@@ -97,4 +97,6 @@ Scripts/check-profile-store.sh# 订阅库导入/更新/删除自检
 
 ## 许可
 
-客户端代码为本项目所有。内置内核 [mihomo](https://github.com/MetaCubeX/mihomo) 为 GPL-3.0，以独立进程调用，随包分发其许可证与源码地址。
+客户端代码以 [MIT](LICENSE) 发布。
+
+随包的第三方组件：内置内核 [mihomo](https://github.com/MetaCubeX/mihomo) 与 geodata（[meta-rules-dat](https://github.com/MetaCubeX/meta-rules-dat)）为 **GPL-3.0**，以独立进程 / 数据文件方式分发，许可全文见 [`Clash/Resources/Licenses/`](Clash/Resources/Licenses/)；[Yams](https://github.com/jpsim/Yams) 为 MIT。完整清单与 GPL 合规说明见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
