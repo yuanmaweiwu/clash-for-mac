@@ -234,6 +234,8 @@ enum Metrics {
     static let rowHeight: CGFloat = 32
     /// 二级列表行高（比一级卡片松一档）
     static let listRowHeight: CGFloat = 48
+    /// 设置页表单行高
+    static let formRowHeight: CGFloat = 36
     static let breadcrumbHeight: CGFloat = 40
     static let cardPadding: CGFloat = Space.l
     /// 卡片上下内边距：卡头 hover 胶囊距卡顶 = 4 + 2 = 6pt

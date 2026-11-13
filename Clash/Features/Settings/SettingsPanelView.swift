@@ -47,7 +47,7 @@ struct SettingsPanelView: View {
             }
 
             ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: Space.xxl) {
                     proxySection
                     subscriptionSection
                     componentSection
@@ -56,8 +56,8 @@ struct SettingsPanelView: View {
                         noticeText(error, isError: true)
                     }
                 }
-                .padding(.top, 12)
-                .padding(.bottom, 12)
+                .padding(.top, Metrics.sectionGap)
+                .padding(.bottom, Metrics.sectionGap)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .scrollIndicators(.hidden)
@@ -85,7 +85,7 @@ struct SettingsPanelView: View {
             }
 
             Text("设置")
-                .font(Typography.title)
+                .font(Typography.pageTitle)
                 .foregroundStyle(Theme.textPrimary)
 
             Spacer(minLength: 6)
@@ -112,11 +112,11 @@ struct SettingsPanelView: View {
                     .controlSize(.mini)
             } else {
                 Button("立即重启") { model.restartKernelForSettings() }
-                    .controlSize(.small)
+                    .controlSize(.regular)
             }
         }
-        .padding(.horizontal, 10)
-        .frame(height: Metrics.rowHeight)
+        .padding(.horizontal, Metrics.cardPadding)
+        .frame(height: Metrics.rowHeight + Space.xs)
         .background {
             RoundedRectangle(cornerRadius: Metrics.radiusRow, style: .continuous)
                 .fill(Theme.warning.opacity(0.14))
@@ -261,15 +261,16 @@ struct SettingsPanelView: View {
                             .controlSize(.mini)
                     } else if let action = helper.action {
                         Button(action.title) { handleHelperAction(action) }
-                            .controlSize(.small)
+                            .controlSize(.regular)
                     }
                 }
-                .frame(height: Metrics.rowHeight)
+                .frame(height: Metrics.formRowHeight)
 
                 Text(helper.hintText)
                     .font(Typography.caption)
                     .foregroundStyle(Theme.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.vertical, Space.xs)
 
                 if let notice = helper.notice {
                     noticeText(notice, isError: helper.noticeIsError)
@@ -314,16 +315,16 @@ struct SettingsPanelView: View {
                 .accessibilityLabel(Text("日志级别"))
             }
 
-            HStack(spacing: 8) {
+            HStack(spacing: Space.m) {
                 Button("打开配置目录") {
                     NSWorkspace.shared.open(AppPaths.supportDirectory)
                 }
-                .controlSize(.small)
+                .controlSize(.regular)
 
                 Button("打开日志目录") {
                     NSWorkspace.shared.open(AppPaths.logsDirectory)
                 }
-                .controlSize(.small)
+                .controlSize(.regular)
 
                 Spacer(minLength: 4)
 
@@ -338,12 +339,13 @@ struct SettingsPanelView: View {
                     Text("完全清理…")
                         .font(Typography.caption)
                         .foregroundStyle(Theme.error)
+                        .frame(height: Metrics.hitTarget)
                 }
                 .buttonStyle(.borderless)
                 .disabled(isCleaningUp)
                 .accessibilityHint(Text("还原系统代理、停止内核并删除本地数据，App 本身保留"))
             }
-            .frame(height: Metrics.rowHeight)
+            .frame(height: Metrics.formRowHeight)
 
             if let maintenanceNotice {
                 noticeText(maintenanceNotice, isError: maintenanceFailed)
@@ -370,37 +372,51 @@ struct SettingsPanelView: View {
 
     // MARK: - 通用部件
 
+    /// 一段 = 11pt 段名 + 一张卡（行与行之间不画线，靠行高与对齐区分）
     private func section<Content: View>(
         _ title: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: Space.s) {
             Text(title)
                 .font(Typography.section)
                 .foregroundStyle(Theme.textSecondary)
-                .padding(.bottom, 2)
+                .padding(.leading, Space.xs)
 
-            content()
+            VStack(alignment: .leading, spacing: 0) {
+                content()
+            }
+            .padding(.horizontal, Metrics.cardPadding)
+            .padding(.vertical, Space.s)
+            .background {
+                RoundedRectangle(cornerRadius: Metrics.radiusCard, style: .continuous)
+                    .fill(Theme.card)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: Metrics.radiusCard, style: .continuous)
+                            .strokeBorder(Theme.hairline, lineWidth: Metrics.cardStroke)
+                    }
+                    .compositingGroup()
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// 32pt 行：label 左、控件右
+    /// 36pt 行：label 左、控件右；控件命中区不小于 28pt
     private func row<Content: View>(
         _ title: String,
         @ViewBuilder control: () -> Content
     ) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Space.l) {
             Text(title)
                 .font(Typography.body)
                 .foregroundStyle(Theme.textPrimary)
                 .lineLimit(1)
 
-            Spacer(minLength: 8)
+            Spacer(minLength: Space.l)
 
             control()
         }
-        .frame(height: Metrics.rowHeight)
+        .frame(height: Metrics.formRowHeight)
     }
 
     private func menuLabel(_ title: String) -> some View {
