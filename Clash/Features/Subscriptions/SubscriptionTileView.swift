@@ -27,10 +27,13 @@ struct SubscriptionTileView: View {
 
                 Spacer(minLength: 2)
 
-                if let quotaText = content.quotaText, let fraction = content.usageFraction {
-                    metaRow(quotaText, fraction: fraction)
-                    meter(fraction, fill: usageColors(fraction).fill)
-                        .padding(.top, Self.meterSpacing)
+                // 有到期或有用量就画数据行；只有用量才画条（到期单独存在时也应当可见）
+                if content.quotaText != nil || content.expiryText != nil {
+                    metaRow(content.quotaText, fraction: content.usageFraction)
+                    if let fraction = content.usageFraction {
+                        meter(fraction, fill: usageColors(fraction).fill)
+                            .padding(.top, Self.meterSpacing)
+                    }
                 }
             }
             .padding(.vertical, Self.verticalInset)
@@ -58,8 +61,8 @@ struct SubscriptionTileView: View {
         }
     }
 
-    /// 第 2 行：左到期 / 右用量。缺 `expire` 时左侧留白，用量仍然右对齐。
-    private func metaRow(_ quotaText: String, fraction: Double) -> some View {
+    /// 第 2 行：左到期 / 右用量。缺 `expire` 时左侧留白，用量仍然右对齐；只有其中一个也照常显示。
+    private func metaRow(_ quotaText: String?, fraction: Double?) -> some View {
         HStack(spacing: 4) {
             if let expiry = content.expiryText {
                 Text(expiry)
@@ -70,11 +73,13 @@ struct SubscriptionTileView: View {
 
             Spacer(minLength: 4)
 
-            Text(quotaText)
-                .font(Typography.numberSmall)
-                .foregroundStyle(usageColors(fraction).text)
-                .lineLimit(1)
-                .fixedSize()
+            if let quotaText {
+                Text(quotaText)
+                    .font(Typography.numberSmall)
+                    .foregroundStyle(usageColors(fraction ?? 0).text)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
         }
     }
 

@@ -1,4 +1,5 @@
 import AppKit
+import OSLog
 import SwiftUI
 
 /// 面板窗口（`docs/adr/0011`）：自建 `NSPanel` 承载同一份 `PanelView`。
@@ -9,6 +10,7 @@ import SwiftUI
 /// - 失焦（点外部 / 切 App）即收；`Esc` 由面板内容自己处理
 @MainActor
 final class PanelWindowController: NSObject, NSWindowDelegate {
+    fileprivate static let logger = Logger(subsystem: "com.clash.app", category: "panel")
     /// 内容高度上限（`docs/02-UI-SPEC.md` §3.2：双卡满态 642，留 14pt 余量）
     private static let maximumHeight: CGFloat = 656
     /// 空态最小高（§3.2）
@@ -102,6 +104,9 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
 
         panel.setFrame(NSRect(origin: origin, size: size), display: true)
         panel.makeKeyAndOrderFront(nil)
+        // 面板刚显示时也补一次：路由可能是在隐藏状态下改的（⌘, / 菜单），
+        // 隐着的时候没有绘制周期，内容还停在旧尺寸上
+        syncHostingLayout()
         onVisibilityChange?(true)
     }
 
@@ -114,13 +119,38 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
     private func resizeToFitContent() {
         guard panel.isVisible else { return }
         let height = contentSize().height
-        guard abs(panel.frame.height - height) > 0.5 else { return }
-        var frame = panel.frame
-        // 顶边不动，只把底边往上/下推
-        frame.origin.y = frame.maxY - height
-        frame.size.height = height
-        panel.setFrame(frame, display: true)
-        clampToScreen()
+        let oldHeight = panel.frame.height
+
+        // 兜底：`NSHostingView` 多数时候已经按内容极值把窗口改好了，没改到时我们自己改
+        if abs(oldHeight - height) > 0.5 {
+            var frame = panel.frame
+            // 顶边不动，只把底边往上/下推
+            frame.origin.y = frame.maxY - height
+            frame.size.height = height
+            panel.setFrame(frame, display: true)
+            Self.logger.debug(
+                "窗口高度 \(oldHeight, format: .fixed(precision: 1), privacy: .public) → \(height, format: .fixed(precision: 1), privacy: .public)（面板自己调整）"
+            )
+            clampToScreen()
+        }
+
+        // 尺寸没变也要补一次：`NSHostingView` 会在 SwiftUI 布局过程中按内容极值
+        // 直接改窗口尺寸，那一次改动不会再驱动一轮完整布局，内容就停在旧尺寸的
+        // 绘制结果上（订阅页 496 → 642 后整块空白的根因）。
+        syncHostingLayout()
+    }
+
+    /// 强制把 SwiftUI 的布局与绘制跟窗口当前尺寸对齐。
+    ///
+    /// `NSHostingView` 会在自己的布局过程中（`updateWindowContentSizeExtrema`）直接改窗口
+    /// 尺寸，而那次改动之后不会再补一轮布局：SwiftUI 的树仍停在旧高度，绘制结果也是旧的，
+    /// 于是窗口变高了却整块空白（订阅页 496 → 642 就是这样）。补一轮 layout + display
+    /// 就能让内容跟上；代价只是一次小面板重绘。
+    private func syncHostingLayout() {
+        hostingView.needsLayout = true
+        hostingView.layoutSubtreeIfNeeded()
+        hostingView.needsDisplay = true
+        hostingView.displayIfNeeded()
     }
 
     /// 屏幕边缘 / 分辨率变化后仍要保证整块面板可见
@@ -190,11 +220,24 @@ private final class PanelWindow: NSPanel {
 private final class PanelHostingView<Content: View>: NSHostingView<Content> {
     var onContentSizeChange: ((CGSize) -> Void)?
     private var lastReportedSize = CGSize.zero
+    /// `fittingSize` 会再入 SwiftUI 布局：同一轮里只测一次，避免自激
+    private var isMeasuring = false
 
     override func layout() {
         super.layout()
+        measureContentSize()
+    }
+
+    private func measureContentSize() {
+        guard !isMeasuring else { return }
+        isMeasuring = true
+        defer { isMeasuring = false }
+
         let size = fittingSize
         guard size != lastReportedSize else { return }
+        PanelWindowController.logger.debug(
+            "内容高度 \(self.lastReportedSize.height, format: .fixed(precision: 1), privacy: .public) → \(size.height, format: .fixed(precision: 1), privacy: .public)"
+        )
         lastReportedSize = size
         onContentSizeChange?(size)
     }
