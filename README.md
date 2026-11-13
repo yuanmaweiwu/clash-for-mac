@@ -14,13 +14,13 @@
 
 ## 界面
 
-| 未运行 | 内核已就绪（未接管流量） |
+| 面板（系统代理接管中） | 订阅管理 |
 |---|---|
-| <img src="docs/images/panel-idle.png" width="260"> | <img src="docs/images/panel-ready.png" width="260"> |
+| <img src="docs/images/panel.png" width="260"> | <img src="docs/images/panel-subscriptions.png" width="260"> |
 
-| 真实策略组与节点 |
+| 设置 |
 |---|
-| <img src="docs/images/panel-nodes.png" width="260"> |
+| <img src="docs/images/panel-settings.png" width="520"> |
 
 面板只有 340pt 宽，四个磁贴是全部一级动作：**连接**（系统代理开关）、**代理模式**（规则/全局/直连）、**TUN**、**订阅**。策略组卡片显示「选中项 + 延迟最低的两条」，点「全部」进完整列表。节点默认按延迟升序，未测速显示 `—`，超时才是「超时」。
 
