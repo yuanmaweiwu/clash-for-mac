@@ -82,8 +82,11 @@ enum TunGeodataProbe {
         guard let profileURL else { return Requirements() }
 
         return await Task.detached(priority: .userInitiated) {
-            let modified = (try? profileURL.resourceValues(forKeys: [.contentModificationDateKey]))?
-                .contentModificationDate ?? .distantPast
+            // 用 `attributesOfItem` 而不是 `URL.resourceValues`：后者会按 URL 实例缓存 mtime，
+            // 同一个 URL 反复传进来时会把「刚更新过的订阅」当成旧结果。
+            let modified = (try? FileManager.default.attributesOfItem(atPath: profileURL.path))?[
+                .modificationDate
+            ] as? Date ?? .distantPast
             if let cached = cache.value(for: profileURL, modified: modified) { return cached }
 
             // `.mappedIfSafe`：大文件走 mmap，不把整份正文复制进堆
