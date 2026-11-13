@@ -1,0 +1,73 @@
+import SwiftUI
+
+/// 全部策略组的一行 36pt：组名 + 节点数 + 星标（主组禁用星标）。
+@MainActor
+struct AllGroupsRowView: View {
+    let group: DemoGroup
+    let onTogglePin: () -> Void
+    let onOpen: () -> Void
+
+    @State private var isHovering = false
+    @FocusState private var isStarFocused: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(group.name)
+                    .font(Typography.body)
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+                Text("\(group.nodes.count) 个节点")
+                    .font(Typography.caption)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+
+            Spacer(minLength: 6)
+
+            starButton
+        }
+        .padding(.horizontal, Metrics.cardPadding)
+        .frame(height: 36)
+        .frame(maxWidth: .infinity)
+        .background {
+            if isHovering {
+                RoundedRectangle(cornerRadius: Metrics.radiusRow, style: .continuous)
+                    .fill(Theme.rowHover)
+                    .padding(.horizontal, Metrics.pillInsetH)
+                    .padding(.vertical, Metrics.pillInsetV)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { onOpen() }
+        .onHover { isHovering = $0 }
+        .animation(.easeInOut(duration: 0.14), value: isHovering)
+    }
+
+    private var starButton: some View {
+        Button(action: onTogglePin) {
+            Image(systemName: group.isPinned ? "star.fill" : "star")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(starColor)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressableButtonStyle())
+        .disabled(group.isMainGroup)
+        .focused($isStarFocused)
+        .focusEffectDisabled()
+        .overlay {
+            if isStarFocused {
+                RoundedRectangle(cornerRadius: Metrics.radiusRow + 1, style: .continuous)
+                    .strokeBorder(Theme.focus, lineWidth: 2)
+                    .padding(-1)
+            }
+        }
+        .help(group.isMainGroup ? "主组固定显示" : (group.isPinned ? "取消固定" : "固定到首屏"))
+        .accessibilityLabel(Text(group.isPinned ? "取消固定 \(group.name)" : "固定 \(group.name)"))
+    }
+
+    private var starColor: Color {
+        if group.isMainGroup { return Theme.textTertiary }
+        return group.isPinned ? Theme.accent : Theme.textSecondary
+    }
+}
