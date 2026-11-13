@@ -28,7 +28,7 @@ description: "本仓库（Clash，SwiftUI macOS 原生应用）总入口与路�
 | 内核 | 自带 `mihomo` 二进制，helper 以子进程管理（`docs/adr/0001`、`0004`） | 已定 |
 | 配置生成 | 解析原 YAML → 覆盖顶层键 → 写 `runtime/`，**绝不改写用户配置** | 已定 |
 | 持久化 | 设置 JSON（`Codable` + 原子写）+ 配置 YAML 文件；**不用 SwiftData/GRDB** | 已定 |
-| 第三方依赖 | 仅 `Yams`（YAML 解析，提议待确认）；Sparkle 到 v1.0 | 提议 |
+| 第三方依赖 | 仅 `Yams`（YAML 解析）；Sparkle 到 v1.0 再接 | 已定 |
 | 分发 | 自助下载 + 签名/公证 + Sparkle（App Store 不做） | 已定（细节 v1.0） |
 
 **未确认项**：不要提前写依赖它的代码；`docs/00-PRODUCT.md`、`01-ARCHITECTURE.md`、`03-ROADMAP.md` 是本节的展开。
@@ -119,6 +119,7 @@ xcodebuild -project Clash.xcodeproj -scheme Clash -destination 'platform=macOS' 
 | 2 | 最低 macOS 15 Sequoia | `docs/adr/0002` |
 | 3 | 手写 `.xcodeproj` 入库（不用 XcodeGen/Tuist） | `docs/adr/0003` |
 | 4 | 持久化 = 设置 JSON + 配置 YAML，不用 SwiftData/GRDB | `docs/01-ARCHITECTURE.md` |
-| 5 | 依赖仅 Yams（待确认）+ Sparkle（v1.0） | `docs/adr/0005` |
+| 5 | 依赖仅 Yams + Sparkle（v1.0） | `docs/adr/0005` |
 
-仍有待确认：Yams 是否引入；签名/公证/Sparkle 细节（v1.0 前）。
+界面语言：中文为主，全部文案走 `LocalizedStringKey`（String Catalog），预留英文。
+仍有待确认：签名/公证/Sparkle 细节（v1.0 前）。

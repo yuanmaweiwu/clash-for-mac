@@ -14,12 +14,12 @@
 - [x] 产品文档：`docs/00-PRODUCT.md`（定位、范围、术语、合规）
 - [x] 架构文档：`docs/01-ARCHITECTURE.md`（helper + XPC 进程模型、配置流水线、API 面、代理还原）
 - [x] 路线图：`docs/03-ROADMAP.md`（v0.1 → v1.0 + 风险登记）
-- [x] ADR 0001–0004（自带内核 / macOS 15 / 手写 xcodeproj / TUN 与 helper 进 v1）
+- [x] ADR 0001–0005（自带内核 / macOS 15 / 手写 xcodeproj / TUN 与 helper 进 v1 / Yams 定案）
+- [x] 依赖定案：`Yams` 为唯一第三方解析库，Sparkle 到 v1.0；界面中文为主、预留本地化
 
 ## 进行中
 
 - [ ] UI 规范 `docs/02-UI-SPEC.md`（交给 designer 子代理撰写，风格=系统控制中心）
-- [ ] 待用户确认：是否引入 `Yams`（`docs/adr/0005`）
 
 ## 下一步（按优先级）
 
