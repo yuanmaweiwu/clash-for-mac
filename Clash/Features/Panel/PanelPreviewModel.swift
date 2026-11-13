@@ -592,6 +592,8 @@ final class PanelPreviewModel {
         }
 
         // 4. 删目录：整个 App 数据根（settings.json / profiles / runtime / kernel / logs / 快照）
+        //    文本设置可能还有 300ms 合并写在路上：先落盘，否则删完目录它会把 settings.json 写回来
+        settings.flushPendingWrite()
         let fileManager = FileManager.default
         let targets: [(String, URL)] = [
             ("应用数据", AppPaths.supportDirectory),
