@@ -90,19 +90,12 @@ struct SubscriptionNewPanelView: View {
             .frame(height: Metrics.hitTarget)
             .accessibilityElement(children: .combine)
         } else {
-            HStack(spacing: Space.l) {
-                Button("导入") { submit() }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.regular)
-                    .font(.system(size: 13, weight: .medium))
-                    .disabled(trimmed.isEmpty)
-
-                Button("选择 YAML…") { chooseYAMLFile() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.regular)
-                    .font(.system(size: 13))
-            }
-            .frame(height: Metrics.hitTarget)
+            Button("导入") { submit() }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+                .font(.system(size: 13, weight: .medium))
+                .disabled(trimmed.isEmpty)
+                .frame(height: Metrics.hitTarget)
         }
     }
 
@@ -111,18 +104,5 @@ struct SubscriptionNewPanelView: View {
         model.importSubscription(urlString: trimmed)
     }
 
-    /// `NSOpenPanel` 是系统必要的文件选择器：只在 UI 层做，store 只接收 fileURL
-    private func chooseYAMLFile() {
-        let panel = NSOpenPanel()
-        panel.title = "选择 YAML 配置"
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        let types = ["yaml", "yml"].compactMap { UTType(filenameExtension: $0) }
-        if !types.isEmpty { panel.allowedContentTypes = types }
 
-        NSApp.activate(ignoringOtherApps: true)
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        model.importLocalSubscription(fileURL: url)
-    }
 }

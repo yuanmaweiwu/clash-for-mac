@@ -188,6 +188,9 @@ final class PanelPreviewModel {
     /// 内核相位（转发 `KernelService`，只读）
     var phase: KernelPhase { kernel.phase }
 
+    /// 内核 / geodata 下载进度（ADR-0012）：`idle` / `downloading` / `verifying` / `ready` / `failed`
+    var kernelProvisioning: KernelProvisioner.Phase { kernel.provisioningPhase }
+
     /// 连接磁贴不可再点：内核启停中、系统代理正在写入、或 TUN 正在过渡
     var isConnectionBusy: Bool { kernel.isTransitioning || connectionState.isBusy || tun.isBusy }
 
@@ -224,7 +227,7 @@ final class PanelPreviewModel {
         return phase == .failed ? "内核未运行" : "正在启动内核"
     }
 
-    /// 已经导入订阅就不摆「导入订阅 / 选择 YAML」：用户不是没导入，只是内核还没就绪
+    /// 已经导入订阅就不摆「导入订阅」按钮：用户不是没导入，只是内核还没就绪
     var showsEmptyGroupImportActions: Bool { !hasConfiguredProfile }
 
     /// 是否已有可用配置：订阅库有 active，或本次内核用了用户配置（DEBUG 的 `CLASH_PROFILE` 也算）

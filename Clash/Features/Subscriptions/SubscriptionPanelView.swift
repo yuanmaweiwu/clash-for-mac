@@ -38,10 +38,7 @@ struct SubscriptionPanelView: View {
     @ViewBuilder
     private var subscriptionList: some View {
         if model.subscriptions.isEmpty {
-            EmptySubscriptionView(
-                onImportURL: { model.openSubscriptionNewPage() },
-                onImportYAML: { chooseYAMLFile() }
-            )
+            EmptySubscriptionView(onImportURL: { model.openSubscriptionNewPage() })
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollViewReader { proxy in
@@ -128,19 +125,7 @@ struct SubscriptionPanelView: View {
     }
 
     /// `NSOpenPanel` 只在 UI 层做；store 只接收 fileURL
-    private func chooseYAMLFile() {
-        let panel = NSOpenPanel()
-        panel.title = "选择 YAML 配置"
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        let types = ["yaml", "yml"].compactMap { UTType(filenameExtension: $0) }
-        if !types.isEmpty { panel.allowedContentTypes = types }
 
-        NSApp.activate(ignoringOtherApps: true)
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        model.importLocalSubscription(fileURL: url)
-    }
 
     private func copyLink(of profile: ProfileEntry) {
         guard let link = profile.source.url else { return }

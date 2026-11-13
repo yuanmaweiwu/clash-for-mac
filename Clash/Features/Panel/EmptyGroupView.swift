@@ -3,14 +3,14 @@ import SwiftUI
 /// 空态占位卡 120pt：`tray` + 一句说明（§7）。
 ///
 /// 两种形态：
-/// - 没导入订阅：`body` 文案 + 导入订阅 / 选择 YAML 两个按钮
+/// - 没导入订阅：`body` 文案 + 「导入订阅」按钮（v1 只支持链接导入，不再提供本地 YAML）
 /// - 已导入订阅（内核还没就绪 / 配置里没有策略组）：只有一句 `caption` 说明，不给导入按钮，
 ///   否则用户会以为自己的订阅没导进来
 @MainActor
 struct EmptyGroupView: View {
     /// 空态主文案：无配置「还没有配置」/ 有配置但无策略组「当前配置没有策略组」/ 内核未就绪「内核未运行」
     var title = "还没有配置"
-    /// 是否展示「导入订阅 / 选择 YAML」：只有真的没导入订阅时才展示
+    /// 是否展示「导入订阅」：只有真的没导入订阅时才展示
     var showsImportActions = true
 
     var body: some View {
@@ -35,10 +35,6 @@ struct EmptyGroupView: View {
                             RoundedRectangle(cornerRadius: Metrics.radiusRow, style: .continuous)
                                 .fill(Theme.accent)
                         }
-
-                    Text("选择 YAML")
-                        .font(Typography.caption)
-                        .foregroundStyle(Theme.accent)
                 }
                 .padding(.top, Space.hair)
             }

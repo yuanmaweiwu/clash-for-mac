@@ -4,7 +4,6 @@ import SwiftUI
 @MainActor
 struct EmptySubscriptionView: View {
     let onImportURL: () -> Void
-    let onImportYAML: () -> Void
 
     var body: some View {
         VStack(spacing: Space.m) {
@@ -16,18 +15,11 @@ struct EmptySubscriptionView: View {
                 .font(Typography.body)
                 .foregroundStyle(Theme.textSecondary)
 
-            HStack(spacing: Space.l) {
-                Button("导入订阅", action: onImportURL)
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.regular)
-                    .font(.system(size: 11, weight: .medium))
-
-                Button("选择 YAML", action: onImportYAML)
-                    .buttonStyle(.plain)
-                    .font(Typography.caption)
-                    .foregroundStyle(Theme.accent)
-            }
-            .padding(.top, Space.xs)
+            Button("导入订阅", action: onImportURL)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+                .font(.system(size: 11, weight: .medium))
+                .padding(.top, Space.xs)
         }
         .frame(maxWidth: .infinity)
         .frame(height: Metrics.emptyGroupCardHeight)
