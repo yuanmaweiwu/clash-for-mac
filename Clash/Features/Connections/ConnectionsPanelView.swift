@@ -15,7 +15,7 @@ struct ConnectionsPanelView: View {
 
             if let error = model.connectionsError {
                 noticeRow(error)
-                    .padding(.top, 4)
+                    .padding(.top, Space.xs)
             }
 
             content

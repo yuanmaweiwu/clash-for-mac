@@ -46,7 +46,7 @@ struct SubscriptionTileView: View {
 
     /// 第 1 行：商家名 + 右上角条数徽标（徽标不吃名字的宽度优先级）
     private var nameRow: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Space.xs) {
             Text(content.name ?? "未添加")
                 .font(Typography.body)
                 .foregroundStyle(content.name == nil ? Theme.textSecondary : Theme.textPrimary)
@@ -63,7 +63,7 @@ struct SubscriptionTileView: View {
 
     /// 第 2 行：左到期 / 右用量。缺 `expire` 时左侧留白，用量仍然右对齐；只有其中一个也照常显示。
     private func metaRow(_ quotaText: String?, fraction: Double?) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Space.xs) {
             if let expiry = content.expiryText {
                 Text(expiry)
                     .font(Typography.caption)
@@ -110,7 +110,7 @@ struct SubscriptionTileView: View {
         Text("\(content.badgeCount)")
             .font(Typography.captionNumber)
             .foregroundStyle(Theme.textSecondary)
-            .padding(.horizontal, 4)
+            .padding(.horizontal, Space.xs)
             .frame(minWidth: 16, minHeight: 14)
             .background {
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
@@ -143,7 +143,7 @@ struct SubscriptionTileView: View {
 
 @MainActor
 private func tilePreviewCell(_ title: String, _ content: SubscriptionTileContent) -> some View {
-    VStack(alignment: .leading, spacing: 4) {
+    VStack(alignment: .leading, spacing: Space.xs) {
         Text(title)
             .font(Typography.caption)
             .foregroundStyle(Theme.textSecondary)

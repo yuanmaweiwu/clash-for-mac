@@ -6,7 +6,7 @@ struct SubscriptionNoticeView: View {
     let text: String
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Space.s) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(Theme.warning)
@@ -18,7 +18,7 @@ struct SubscriptionNoticeView: View {
 
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, Metrics.cardPadding)
         .frame(height: 32)
         .background {
             RoundedRectangle(cornerRadius: Metrics.radiusRow, style: .continuous)

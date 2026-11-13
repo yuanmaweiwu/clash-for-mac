@@ -53,7 +53,7 @@ struct SubscriptionEditForm: View {
 
             Spacer(minLength: 0)
 
-            HStack(spacing: 8) {
+            HStack(spacing: Space.m) {
                 Spacer(minLength: 0)
 
                 Button("取消", action: onCancel)

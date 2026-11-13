@@ -165,7 +165,7 @@
 
 ### 2.9 动效 token
 
-`motion/panel-in` `.spring(response: 0.24, dampingFraction: 0.88)` · `motion/panel-out` `.easeIn(0.12)` · `motion/tile` `.spring(0.22, 0.82)` · `motion/list` `.easeInOut(0.18)` · `motion/push` `.spring(0.30, 0.90)` · `motion/hover` `.easeOut(0.12–0.16)` · `motion/skeleton` `.easeInOut(1.2).repeatForever` · `motion/chart` `.linear(1.0)`。
+`motion/panel-in` `NSPanel.animationBehavior = .utilityWindow`（系统负责进出，不自绘） · `motion/tile` `.spring(response: 0.22, dampingFraction: 0.82)` · `motion/list` `.easeInOut(0.18)` · `motion/push` `.spring(response: 0.32, dampingFraction: 0.90)` · `motion/height` `.spring(response: 0.28, dampingFraction: 0.80)` · `motion/hover` `.easeOut(0.12–0.16)` · `motion/skeleton` `.easeInOut(1.2).repeatForever` · `motion/chart` `.linear(1.0)`。
 
 **时长区间 150–220ms**（面板进出可到 240ms）；只挂在状态变化上，不做页面级 stagger。Reduce Motion 下所有位移 / 缩放退化为淡入淡出。
 
@@ -413,11 +413,11 @@
 
 | 场景 | 表现 | 参数 | Reduce Motion 降级 |
 |---|---|---|---|
-| 面板出现 | 透明度 0→1 + 上移 6pt | `motion/panel-in`（0.24 / 0.88） | 仅淡入 120ms，无位移 |
+| 面板出现 | 由 `NSPanel` 系统动画负责（不叠自定义 spring） | `motion/panel-in` | 系统自动降级 |
 | 面板消失 | 淡出 + 下移 4pt | `motion/panel-out` | 仅淡出 80ms |
 | 磁贴开关 | 图标座底色过渡 + 图标 `.symbolEffect(.replace)` + 整卡 0.98 | `motion/tile`（0.22 / 0.82） | 不缩放、不做符号替换，仅颜色 0.15s |
-| 分段选中 / 列表选中 | 选中段位移 + 底色；行底淡入 + 名称字重过渡 | `motion/list` | 跳过位移，仅底色 |
-| 二级面板推入 | 横向 16pt + 淡入，旧内容降 0.3 透明度 | `motion/push`（0.30 / 0.90） | 交叉淡入 150ms |
+| 分段选中 / 列表选中 | 选中段位移 + 底色；行底淡入 + 名称字重过渡 | `motion/list`（0.18） | 跳过位移，仅底色 |
+| 二级面板推入 | 横向 16pt + 淡入，旧内容降 0.3 透明度 | `motion/push`（0.32 / 0.90） | 交叉淡入 150ms |
 | 加载骨架 | 3 个等高灰块呼吸（0.35↔0.65） | `motion/skeleton` | 静态 `surface/track` 块 |
 | 曲线更新 | 每 1s 左插新点、整体左移 1px | `motion/chart` | 关闭位移插值，改 5s 批量刷新 |
 

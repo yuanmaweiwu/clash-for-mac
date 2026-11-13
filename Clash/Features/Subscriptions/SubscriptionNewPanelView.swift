@@ -79,7 +79,7 @@ struct SubscriptionNewPanelView: View {
     @ViewBuilder
     private var actions: some View {
         if model.isImportingProfile {
-            HStack(spacing: 6) {
+            HStack(spacing: Space.s) {
                 ProgressView()
                     .controlSize(.mini)
 

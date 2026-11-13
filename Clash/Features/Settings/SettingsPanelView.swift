@@ -79,7 +79,7 @@ struct SettingsPanelView: View {
     // MARK: - 面包屑
 
     private var breadcrumb: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: Space.hair) {
             IconButtonView(systemName: "chevron.left", label: "返回", iconSize: 12) {
                 onBack()
             }
@@ -95,7 +95,7 @@ struct SettingsPanelView: View {
 
     /// 端口 / 局域网 / 日志级别已改，内核还用旧值：页内一条提示行，不弹窗
     private var restartRow: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Space.s) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(Theme.warning)
@@ -128,7 +128,7 @@ struct SettingsPanelView: View {
 
     private var proxySection: some View {
         section("代理") {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Space.hair) {
                 row("混合端口") {
                     TextField("7890", text: $portText)
                         .textFieldStyle(.roundedBorder)
@@ -240,9 +240,9 @@ struct SettingsPanelView: View {
 
     private var componentSection: some View {
         section("组件与维护") {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Space.hair) {
                 // 状态点 + 文案 + 右侧小按钮：四态（未安装 / 已安装 / 需要更新 / 未运行）互斥
-                HStack(spacing: 6) {
+                HStack(spacing: Space.s) {
                     Circle()
                         .fill(helperStatusColor)
                         .frame(width: 6, height: 6)
@@ -283,7 +283,7 @@ struct SettingsPanelView: View {
                 Text("将停止 TUN、移除管理员组件；系统代理与订阅不受影响。")
             }
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Space.hair) {
                 row("开机自启") {
                     Toggle("", isOn: Binding(
                         get: { settings.launchAtLogin },
@@ -420,7 +420,7 @@ struct SettingsPanelView: View {
     }
 
     private func menuLabel(_ title: String) -> some View {
-        HStack(spacing: 2) {
+        HStack(spacing: Space.hair) {
             Text(title)
                 .font(Typography.body)
                 .foregroundStyle(Theme.textSecondary)

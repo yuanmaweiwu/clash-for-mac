@@ -7,7 +7,7 @@ struct PlaceholderPanelContentView: View {
     let detail: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Space.m) {
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Theme.textPrimary)
@@ -23,7 +23,7 @@ struct PlaceholderPanelContentView: View {
 
             Spacer(minLength: 0)
         }
-        .padding(16)
+        .padding(Space.xl)
         .frame(width: 300, height: 150, alignment: .topLeading)
     }
 }

@@ -8,7 +8,7 @@ struct RateReadoutView: View {
     let tint: Color
 
     var body: some View {
-        HStack(spacing: 3) {
+        HStack(spacing: Space.hair) {
             Image(systemName: arrow)
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(tint)

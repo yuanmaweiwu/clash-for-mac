@@ -14,7 +14,7 @@ struct SubscriptionPanelView: View {
 
             if let notice = model.subscriptionNotice {
                 SubscriptionNoticeView(text: notice)
-                    .padding(.top, 8)
+                    .padding(.top, Space.m)
             }
 
             switch model.subscriptionPanelState {

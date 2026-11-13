@@ -68,7 +68,7 @@ struct TrafficCardView: View {
     }
 
     private func rate(arrow: String, value: Double, tint: Color) -> some View {
-        HStack(spacing: 3) {
+        HStack(spacing: Space.hair) {
             Image(systemName: arrow)
                 .font(.system(size: 8, weight: .semibold))
                 .foregroundStyle(tint)

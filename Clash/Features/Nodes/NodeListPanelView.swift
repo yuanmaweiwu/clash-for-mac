@@ -67,14 +67,14 @@ struct NodeListPanelView: View {
                 .controlSize(.small)
                 .scaleEffect(0.7)
                 .frame(width: 28, height: 28)
-                .padding(.trailing, 4)
+                .padding(.trailing, Space.xs)
                 .allowsHitTesting(false)
                 .accessibilityLabel("测速中")
         } else {
             IconButtonView(systemName: "speedometer", label: "测速全部节点", iconSize: 16) {
                 model.testAllNodes(in: group.id)
             }
-            .padding(.trailing, 4)
+            .padding(.trailing, Space.xs)
         }
     }
 
