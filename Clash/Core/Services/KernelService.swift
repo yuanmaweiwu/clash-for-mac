@@ -119,7 +119,7 @@ final class KernelService {
         let profileURL = ProfileLocator.locate()
         hasProfile = profileURL != nil
         // `GEOIP,` / `GEOSITE,` 规则需要 geodata；包内不再附带，缺失时先下载（ADR-0012）
-        if TunGeodataProbe.profileNeedsGeodata(profileURL) {
+        if await TunGeodataProbe.profileNeedsGeodata(profileURL) {
             Self.logger.notice("启动步骤 2/2：ensureGeodata begin")
             try await provisioner.ensureGeodata()
             Self.logger.notice("启动步骤 2/2：ensureGeodata end")
@@ -188,7 +188,7 @@ final class KernelService {
             secret: RuntimeConfigBuilder.makeSecret(),
             logLevel: settings.logLevel.cliValue
         )
-        let runtimeURL = try RuntimeConfigBuilder.build(from: profileURL, injected: injected)
+        let runtimeURL = try await RuntimeConfigBuilder.build(from: profileURL, injected: injected)
         Self.logger.notice("使用配置 profile=\(ProfileLocator.displayName(for: profileURL), privacy: .public)")
         try Task.checkCancellation()
 
@@ -300,7 +300,7 @@ final class KernelService {
 
     /// 订阅里有 `GEOIP,` / `GEOSITE,` 规则时确保 geodata 已下载
     func ensureGeodataIfNeeded() async throws {
-        guard TunGeodataProbe.profileNeedsGeodata(ProfileLocator.locate()) else { return }
+        guard await TunGeodataProbe.profileNeedsGeodata(ProfileLocator.locate()) else { return }
         try await provisioner.ensureGeodata()
     }
 

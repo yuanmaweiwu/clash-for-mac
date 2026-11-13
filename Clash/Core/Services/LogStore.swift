@@ -20,6 +20,9 @@ final class LogStore {
 
     /// 全部已收到的行（含被级别筛选隐藏的），超过 `capacity` 丢最旧
     private(set) var lines: [LogLine] = []
+    /// 界面当前该显示的行（stored）：只在 append / 筛选 / 暂停 / 清空时重算一次。
+    /// 以前是计算属性，一次 body 读 4 次就得 filter 4 遍，日志流每秒几十条时是窗口 CPU 大头。
+    private(set) var visibleLines: [LogLine] = []
     /// 级别筛选：默认 info + warning + error
     var levelFilter: Set<LogLine.Level> = [.info, .warning, .error]
     /// 暂停：只冻结**显示**，新行照旧写入缓冲（恢复后补齐）
@@ -42,12 +45,6 @@ final class LogStore {
     }
 
     // MARK: - 派生
-
-    /// 界面当前该显示的行：暂停时用快照，再按级别筛选
-    var visibleLines: [LogLine] {
-        let source = isPaused ? pausedLines : lines
-        return source.filter { levelFilter.contains($0.level) }
-    }
 
     /// 断连提示：连上过又断了才提示（`core-process` §5：不清零已有内容）
     var showsReconnecting: Bool { isRunning && hasConnectedOnce && !isConnected }
@@ -143,6 +140,13 @@ final class LogStore {
         if lines.count > Self.capacity {
             lines.removeFirst(lines.count - Self.capacity)
         }
+        rebuildVisibleLines()
+    }
+
+    /// 唯一的重算入口（stored 属性的代价：所有改动源都要记得调它）
+    private func rebuildVisibleLines() {
+        let source = isPaused ? pausedLines : lines
+        visibleLines = source.filter { levelFilter.contains($0.level) }
     }
 
     // MARK: - 交互
@@ -153,6 +157,7 @@ final class LogStore {
         } else {
             levelFilter.insert(level)
         }
+        rebuildVisibleLines()
     }
 
     /// 暂停 / 继续：暂停时冻结当前缓冲作为显示源，继续时回到实时缓冲
@@ -160,11 +165,13 @@ final class LogStore {
         guard isPaused != paused else { return }
         if paused { pausedLines = lines }
         isPaused = paused
+        rebuildVisibleLines()
     }
 
     func clear() {
         lines.removeAll()
         pausedLines.removeAll()
+        rebuildVisibleLines()
     }
 
     // MARK: - 导出

@@ -193,6 +193,12 @@ final class TunService {
 
     private func requestEnable() {
         guard !isBusy else { return }
+        // 内核正在 start/stop：TUN 此刻抢同一个 mixed-port 只会得到「端口被占用」，
+        // 而 kernel.stop() 会因过渡中直接返回。等内核稳定后用户再点一次。
+        guard !kernel.isTransitioning else {
+            failureMessage = "内核正在启动，请稍候"
+            return
+        }
         guard !installFlowActive else {
             failureMessage = "正在安装组件，请稍候"
             return
@@ -379,7 +385,7 @@ final class TunService {
         }
 
         // 2. 别家 TUN / VPN 已在接管流量：不抢路由，直接给可执行建议
-        if let conflict = TunConflictDetector.detect() {
+        if let conflict = await TunConflictDetector.detect() {
             Self.logger.error("TUN 冲突：\(conflict.summary, privacy: .public)")
             fail(.conflict(conflict.userMessage))
             return
@@ -387,7 +393,7 @@ final class TunService {
 
         // 3. GeoIP / GeoSite 数据库：缺了内核会去 GitHub 下载（90s 超时），先拦下并给准确原因
         let profileURL = ProfileLocator.locate()
-        if let missingGeodata = TunGeodataProbe.missingDescription(profileURL: profileURL) {
+        if let missingGeodata = await TunGeodataProbe.missingDescription(profileURL: profileURL) {
             fail(.startup(missingGeodata))
             return
         }
@@ -436,14 +442,14 @@ final class TunService {
 
         let yaml: String
         do {
-            yaml = try RuntimeConfigBuilder.yaml(from: profileURL, injected: injected)
+            yaml = try await RuntimeConfigBuilder.yaml(from: profileURL, injected: injected)
         } catch {
             fail(.startup((error as? KernelError)?.userMessage ?? "生成运行配置失败"))
             return
         }
 
         // 7. 抓基线：关闭时用它判断路由 / DNS 是否复原
-        baseline = SystemNetworkProbe.capture()
+        baseline = await SystemNetworkProbe.capture()
 
         // 8. 送配置 → 启动 root 内核（两步 XPC；失败时停一次防半开）
         let runner = HelperKernelRunner(client: client)
@@ -533,7 +539,7 @@ final class TunService {
         kernel.releaseExternalKernel()
 
         if let baseline {
-            let differences = SystemNetworkProbe.capture().differences(from: baseline)
+            let differences = await SystemNetworkProbe.capture().differences(from: baseline)
             if !differences.isEmpty {
                 restoreWarning = "已关闭 TUN，但\(differences.joined(separator: "；"))。若仍无法上网，请重启网络或重启电脑"
                 Self.logger.error("TUN 关闭后网络未复原：\(differences.joined(separator: "；"), privacy: .public)")

@@ -178,7 +178,6 @@ final class ProfileStore {
             throw ProfileStoreError.fileUnreadable
         }
         let text = try decodeText(data)
-        try ensureYAMLMapping(text)
         try await ProfileValidator.validate(yamlText: text)
 
         let id = makeID()
@@ -216,7 +215,6 @@ final class ProfileStore {
         }
 
         let download = try await fetchSubscription(url: url)
-        try ensureYAMLMapping(download.text)
         try await ProfileValidator.validate(yamlText: download.text)
 
         let id = makeID()
@@ -283,7 +281,6 @@ final class ProfileStore {
             }
 
             let text = try decodeText(data)
-            try ensureYAMLMapping(text)
             try await ProfileValidator.validate(yamlText: text)
 
             // 校验通过才原子替换旧文件
@@ -418,13 +415,6 @@ final class ProfileStore {
             throw ProfileStoreError.notYAML
         }
         return text
-    }
-
-    /// 解析校验：`Yams.load` 顶层必须是字典
-    private func ensureYAMLMapping(_ text: String) throws {
-        guard SubscriptionFetcher.isYAMLMapping(text) else {
-            throw ProfileStoreError.notYAML
-        }
     }
 
     private func normalizedURL(_ raw: String) throws -> URL {

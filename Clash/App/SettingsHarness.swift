@@ -45,6 +45,8 @@ enum SettingsHarness {
         store.subscriptionUserAgent = SubscriptionUserAgent.presets[0]
         store.keepKernelOnProxyOff = false
         store.autoUpdateHours = 6
+        // 文本字段是 300ms 合并写：自检里立即落盘再重新读
+        store.flushPendingWrite()
 
         let json = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
         failures += report("json-has-port", json.contains("17890"), json)
@@ -99,7 +101,22 @@ enum SettingsHarness {
         failures += report("normalize-port", normalized.mixedPort == 7890, "port=\(normalized.mixedPort)")
         failures += report("normalize-auto-update", normalized.autoUpdateHours == 0, "hours=\(normalized.autoUpdateHours)")
 
-        // 6. 登录项真实状态（只报告，不在这里改系统设置）
+        // 6. 文本合并写：连续改 UA 20 次只应落盘 1 次（下拉 / 开关仍立即写）
+        let debounceURL = URL.temporaryDirectory
+            .appending(path: "clash-settings-debounce-\(UUID().uuidString).json")
+        let debounced = SettingsStore(fileURL: debounceURL)
+        let baseline = debounced.debugPersistCount
+        for length in 1...20 {
+            debounced.subscriptionUserAgent = String(repeating: "x", count: length)
+        }
+        let immediate = debounced.debugPersistCount
+        debounced.flushPendingWrite()
+        let flushed = debounced.debugPersistCount
+        failures += report("text-merge-no-write-per-key", immediate == baseline, "baseline=\(baseline) immediate=\(immediate)")
+        failures += report("text-merge-one-write", flushed == baseline + 1, "baseline=\(baseline) flushed=\(flushed)")
+        try? FileManager.default.removeItem(at: debounceURL)
+
+        // 7. 登录项真实状态（只报告，不在这里改系统设置）
         print("NOTE login-item status=\(LaunchAtLogin.statusText)")
 
         return failures

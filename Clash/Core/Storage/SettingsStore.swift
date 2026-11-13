@@ -95,12 +95,12 @@ final class SettingsStore {
     var mixedPort: Int { didSet { persistIfReady() } }
     var allowLAN: Bool { didSet { persistIfReady() } }
     var keepKernelOnProxyOff: Bool { didSet { persistIfReady() } }
-    var subscriptionUserAgent: String { didSet { persistIfReady() } }
+    var subscriptionUserAgent: String { didSet { persistTextIfReady() } }
     var autoUpdateHours: Int { didSet { persistIfReady() } }
     var logLevel: LogLevelSetting { didSet { persistIfReady() } }
     var launchAtLogin: Bool { didSet { persistIfReady() } }
     var kernelDownloadMode: KernelDownloadMode { didSet { persistIfReady() } }
-    var customMirrorPrefix: String { didSet { persistIfReady() } }
+    var customMirrorPrefix: String { didSet { persistTextIfReady() } }
 
     /// 最近一次写盘失败的原因（UI 提示用；写成功后清空）
     private(set) var lastError: String?
@@ -113,6 +113,8 @@ final class SettingsStore {
 
     /// 加载期间关闭 didSet 写盘（否则 init 里的每个默认值都会触发一次落盘）
     @ObservationIgnored private var isReady = false
+    /// 文本字段的合并写任务（见 `persistTextIfReady`）
+    @ObservationIgnored private var textPersistTask: Task<Void, Never>?
 
     // MARK: - 初始化
 
@@ -217,6 +219,31 @@ final class SettingsStore {
 
     private func persistIfReady() {
         guard isReady else { return }
+        textPersistTask?.cancel()
+        textPersistTask = nil
+        persist()
+    }
+
+    /// 文本字段（UA / 镜像前缀）逐字符触发 didSet：合并 300ms 再落盘。
+    ///
+    /// 长串输入以前每个按键一次 JSON 编码 + 原子写（主线程），明显掉帧；
+    /// 下拉 / 开关等离散选择仍走 `persistIfReady()` 立即写。
+    private func persistTextIfReady() {
+        guard isReady else { return }
+        textPersistTask?.cancel()
+        textPersistTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard let self, !Task.isCancelled else { return }
+            self.textPersistTask = nil
+            self.persist()
+        }
+    }
+
+    /// 退出前把合并中的文本写掉（否则最后 300ms 的输入可能丢）
+    func flushPendingWrite() {
+        guard textPersistTask != nil else { return }
+        textPersistTask?.cancel()
+        textPersistTask = nil
         persist()
     }
 
@@ -227,6 +254,9 @@ final class SettingsStore {
             let data = try encoder.encode(values)
             try AtomicFile.write(data, to: fileURL)
             lastError = nil
+            #if DEBUG
+            debugPersistCount += 1
+            #endif
         } catch {
             Self.logger.error("写 settings.json 失败：\(error.localizedDescription, privacy: .public)")
             lastError = "设置保存失败：\(error.localizedDescription)"
@@ -240,5 +270,8 @@ final class SettingsStore {
     func applyForSelfCheck(_ values: Values) {
         apply(values)
     }
+
+    /// 自检用：本实例成功落盘次数（验证文本字段 300ms 合并写）
+    private(set) var debugPersistCount = 0
     #endif
 }

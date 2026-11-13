@@ -40,34 +40,48 @@ enum RuntimeConfigBuilder {
     ///
     /// - `profileURL == nil`：没有用户配置，生成最小可用配置（v0.1 行为）
     /// - 否则：读取、解析、覆盖注入键、写出；解析失败 / 顶层不是映射 → `configInvalid`
+    ///
+    /// 真实订阅 1–5 MB：Yams 的 load + dump 与落盘一律在 `Task.detached` 里跑，
+    /// 主线程只等结果（调用方是 `@MainActor` 的启动流水线）。
     @discardableResult
-    static func build(from profileURL: URL?, injected: Injected) throws -> URL {
-        let root = try makeRoot(profileURL: profileURL, injected: injected)
-        let yaml = try dump(root)
-        try writeAtomically(yaml, to: AppPaths.runtimeConfigURL)
-        return AppPaths.runtimeConfigURL
+    static func build(from profileURL: URL?, injected: Injected) async throws -> URL {
+        try await Task.detached(priority: .userInitiated) {
+            let yaml = try dump(makeRoot(profileURL: profileURL, injected: injected))
+            try writeAtomically(yaml, to: AppPaths.runtimeConfigURL)
+            return AppPaths.runtimeConfigURL
+        }.value
     }
 
     /// **只生成正文，不落盘**：TUN 模式下正文经 XPC 交给 helper，由 helper 写到 root 目录。
     ///
     /// 与 `build(from:injected:)` 共用同一套解析 / 注入逻辑，避免「App 校验的配置」
     /// 和「helper 实际运行的配置」出现两份实现。
-    static func yaml(from profileURL: URL?, injected: Injected) throws -> String {
-        try dump(makeRoot(profileURL: profileURL, injected: injected))
+    static func yaml(from profileURL: URL?, injected: Injected) async throws -> String {
+        try await Task.detached(priority: .userInitiated) {
+            try dump(makeRoot(profileURL: profileURL, injected: injected))
+        }.value
     }
-
 
     /// 用**尚未入库**的配置正文生成一份运行配置，写到指定路径。
     ///
     /// 订阅导入 / 更新时先用它生成临时 runtime，再交给 `mihomo -t` 校验（`ProfileValidator`）；
     /// 绝不覆盖正在使用的 `runtime/runtime.yaml`。
     @discardableResult
-    static func build(yamlText: String, injected: Injected, to destination: URL) throws -> URL {
-        let root = try makeRoot(yamlText: yamlText, injected: injected)
-        let yaml = try dump(root)
-        try writeAtomically(yaml, to: destination)
-        return destination
+    static func build(yamlText: String, injected: Injected, to destination: URL) async throws -> URL {
+        try await Task.detached(priority: .userInitiated) {
+            let yaml = try dump(makeRoot(yamlText: yamlText, injected: injected))
+            try writeAtomically(yaml, to: destination)
+            return destination
+        }.value
     }
+
+    #if DEBUG
+    /// 自检夹具专用（同步）：`TunConfigHarness` / `TunSmokeHarness dump` 是命令行入口，
+    /// 不经过 UI，不需要把解析挪到后台。生产路径一律 `await yaml(from:injected:)`。
+    static func yamlForSelfCheck(from profileURL: URL?, injected: Injected) throws -> String {
+        try dump(makeRoot(profileURL: profileURL, injected: injected))
+    }
+    #endif
 
     /// 32 字节随机数转 hex；`SecRandomCopyBytes` 不可用时退回两个 UUID
     static func makeSecret() -> String {

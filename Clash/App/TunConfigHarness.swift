@@ -61,7 +61,7 @@ enum TunConfigHarness {
 
         let yamlOn: String
         do {
-            yamlOn = try RuntimeConfigBuilder.yaml(from: profileURL, injected: injectedOn)
+            yamlOn = try RuntimeConfigBuilder.yamlForSelfCheck(from: profileURL, injected: injectedOn)
         } catch {
             print("FAIL build-on \(error.localizedDescription)")
             return 1
@@ -110,7 +110,7 @@ enum TunConfigHarness {
 
         let yamlOff: String
         do {
-            yamlOff = try RuntimeConfigBuilder.yaml(from: profileURL, injected: injectedOff)
+            yamlOff = try RuntimeConfigBuilder.yamlForSelfCheck(from: profileURL, injected: injectedOff)
         } catch {
             print("FAIL build-off \(error.localizedDescription)")
             return 1
@@ -150,7 +150,7 @@ enum TunConfigHarness {
 
             let yaml: String
             do {
-                yaml = try RuntimeConfigBuilder.yaml(from: url, injected: injectedOn)
+                yaml = try RuntimeConfigBuilder.yamlForSelfCheck(from: url, injected: injectedOn)
             } catch {
                 print("FAIL dns-fallback-\(name) \(error.localizedDescription)")
                 failures += 1

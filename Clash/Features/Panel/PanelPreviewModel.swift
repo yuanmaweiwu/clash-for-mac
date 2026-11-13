@@ -362,6 +362,11 @@ final class PanelPreviewModel {
     /// 关闭 → 只还原系统代理（内核继续跑，节点仍可见可选）；开启 → 内核没跑先启动，再接管系统代理。
     /// 过渡中忽略点击。
     func toggleConnection() {
+        // 内核过渡中：先说清原因（否则 isConnectionBusy 会静默吞掉这一下，用户以为点坏了）
+        guard !kernel.isTransitioning else {
+            connectionError = "内核正在启动，请稍候"
+            return
+        }
         guard !isConnectionBusy else { return }
         if isSystemProxyOn {
             turnOffProxy()
@@ -373,6 +378,13 @@ final class PanelPreviewModel {
     /// 开启：内核未运行就先 `start()` 并等 `running`，再 `enable(port:)`。
     /// `SystemProxyService.enable` 负责「快照 → 写入 → 读回校验 → 失败回滚」，这里不重复兜底。
     private func turnOnProxy() {
+        // 与 TUN 同理：内核过渡中调 `start()` 会被内部 guard 直接返回，
+        // 再往下走只会拿到「内核未能就绪」这种误导文案。
+        guard !kernel.isTransitioning else {
+            connectionState = .off
+            connectionError = "内核正在启动，请稍候"
+            return
+        }
         connectionTask?.cancel()
         connectionState = .turningOn
         connectionError = nil

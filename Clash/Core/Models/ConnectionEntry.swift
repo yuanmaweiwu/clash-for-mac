@@ -26,13 +26,8 @@ struct ConnectionEntry: Identifiable, Decodable, Sendable, Equatable {
     /// 内核顺序是「出口节点 → 外层策略组」（v1.19.34 实测：`["🇭🇰 香港 | 00", "机场A"]`），
     /// 所以取**第一个**非内置项；全内置链路说明走的是直连 / 拒绝，没有节点可展示。
     var node: String? {
-        chains.first { !Self.builtinChainNames.contains($0.uppercased()) }
+        chains.first { !ProxyNodeFilter.builtinNames.contains($0.uppercased()) }
     }
-
-    /// 内置出口 / 容器名，不作为「节点」展示
-    private static let builtinChainNames: Set<String> = [
-        "DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE", "GLOBAL"
-    ]
 
     // MARK: - 解码
 

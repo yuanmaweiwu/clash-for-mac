@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 /// 机场「信息节点」过滤（启发式）。
 ///
@@ -20,17 +21,36 @@ enum ProxyNodeFilter {
         "expire", "traffic", "website"
     ]
 
-    /// 内核合成的内置策略：合法选项，永不过滤（大小写与内核返回一致）
+    /// 内核合成的内置策略：合法选项，永不过滤（大小写与内核返回一致）。
+    ///
+    /// **单一来源**：连接链路的「节点」判定（`ConnectionEntry.node`）也读这一份，
+    /// 两处口径必须一致，否则会出现「组里算内置、连接里当节点」。
     static let builtinNames: Set<String> = [
         "DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATIBLE", "GLOBAL"
     ]
 
+    /// 正则只编译一次：`makeGroup` 对每个组每个节点都会问一次，
+    /// 一次 `/proxies` 刷新上千次调用；以前每次 `range(of:options:.regularExpression)` 都重编译。
+    private static let infoRegex: NSRegularExpression? = {
+        let pattern = infoKeywords.joined(separator: "|")
+        #if DEBUG
+        debugCompileCount += 1
+        Logger(subsystem: "com.clash.app", category: "proxies")
+            .debug("ProxyNodeFilter 关键词正则已编译（进程内仅一次）")
+        #endif
+        return try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
+    }()
+
+    #if DEBUG
+    /// 自检用：关键词正则的编译次数（正常恒为 1）
+    nonisolated(unsafe) private(set) static var debugCompileCount = 0
+    #endif
+
     /// 是否为需要丢弃的信息节点
     static func isInfoNode(_ name: String) -> Bool {
         if builtinNames.contains(name) { return false }
-        return name.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
+        guard let infoRegex else { return false }
+        let range = NSRange(name.startIndex..., in: name)
+        return infoRegex.firstMatch(in: name, options: [], range: range) != nil
     }
-
-    /// 关键词拼成一条正则（`a|b|c`）；关键词里没有正则特殊字符，直接拼接即可
-    private static let pattern = infoKeywords.joined(separator: "|")
 }

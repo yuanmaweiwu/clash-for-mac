@@ -51,8 +51,19 @@ enum SystemNetworkProbe {
     private static let logger = Logger(subsystem: "com.clash.app", category: "tun")
     private static let routePath = "/sbin/route"
     private static let resolvConfPath = "/etc/resolv.conf"
+    /// 只读命令正常 <100ms；给 3s 上限，进程卡住时杀掉，避免整个 App 挂死
+    private static let commandTimeout: TimeInterval = 3
 
-    static func capture() -> SystemNetworkSnapshot {
+    /// UI 路径（开 / 关 TUN）：三个只读命令在后台跑，主线程只拿结果做对比。
+    static func capture() async -> SystemNetworkSnapshot {
+        await Task.detached(priority: .userInitiated) {
+            captureSynchronously()
+        }.value
+    }
+
+    /// **同步版本只给退出路径**（`willTerminate` / 信号处理）：那里无法 `await`，
+    /// 又必须在进程消失前拿到还原判断。UI 路径一律用 `capture()`。
+    static func captureSynchronously() -> SystemNetworkSnapshot {
         let route = defaultRoute()
         return SystemNetworkSnapshot(
             defaultInterface: route.interface,
@@ -66,7 +77,7 @@ enum SystemNetworkProbe {
 
     private static func defaultRoute() -> (interface: String?, gateway: String?) {
         // 没有默认路由时 route 退出码非 0，输出为空 → 两个字段都是 nil
-        guard let output = runCommand(routePath, ["-n", "get", "default"]) else {
+        guard let output = runCommandSynchronously(routePath, ["-n", "get", "default"]) else {
             return (nil, nil)
         }
         return (
@@ -90,7 +101,7 @@ enum SystemNetworkProbe {
 
     /// `0/1`、`128.0/1` 这两条是 mihomo / 别家 TUN 接管默认路由的典型手法（不改 `default`）
     private static func tunnelRoutes() -> [String] {
-        guard let table = runCommand("/usr/sbin/netstat", ["-rn", "-f", "inet"]) else { return [] }
+        guard let table = runCommandSynchronously("/usr/sbin/netstat", ["-rn", "-f", "inet"]) else { return [] }
         return table.split(separator: "\n").compactMap { line in
             let fields = String(line).split(separator: " ", omittingEmptySubsequences: true).map(String.init)
             guard let destination = fields.first else { return nil }
@@ -114,9 +125,17 @@ enum SystemNetworkProbe {
 
     // MARK: - 进程
 
-    /// 同步跑一个只读命令；输出合并 stdout / stderr，失败返回 nil。
+    /// 异步跑一个只读命令；输出合并 stdout / stderr，失败返回 nil。
     /// `internal` 供 `TunConflictDetector` 复用（不重复实现 Process 管道）。
-    static func runCommand(_ path: String, _ arguments: [String]) -> String? {
+    static func runCommand(_ path: String, _ arguments: [String]) async -> String? {
+        await Task.detached(priority: .userInitiated) {
+            runCommandSynchronously(path, arguments)
+        }.value
+    }
+
+    /// 同步执行（`captureSynchronously` / 退出路径用），带 3s 超时。
+    /// 写法照 `PortOccupantProbe.listeningProcesses`：超时先 `terminate`，再读管道收尾。
+    static func runCommandSynchronously(_ path: String, _ arguments: [String]) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = arguments
@@ -130,6 +149,15 @@ enum SystemNetworkProbe {
         } catch {
             logger.error("执行 \(path, privacy: .public) 失败：\(error.localizedDescription, privacy: .public)")
             return nil
+        }
+
+        let deadline = Date().addingTimeInterval(commandTimeout)
+        while process.isRunning && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        if process.isRunning {
+            logger.error("执行 \(path, privacy: .public) 超过 \(Int(commandTimeout))s，已终止")
+            process.terminate()
         }
 
         let data = pipe.fileHandleForReading.readDataToEndOfFile()

@@ -30,13 +30,13 @@ enum TunConflictDetector {
     private static let logger = Logger(subsystem: "com.clash.app", category: "tun")
     private static let ifconfigPath = "/sbin/ifconfig"
 
-    static func detect() -> TunConflict? {
-        let snapshot = SystemNetworkProbe.capture()
+    static func detect() async -> TunConflict? {
+        let snapshot = await SystemNetworkProbe.capture()
         if let interface = snapshot.defaultInterface, interface.hasPrefix("utun") {
             return TunConflict(interface: interface, summary: "默认路由已指向 \(interface)")
         }
 
-        if let tunnel = activeTunnels().first {
+        if let tunnel = await activeTunnels().first {
             return TunConflict(interface: tunnel.interface, summary: "\(tunnel.interface) 已配置 \(tunnel.address)")
         }
         return nil
@@ -50,8 +50,8 @@ enum TunConflictDetector {
     }
 
     /// `ifconfig -a` 里「`utunN:` 段落中出现 `inet x.x.x.x`」的接口
-    private static func activeTunnels() -> [ActiveTunnel] {
-        guard let output = SystemNetworkProbe.runCommand(ifconfigPath, ["-a"]) else {
+    private static func activeTunnels() async -> [ActiveTunnel] {
+        guard let output = await SystemNetworkProbe.runCommand(ifconfigPath, ["-a"]) else {
             logger.error("读取网络接口失败，跳过 TUN 冲突检测")
             return []
         }

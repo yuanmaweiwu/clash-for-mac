@@ -78,7 +78,7 @@ enum TunSmokeHarness {
         }
         do {
             let ports = try PortAllocator.allocateDistinct(2)
-            let yaml = try RuntimeConfigBuilder.yaml(
+            let yaml = try RuntimeConfigBuilder.yamlForSelfCheck(
                 from: profile,
                 injected: .init(
                     mixedPort: KernelService().settings.mixedPort,
@@ -330,7 +330,7 @@ enum TunSmokeHarness {
     // MARK: - 取证
 
     private static func dumpNetworkState() {
-        if let route = SystemNetworkProbe.runCommand("/sbin/route", ["-n", "get", "default"]) {
+        if let route = SystemNetworkProbe.runCommandSynchronously("/sbin/route", ["-n", "get", "default"]) {
             let interface = route.split(separator: "\n")
                 .map { $0.trimmingCharacters(in: .whitespaces) }
                 .first { $0.hasPrefix("interface:") } ?? "interface: ?"
@@ -344,14 +344,14 @@ enum TunSmokeHarness {
 
         print("utun(in a.addr) → \(activeTunnels().joined(separator: ", "))")
 
-        if let ps = SystemNetworkProbe.runCommand("/bin/ps", ["-axo", "user,pid,command"]) {
+        if let ps = SystemNetworkProbe.runCommandSynchronously("/bin/ps", ["-axo", "user,pid,command"]) {
             let kernels = ps.split(separator: "\n")
                 .map(String.init)
                 .filter { $0.contains("PrivilegedHelperTools/mihomo") }
             print("root mihomo → \(kernels.isEmpty ? "无" : kernels.joined(separator: " | "))")
         }
 
-        if let table = SystemNetworkProbe.runCommand("/usr/sbin/netstat", ["-rn", "-f", "inet"]) {
+        if let table = SystemNetworkProbe.runCommandSynchronously("/usr/sbin/netstat", ["-rn", "-f", "inet"]) {
             let interesting = table.split(separator: "\n")
                 .map { $0.trimmingCharacters(in: .whitespaces) }
                 .filter { line in
@@ -360,7 +360,7 @@ enum TunSmokeHarness {
             print("routes(0/1,128/1,default) → \(interesting.isEmpty ? "无" : interesting.joined(separator: " | "))")
         }
 
-        if let resolv = SystemNetworkProbe.runCommand("/usr/sbin/scutil", ["--dns"]) {
+        if let resolv = SystemNetworkProbe.runCommandSynchronously("/usr/sbin/scutil", ["--dns"]) {
             let servers = resolv.split(separator: "\n")
                 .map { $0.trimmingCharacters(in: .whitespaces) }
                 .filter { $0.hasPrefix("nameserver[") }
@@ -369,7 +369,7 @@ enum TunSmokeHarness {
     }
 
     private static func activeTunnels() -> [String] {
-        guard let output = SystemNetworkProbe.runCommand("/sbin/ifconfig", ["-a"]) else { return [] }
+        guard let output = SystemNetworkProbe.runCommandSynchronously("/sbin/ifconfig", ["-a"]) else { return [] }
         var current: String?
         var result: [String] = []
         for line in output.split(separator: "\n") {

@@ -45,6 +45,7 @@ final class AppTerminationGuard {
     private let kernel: KernelService
     private let systemProxy: SystemProxyService
     private let tun: TunService
+    private let settings: SettingsStore
 
     /// 信号统一投递到这条串行队列：多个信号排队，第一个清理完就 `exit`，后面的没机会跑
     private let signalQueue = DispatchQueue(label: "com.clash.app.termination", qos: .userInitiated)
@@ -56,10 +57,11 @@ final class AppTerminationGuard {
     private var signalSources: [DispatchSourceSignal] = []
     private var terminateObserver: NSObjectProtocol?
 
-    init(kernel: KernelService, systemProxy: SystemProxyService, tun: TunService) {
+    init(kernel: KernelService, systemProxy: SystemProxyService, tun: TunService, settings: SettingsStore) {
         self.kernel = kernel
         self.systemProxy = systemProxy
         self.tun = tun
+        self.settings = settings
 
         let shouldInstall = installTerminationGuardOnce.withLock { installed -> Bool in
             guard !installed else { return false }
@@ -163,6 +165,8 @@ final class AppTerminationGuard {
         guard !alreadyStarted else { return }
 
         let began = Date()
+        // 文本设置是 300ms 合并写：退出前把最后一段输入落盘
+        settings.flushPendingWrite()
         systemProxy.disableSynchronouslyForTermination()
 
         // helper 是 launchd 常驻，不会随 App 退出；TUN 的内核还在就会一直接管流量，

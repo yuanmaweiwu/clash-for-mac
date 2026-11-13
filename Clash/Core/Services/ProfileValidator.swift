@@ -42,7 +42,7 @@ enum ProfileValidator {
 
         let tempURL = runtimeDirectory.appending(path: ".validate-\(UUID().uuidString).yaml")
         do {
-            try RuntimeConfigBuilder.build(yamlText: yamlText, injected: injected, to: tempURL)
+            try await RuntimeConfigBuilder.build(yamlText: yamlText, injected: injected, to: tempURL)
         } catch {
             try? FileManager.default.removeItem(at: tempURL)
             let detail = (error as? KernelError)?.logDescription ?? "无法生成运行配置"

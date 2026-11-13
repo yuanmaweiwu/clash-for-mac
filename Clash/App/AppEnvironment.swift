@@ -65,7 +65,12 @@ final class AppEnvironment {
         self.tun = tun
         self.model = model
         panel = PanelWindowController(model: model)
-        terminationGuard = AppTerminationGuard(kernel: kernel, systemProxy: systemProxy, tun: tun)
+        terminationGuard = AppTerminationGuard(
+            kernel: kernel,
+            systemProxy: systemProxy,
+            tun: tun,
+            settings: settings
+        )
         Self.logger.info("Clash 启动（v0.2 系统代理 + TUN）")
 
         #if DEBUG
