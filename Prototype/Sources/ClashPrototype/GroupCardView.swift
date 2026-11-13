@@ -22,11 +22,11 @@ struct GroupCardView: View {
             header
 
             rows
-                .id(group.selectedNodeID)
+                .id(group.cardOrderKey)
                 .transition(.opacity)
         }
         .padding(.vertical, Metrics.cardInsetV)
-        .animation(.easeInOut(duration: 0.18), value: group.selectedNodeID)
+        .animation(.easeInOut(duration: 0.18), value: group.cardOrderKey)
         .background {
             cardSurface
         }

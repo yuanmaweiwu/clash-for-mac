@@ -71,8 +71,18 @@ enum PrototypeSelfTest {
                 model.testAllNodes(in: group.id)
                 try? await Task.sleep(for: .seconds(1.4))
                 let after = model.groups.first?.nodes.first?.latency ?? 0
-                print("17. 测速：\(before) ms → \(after) ms（±20）")
+                print("17. 测速：\(before) ms → \(after) ms（±40）")
                 print("18. 超时节点仍为：\(model.groups.first?.nodes.first { $0.latency == nil }?.name ?? "无")")
+                let order = model.groups.first?.nodesSortedByLatency.map { node in
+                    "\(node.name) \(node.latency.map(String.init) ?? "超时")"
+                } ?? []
+                print("19. 按延迟排序：\(order.joined(separator: " < "))")
+
+                let runCountBefore = model.speedTestRunCount
+                model.testAllNodes(in: group.id)
+                model.testAllNodes(in: group.id)
+                try? await Task.sleep(for: .seconds(1.6))
+                print("20. 连点两次，测速实际启动次数：\(model.speedTestRunCount - runCountBefore)（期望 1）")
             }
 
             exit(0)

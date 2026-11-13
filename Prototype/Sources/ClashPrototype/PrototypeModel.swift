@@ -47,6 +47,10 @@ final class PrototypeModel {
     private(set) var subscriptionNotice: String?
     private(set) var testingGroupID: UUID?
     private(set) var speedNotice: String?
+    /// 测速完成后的「刚刚更新」短暂提示
+    private(set) var speedResultFlash = false
+    /// 实际启动过的测速轮次（自检用，验证连点只跑一次）
+    private(set) var speedTestRunCount = 0
 
     var connectionCount = 12
     var updatedText = "2 分钟前更新"
@@ -63,6 +67,7 @@ final class PrototypeModel {
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
     @ObservationIgnored private var speedTask: Task<Void, Never>?
     @ObservationIgnored private var speedNoticeTask: Task<Void, Never>?
+    @ObservationIgnored private var speedFlashTask: Task<Void, Never>?
 
     init() {
         let initialGroups = Self.makeGroups()
@@ -193,6 +198,8 @@ final class PrototypeModel {
     // MARK: - 节点与 pin
 
     func selectNode(groupID: UUID, nodeID: UUID) {
+        // 测速中不允许切节点，避免列表顺序抖动
+        guard testingGroupID == nil else { return }
         guard let index = groups.firstIndex(where: { $0.id == groupID }),
               let node = groups[index].nodes.first(where: { $0.id == nodeID }),
               node.latency != nil else { return }
@@ -311,11 +318,23 @@ final class PrototypeModel {
         }
 
         testingGroupID = groupID
+        speedTestRunCount += 1
         speedTask?.cancel()
         speedTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(1.2))
             guard let self, !Task.isCancelled else { return }
             self.finishSpeedTest(groupID: groupID)
+        }
+    }
+
+    /// 快照夹具：写入一组固定延迟，演示「测速后重排」的最终形态
+    func applySpeedTestFixture(groupID: UUID, latencies: [String: Int]) {
+        guard let index = groups.firstIndex(where: { $0.id == groupID }) else { return }
+        for nodeIndex in groups[index].nodes.indices {
+            let name = groups[index].nodes[nodeIndex].name
+            if let value = latencies[name] {
+                groups[index].nodes[nodeIndex].latency = value
+            }
         }
     }
 
@@ -329,10 +348,21 @@ final class PrototypeModel {
             for nodeIndex in groups[index].nodes.indices {
                 // 超时节点保持超时
                 guard let latency = groups[index].nodes[nodeIndex].latency else { continue }
-                groups[index].nodes[nodeIndex].latency = max(1, latency + Int.random(in: -20...20))
+                groups[index].nodes[nodeIndex].latency = max(1, latency + Int.random(in: -40...40))
             }
         }
         testingGroupID = nil
+        flashSpeedResult()
+    }
+
+    private func flashSpeedResult() {
+        speedResultFlash = true
+        speedFlashTask?.cancel()
+        speedFlashTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.5))
+            guard let self, !Task.isCancelled else { return }
+            self.speedResultFlash = false
+        }
     }
 
     private func showSpeedNotice(_ text: String) {
@@ -394,6 +424,7 @@ final class PrototypeModel {
         noticeTask?.cancel()
         speedTask?.cancel()
         speedNoticeTask?.cancel()
+        speedFlashTask?.cancel()
 
         phase = .running
         systemProxyOn = true
@@ -414,6 +445,7 @@ final class PrototypeModel {
         subscriptionNotice = nil
         testingGroupID = nil
         speedNotice = nil
+        speedResultFlash = false
 
         downRate = DemoTraffic.initialDownRate
         upRate = DemoTraffic.initialUpRate

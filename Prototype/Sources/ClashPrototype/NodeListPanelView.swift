@@ -16,7 +16,7 @@ struct NodeListPanelView: View {
 
             ScrollView(.vertical) {
                 LazyVStack(spacing: 0) {
-                    ForEach(group.nodes) { node in
+                    ForEach(group.nodesSortedByLatency) { node in
                         NodeRowView(
                             node: node,
                             isSelected: group.isSelected(node),
@@ -28,8 +28,12 @@ struct NodeListPanelView: View {
                         )
                     }
                 }
+                .id(group.listOrderKey)
+                .transition(.opacity)
             }
             .scrollIndicators(.hidden)
+            .allowsHitTesting(!isTesting)
+            .animation(.easeInOut(duration: 0.18), value: group.listOrderKey)
 
             footer
         }
@@ -64,6 +68,7 @@ struct NodeListPanelView: View {
                 .scaleEffect(0.7)
                 .frame(width: 28, height: 28)
                 .padding(.trailing, 4)
+                .allowsHitTesting(false)
                 .accessibilityLabel("测速中")
         } else {
             IconButtonView(systemName: "speedometer", label: "测速全部节点", iconSize: 16) {
@@ -90,10 +95,20 @@ struct NodeListPanelView: View {
 
             Spacer(minLength: 6)
 
-            Text("右键菜单未实现")
-                .font(.system(size: 10))
-                .foregroundStyle(Theme.textTertiary)
+            if isTesting {
+                Text("测速中…")
+                    .font(Typography.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .transition(.opacity)
+            } else if model.speedResultFlash {
+                Text("刚刚更新")
+                    .font(Typography.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .transition(.opacity)
+            }
         }
         .frame(height: Metrics.footerHeight)
+        .animation(.easeInOut(duration: 0.2), value: isTesting)
+        .animation(.easeInOut(duration: 0.2), value: model.speedResultFlash)
     }
 }

@@ -61,7 +61,7 @@ struct NodeRowView: View {
             if isTesting {
                 ProgressView()
                     .controlSize(.mini)
-                    .scaleEffect(0.55)
+                    .scaleEffect(0.98)
                     .frame(width: 34, height: 16, alignment: .trailing)
                     .accessibilityHidden(true)
             } else {

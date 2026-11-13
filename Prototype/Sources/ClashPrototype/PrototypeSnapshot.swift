@@ -38,6 +38,16 @@ enum PrototypeSnapshot {
             nodes.route = .nodes(group.id)
         }
 
+        let nodesSorted = PrototypeModel()
+        if let group = nodesSorted.groups.first {
+            nodesSorted.route = .nodes(group.id)
+            // 夹具：测速完成后的固定结果（香港 01 变慢，首行换成台湾 05）
+            nodesSorted.applySpeedTestFixture(
+                groupID: group.id,
+                latencies: ["香港 01": 96, "台湾 05": 41, "新加坡 04": 64, "日本 02": 88, "韩国 06": 95]
+            )
+        }
+
         let nodesTesting = PrototypeModel()
         if let group = nodesTesting.groups.first {
             nodesTesting.route = .nodes(group.id)
@@ -118,6 +128,7 @@ enum PrototypeSnapshot {
         renderPanel(empty, name: "panel-empty@2x.png", appearance: .aqua, in: directory)
         renderPanel(nodes, name: "panel-nodes@2x.png", appearance: .aqua, in: directory)
         renderPanel(nodesTesting, name: "panel-nodes-testing@2x.png", appearance: .aqua, in: directory)
+        renderPanel(nodesSorted, name: "panel-nodes-sorted@2x.png", appearance: .aqua, in: directory)
         render(
             PanelView(model: single),
             size: CGSize(width: Metrics.panelWidth, height: single.panelHeight),

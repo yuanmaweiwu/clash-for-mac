@@ -19,12 +19,28 @@ struct DemoGroup: Identifiable, Sendable {
         self.selectedNodeID = nodes.first?.id
     }
 
-    /// 卡内只露 3 行：选中项置顶，其后按配置顺序取 2 个
-    var orderedNodes: [DemoNode] {
-        guard let selected = selectedNode else { return Array(nodes.prefix(3)) }
-        let others = nodes.filter { $0.id != selected.id }
-        return [selected] + others.prefix(2)
+    /// 按延迟升序；超时/未测速沉底；同延迟按配置顺序（稳定排序）
+    var nodesSortedByLatency: [DemoNode] {
+        nodes.enumerated()
+            .sorted { lhs, rhs in
+                let left = lhs.element.latency ?? Int.max
+                let right = rhs.element.latency ?? Int.max
+                if left != right { return left < right }
+                return lhs.offset < rhs.offset
+            }
+            .map(\.element)
     }
+
+    /// 卡内只露 3 行：选中项恒第一，其余按延迟升序取前 2（超时自然沉底）
+    var orderedNodes: [DemoNode] {
+        guard let selected = selectedNode else { return Array(nodesSortedByLatency.prefix(3)) }
+        let rest = nodesSortedByLatency.filter { $0.id != selected.id }
+        return [selected] + rest.prefix(2)
+    }
+
+    /// 排序键：变化时整组交叉淡入，不整列跳动
+    var cardOrderKey: String { orderedNodes.map(\.id.uuidString).joined(separator: ",") }
+    var listOrderKey: String { nodesSortedByLatency.map(\.id.uuidString).joined(separator: ",") }
 
     var extraCount: Int { max(nodes.count - 3, 0) }
 
