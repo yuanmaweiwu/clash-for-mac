@@ -26,15 +26,22 @@
 
 - [x] 可交互原型 `Prototype/`：菜单栏真浮层 + 演示窗口，六个动作可点，订阅库 3 条，按延迟排序，测速互斥
 - [x] 原型视觉收敛：胶囊 28pt / 卡内上下 4pt 呼吸区 / 卡内无横线 / 1pt 连续描边 / 选中无 ✓ / 选中置顶
-- [ ] 用户实操反馈 → 继续微调（当前唯一待办）
+- [ ] 用户实操反馈 → 继续微调
 - [ ] 原型交互评审：多订阅 / 策略组 pin 刚定，需同步到原型后再给用户试
+
+## v0.1 已完成（2026-11-13）
+
+- [x] `Clash.xcodeproj`（同步文件夹、arm64、ad-hoc）、`MenuBarExtra` 浮层、面板 UI 全量移植
+- [x] 真内核：runtime 配置生成 → `-t` 校验 → 启动 → `/version` 就绪判定 → 停止/崩溃分类
+- [x] 面板去假象：v0.1 只到「已就绪」，速率/曲线/连接数/TUN 均按实况显示
+- [x] 实测：真点击启动 → `mihomo` 进程 → `/version` v1.19.34 → 再点停止无残留
 
 ## 下一步（按优先级）
 
-1. v0.1 骨架：`Clash.xcodeproj`（App target，同步文件夹）+ `MenuBarExtra` + 内置内核 + `/version`（进行中）
-2. 移植原型 UI 到 `Clash/Features/Panel` + `Clash/UI`
-3. `KernelService`（App 用户态启动，见 `adr/0007`）→ 启动/停止/错误分类
-4. v0.2 前接入 helper（管理员授权安装 LaunchDaemon，`adr/0008`），随后做系统代理
+1. 真实节点数据：Yams 配置合并 + `profiles/index.json` + 订阅导入（进行中）
+2. `ProxyService`：`/proxies` 策略组与节点、选择、测速、`PATCH /configs` 模式
+3. helper（管理员授权安装）+ 系统代理快照还原
+4. 流量 WS + 连接列表
 2. 补齐技能（全部项目级）：`swift-style`、`build-release`
 3. v0.1 骨架：`.xcodeproj`（App / Helper / Tests）+ `MenuBarExtra` 空面板 + helper 安装 + 内核启停 + `/version`
 4. 内核签名与 helper spawn 校验方案（v0.1 内落地）

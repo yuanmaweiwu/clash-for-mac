@@ -15,14 +15,15 @@
 
 ## v0.1 骨架与内核
 
-- [ ] Xcode 工程：App target（`LSUIElement`）+ Helper target（LaunchDaemon）+ Shared 模块；`ARCHS = arm64`
-- [ ] 菜单栏图标：未运行/运行中两态，点击开浮层
-- [ ] 面板外壳：固定宽度、毛玻璃底、空态文案
-- [ ] 内置 mihomo（arm64）随包 + 由脚本生成；版本号展示
-- [ ] Helper 安装引导（`SMAppService`）+ XPC 心跳
-- [ ] 内核 start/stop，状态机与失败原因
-- [ ] `GET /version` 打通，显示内核版本
-- [ ] 构建命令写入 `swiftui-app` §6；`xcodebuild` 通过
+- [x] Xcode 工程：App target（`LSUIElement`）、`ARCHS = arm64`；Helper 按 `adr/0008` 推迟到 v0.2 前
+- [x] 菜单栏图标：未运行/运行中两态，点击开浮层
+- [x] 面板外壳：340pt 固定宽、`.behindWindow` 材质、空态文案
+- [x] 内置 mihomo（arm64）由 `Scripts/fetch-kernel.sh` 拉取并在构建时拷入 bundle
+- [x] 内核 start/stop，状态机与失败原因（7 类错误）
+- [x] `GET /version` 打通（Bearer 鉴权，未授权返回 401）
+- [x] 构建命令写入 `swiftui-app` §6；`xcodebuild` 通过、0 warning
+- [ ] 版本号在面板可见（进行中）
+- [ ] Helper 安装：`adr/0008` 的管理员授权方案（v0.2 前）
 
 **验收**：冷启动 → 点图标 → 点「启动」→ 显示内核版本 → 停止后进程消失，全程无残留。
 
