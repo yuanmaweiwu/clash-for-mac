@@ -204,7 +204,18 @@ idle ──start──► starting ──ok──► running ──stop──►
 | 内核集成 | 集成测试脚本：起内核 → 打 API → 断言响应 → 停（不依赖外网） |
 | UI | 关键路径手工 + 少量快照（面板三种状态） |
 
-## 10. 尚未定（见 `adr/0005`）
+## 10. 多内核（未来，不在 v1 范围）
+
+当前只支持 mihomo：它的「协议 + 策略组 + 规则分流 + Clash REST API」四件套与我们的 UI 模型一一对应。
+
+若将来要接 sing-box / Xray：
+
+- 需要抽象 `CoreProvider = 配置翻译 + API 适配`，UI 层不动
+- sing-box 是唯一现实候选（有 `experimental.clash_api`，但 Clash YAML → sing-box JSON 的规则/组语义差异大）
+- Xray 没有策略组概念，接入等于重做配置与界面模型
+- **v1 不为此写任何空壳代码**
+
+## 11. 尚未定（见 `adr/0005`）
 
 - YAML 解析库：`Yams`（建议）vs 零依赖方案
 - 分发与更新：ad-hoc 签名 + 用户手动允许（`adr/0008`）；Sparkle 需要签名，v1.0 可能改为手动下载更新

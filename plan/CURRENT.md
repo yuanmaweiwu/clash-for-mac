@@ -40,6 +40,10 @@ macOS 原生 Clash 客户端：状态栏「控制中心」风格，自带 mihomo
 3. 退出路径回归：TUN 开着时 ⌘Q 与 `kill -9` 各一次
 4. 可选增强：设置项「关闭代理时保留内核」之外的启动行为、策略组 pin 持久化跨订阅、`build-release` 技能
 
+## 待评估（明确不做，先记着）
+
+- **多内核自适应**（mihomo / sing-box / Xray）：用户未来可能集成，当前不做。届时抽象 `CoreProvider`（配置翻译 + API 适配两件事），sing-box 是唯一划算的第二内核（有 `clash_api` 兼容层）；Xray 没有策略组模型，接进来等于重做 UI 与配置层。**现在不写空壳抽象。**
+
 ## 关键上下文（续作必读）
 
 - 分支 `test`；remote 为内网 Gitea
