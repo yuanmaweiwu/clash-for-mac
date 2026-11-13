@@ -2,7 +2,7 @@
 # 拉取上游 mihomo 最新 release 的 darwin/arm64 二进制，落到 Resources/Kernel/
 # 同时拉 geodata（geoip.metadb / geosite.dat）：TUN 与 GEOIP 规则的硬依赖，
 # helper 运行目录里没有它，内核启动时会去 GitHub 下载（国内常超时 90s）。
-# 用法：Scripts/fetch-kernel.sh [--dry-run] [--skip-geodata]
+# 用法：Scripts/fetch-kernel.sh [--dry-run] [--skip-geodata] [--version vX.Y.Z]
 #
 # 版本策略：取 latest（用户已确认）。可复现性由 Resources/Kernel/VERSION + SHA256 保证。
 # 架构策略：仅 arm64（Apple Silicon），不支持 x86_64（用户已确认）。
@@ -14,14 +14,21 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEST="$ROOT/Resources/Kernel"
 DRY_RUN=0
 SKIP_GEODATA=0
-for arg in "$@"; do
-  case "$arg" in
-    --dry-run) DRY_RUN=1 ;;
-    --skip-geodata) SKIP_GEODATA=1 ;;
+PINNED_VERSION=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run) DRY_RUN=1; shift ;;
+    --skip-geodata) SKIP_GEODATA=1; shift ;;
+    --version) PINNED_VERSION="${2:-}"; shift 2 ;;
+    *) shift ;;
   esac
 done
 
-api="https://api.github.com/repos/$REPO/releases/latest"
+if [[ -n "$PINNED_VERSION" ]]; then
+  api="https://api.github.com/repos/$REPO/releases/tags/$PINNED_VERSION"
+else
+  api="https://api.github.com/repos/$REPO/releases/latest"
+fi
 json="$(curl -fsSL -H 'Accept: application/vnd.github+json' "$api")"
 
 tag="$(printf '%s' "$json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')"

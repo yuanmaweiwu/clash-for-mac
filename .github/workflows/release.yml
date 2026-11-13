@@ -1,0 +1,141 @@
+name: Release
+
+# 触发：推送形如 v0.4.0 的 tag；也支持手动跑（用仓库里的版本号）
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # 必须是 macOS runner：xcodebuild 无法在 Linux 上跑
+    runs-on: macos-15
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 需要 tag 与提交历史算 build number
+
+      - name: Resolve version
+        id: version
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Clash/App/Info.plist)"
+          fi
+          BUILD="$(git rev-list --count HEAD)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+          echo "解析版本：$VERSION (build $BUILD)"
+
+      - name: Select newest Xcode
+        run: |
+          set -euo pipefail
+          LATEST="$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)"
+          if [[ -n "$LATEST" ]]; then
+            sudo xcode-select -s "$LATEST/Contents/Developer"
+          fi
+          xcodebuild -version
+          swift --version
+
+      - name: Restore kernel cache
+        id: kernel-cache
+        uses: actions/cache@v4
+        with:
+          path: Resources/Kernel
+          key: mihomo-${{ runner.arch }}-${{ hashFiles('Resources/Kernel/VERSION') }}
+
+      - name: Fetch kernel and geodata
+        if: steps.kernel-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          PINNED="$(cat Resources/Kernel/VERSION 2>/dev/null | tr -d '[:space:]' || true)"
+          if [[ -n "${PINNED:-}" ]]; then
+            Scripts/fetch-kernel.sh --version "$PINNED"
+          else
+            Scripts/fetch-kernel.sh
+          fi
+
+      - name: Stamp version into Info.plist
+        run: |
+          set -euo pipefail
+          plutil -replace CFBundleShortVersionString -string "${{ steps.version.outputs.version }}" Clash/App/Info.plist
+          plutil -replace CFBundleVersion -string "${{ steps.version.outputs.build }}" Clash/App/Info.plist
+          plutil -p Clash/App/Info.plist | grep -E 'CFBundleShortVersionString|CFBundleVersion'
+
+      - name: Build (Release, ad-hoc)
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project Clash.xcodeproj \
+            -scheme Clash \
+            -configuration Release \
+            -destination 'platform=macOS,arch=arm64' \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=YES \
+            build
+
+      - name: Verify bundle
+        id: bundle
+        run: |
+          set -euo pipefail
+          APP="$(/usr/bin/find ~/Library/Developer/Xcode/DerivedData -maxdepth 5 -type d -name Clash.app -path '*/Build/Products/Release/*' | head -1)"
+          [[ -n "$APP" ]] || { echo "找不到 Release 产物"; exit 1; }
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          lipo -archs "$APP/Contents/MacOS/Clash"
+          echo "app=$APP" >> "$GITHUB_OUTPUT"
+          echo "=== Info.plist ==="; plutil -p "$APP/Contents/Info.plist" | grep -E 'CFBundle|LSUIElement|LSMinimumSystemVersion'
+          echo "=== 内核 ==="; ls -la "$APP/Contents/Resources/Kernel/" || true
+
+      - name: Package zip and dmg
+        run: |
+          set -euo pipefail
+          APP="${{ steps.bundle.outputs.app }}"
+          mkdir -p dist
+          NAME="Clash-${{ steps.version.outputs.version }}-arm64"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "dist/${NAME}.zip"
+          STAGE="$(mktemp -d)"
+          cp -R "$APP" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create -volname "Clash ${{ steps.version.outputs.version }}" \
+            -srcfolder "$STAGE" -ov -format UDZO "dist/${NAME}.dmg" >/dev/null
+          rm -rf "$STAGE"
+          shasum -a 256 dist/* > "dist/${NAME}.sha256"
+          ls -lah dist
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Clash-${{ steps.version.outputs.version }}-arm64
+          path: dist/*
+          if-no-files-found: error
+
+      # 未签名、未公证：产物在别的机器上首次打开需要在「系统设置 → 隐私与安全性」允许
+      # 若将来拿到 Developer ID，可在此加 codesign + notarytool 步骤，并去掉 ad-hoc 参数
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Clash ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          body: |
+            macOS 状态栏 Clash 客户端（Apple Silicon，macOS 15+）。
+
+            **安装**：下载 `.dmg` → 拖进「应用程序」→ 首次打开若被拦截，去「系统设置 → 隐私与安全性」点「仍要打开」。
+
+            本构建为 ad-hoc 签名、未公证；TUN 模式需要一次管理员授权安装特权组件。
+          files: dist/*
+          fail_on_unmatched_files: true

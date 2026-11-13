@@ -17,3 +17,6 @@ Prototype/.build/
 # geodata（脚本下载，随安装器拷进 helper 目录；不入库）
 Resources/Kernel/geoip.metadb
 Resources/Kernel/geosite.dat
+
+# 发布产物
+dist/
