@@ -35,20 +35,23 @@ struct SubscriptionEditForm: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Space.m) {
             Text(title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(Typography.title)
                 .foregroundStyle(Theme.textPrimary)
 
-            TextField(placeholder, text: $text)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 12))
+            PanelTextField(
+                placeholder,
+                text: $text,
+                label: title,
+                isAutofocused: true
+            )
 
             if let hint {
                 Text(hint)
-                    .font(.system(size: 10))
+                    .font(Typography.caption)
                     .foregroundStyle(Theme.textTertiary)
-                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Spacer(minLength: 0)
@@ -66,7 +69,7 @@ struct SubscriptionEditForm: View {
                 .disabled(trimmed.isEmpty)
             }
         }
-        .padding(16)
+        .padding(Space.xl)
         .frame(width: 320, height: 168, alignment: .topLeading)
     }
 }

@@ -47,7 +47,6 @@ struct SubscriptionStateView: View {
                 Button("重试", action: onRetry)
                     .buttonStyle(.bordered)
                     .controlSize(.regular)
-                    .font(.system(size: 11, weight: .medium))
                     .accessibilityHint(Text("重新读取订阅库"))
             }
         }

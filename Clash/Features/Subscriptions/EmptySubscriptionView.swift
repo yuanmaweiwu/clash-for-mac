@@ -18,7 +18,6 @@ struct EmptySubscriptionView: View {
             Button("导入订阅", action: onImportURL)
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
-                .font(.system(size: 11, weight: .medium))
                 .padding(.top, Space.xs)
         }
         .frame(maxWidth: .infinity)
