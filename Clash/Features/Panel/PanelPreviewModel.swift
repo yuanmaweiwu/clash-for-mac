@@ -540,42 +540,62 @@ final class PanelPreviewModel {
         }
     }
 
-    /// 「完全清理…」：还原系统代理 → 停内核 → 删 `profiles/` `runtime/` `kernel/` `logs/` 与代理快照。
-    /// **不删 App 本身**，也不动 `settings.json`（否则窗口里的偏好会突然回默认）。
+    /// 「完全清理…」：还原系统代理 → 停 TUN / 内核 → 删数据与偏好。
+    ///
+    /// 顺序与理由：
+    /// 1. 系统代理必须先还原且**确认已关闭**（快照还在 = 代理仍指向本机端口），
+    ///    否则删掉 runtime 会让用户对着死端口断网
+    /// 2. TUN / 内核停不下来就中止：root 内核还在接管流量时删配置等于制造「黑盒断网」
+    /// 3. 只删本 App 的用户数据与缓存、偏好；**不碰 `/Library/Application Support/ClashHelper`**
+    ///    （root 目录由 helper 自己管，卸载入口在「组件」里）
+    ///
     /// - Returns: `nil` 表示成功；否则是给用户看的中文失败原因。
     func performFullCleanup() async -> String? {
-        // TUN 开着时先停 root 内核（它不属于本 App，删文件前必须先失去流量接管）
-        if tun.isHelperKernelRunning {
-            await tun.disable(restartLocalKernel: false)
-            if tun.isOn {
-                return "TUN 未能关闭（\(tun.failureMessage ?? "未知原因")），已中止清理"
-            }
+        // 0. 过渡中的任何一次系统代理写入都不能被删目录打断：
+        //    此刻快照可能还没落盘（`hasSnapshot == false`），单看 hasSnapshot 会漏掉这个窗口。
+        if systemProxy.isTransitioning {
+            return "\(SystemProxyError.busy.userMessage)，已中止清理"
         }
 
-        if isSystemProxyOn {
+        // 1. 系统代理：失败 / 仍在开启（含快照还在）都中止。
+        // 用 `hasSnapshot` 而不是只看 `isEnabled`：enable 正在写入时 isEnabled 仍是 false，
+        // 但快照已经落盘——此时删目录会让用户停在「代理指向死端口」。
+        if systemProxy.isEnabled || systemProxy.hasSnapshot {
             do {
                 try await systemProxy.disable()
                 connectionState = .off
             } catch {
-                let message = systemProxy.lastError?.userMessage ?? "还原系统代理失败"
+                let message = (error as? SystemProxyError)?.userMessage
+                    ?? systemProxy.lastError?.userMessage
+                    ?? "还原系统代理失败"
+                return "\(message)，已中止清理"
+            }
+            // 不变式：没有快照才算真的还原。busy / 只抛错不落状态时这里必须拦住
+            guard !systemProxy.isEnabled, !systemProxy.hasSnapshot else {
+                let message = systemProxy.lastError?.userMessage ?? "系统代理仍在开启"
                 return "\(message)，已中止清理"
             }
         }
 
-        await kernel.stop()
-        profiles.forgetAllAfterCleanup()
-        // 配置正文已删：策略组快照必须一起作废，否则面板还挂着上一份配置的卡片
-        proxies.clear()
-        isGroupDataStale = false
-        pruneRouteIfTargetMissing()
+        // 2. TUN：root 内核不在本进程，停不掉就不能删它要读的配置
+        if tun.isHelperKernelRunning {
+            await tun.disable(restartLocalKernel: false)
+            if tun.isOn || tun.isHelperKernelRunning {
+                return "TUN 未能关闭（\(tun.failureMessage ?? "未知原因")），已中止清理"
+            }
+        }
 
+        // 3. 本地内核：`stop()` 在过渡中会静默返回，用相位复核一次
+        await kernel.stop()
+        if kernel.phase == .running || kernel.isExternal {
+            return "内核未能停止，已中止清理"
+        }
+
+        // 4. 删目录：整个 App 数据根（settings.json / profiles / runtime / kernel / logs / 快照）
         let fileManager = FileManager.default
         let targets: [(String, URL)] = [
-            ("profiles", AppPaths.profilesDirectory),
-            ("runtime", AppPaths.runtimeDirectory),
-            ("kernel", AppPaths.kernelDirectory),
-            ("logs", AppPaths.logsDirectory),
-            ("代理快照", AppPaths.systemProxySnapshotURL)
+            ("应用数据", AppPaths.supportDirectory),
+            ("缓存", AppPaths.cachesDirectory)
         ]
         for (name, url) in targets where fileManager.fileExists(atPath: url.path) {
             do {
@@ -585,6 +605,23 @@ final class PanelPreviewModel {
             }
         }
 
+        // 5. 偏好：UserDefaults 域 + plist 文件（存在才删）
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.clash.app"
+        UserDefaults.standard.removePersistentDomain(forName: bundleID)
+        let preferencesURL = AppPaths.preferencesPlistURL
+        if fileManager.fileExists(atPath: preferencesURL.path) {
+            do {
+                try fileManager.removeItem(at: preferencesURL)
+            } catch {
+                return "删除偏好设置失败：\(error.localizedDescription)"
+            }
+        }
+
+        // 内存态跟上：配置正文已删，策略组快照必须作废，否则面板还挂着上一份配置的卡片
+        profiles.forgetAllAfterCleanup()
+        proxies.clear()
+        isGroupDataStale = false
+        pruneRouteIfTargetMissing()
         connectionState = .off
         return nil
     }

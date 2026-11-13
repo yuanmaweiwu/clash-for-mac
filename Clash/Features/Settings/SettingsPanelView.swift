@@ -4,10 +4,11 @@ import SwiftUI
 /// 二级面板：设置（`docs/02-UI-SPEC.md` §4.9）。
 ///
 /// 与「策略组详情」「订阅管理」一样推入：同宽 340、面包屑返回、内容可滚动（隐藏滚动条）、
-/// 无底栏、底部留 12pt。三段：**代理 / 订阅 / 组件与维护**——行高 32，label 左、控件右，
-/// 分组靠 16pt 间距与 11pt 小标题区分，**不画横线**。
+/// 无底栏、底部留 12pt。五段：**代理 / 订阅 / 下载 / 组件与维护 / 存储**——行高 32，label 左、
+/// 控件右，分组靠 16pt 间距与 11pt 小标题区分，**不画横线**。
 ///
-/// 每次改动立即落盘（`SettingsStore` 原子写），写失败在页内显示红字，不静默。
+/// 设置改动持久化：下拉 / 开关立即落盘，文本字段 300ms 合并写（`SettingsStore`），
+/// 写失败在页内显示红字，不静默。
 /// 只保留必要的系统弹窗：授权密码框、`NSOpenPanel`、完全清理 / 卸载组件的破坏性确认。
 @MainActor
 struct SettingsPanelView: View {
@@ -24,6 +25,10 @@ struct SettingsPanelView: View {
     @State private var showsCleanupConfirmation = false
     @State private var showsUninstallConfirmation = false
     @State private var helper: HelperComponentModel
+    /// 「存储」一节：目录清单（随组件是否安装变化）+ 各目录体积
+    @State private var storageTargets: [StorageTarget] = []
+    @State private var storageStates: [StorageTarget.Kind: StorageSizeState] = [:]
+    @State private var isMeasuringStorage = false
 
     init(model: PanelPreviewModel, settings: SettingsStore, onBack: @escaping () -> Void) {
         self.model = model
@@ -52,6 +57,7 @@ struct SettingsPanelView: View {
                     subscriptionSection
                     downloadSection
                     componentSection
+                    storageSection
 
                     if let error = settings.lastError {
                         noticeText(error, isError: true)
@@ -66,14 +72,15 @@ struct SettingsPanelView: View {
         .frame(width: contentWidth, height: contentHeight)
         .onAppear {
             syncLoginItemState()
+            refreshStorageUsage()
             Task { await helper.refresh() }
         }
         // 破坏性确认属于「必要的弹窗」：清理不可撤销，点错一次要丢全部本地数据
-        .alert("完全清理？", isPresented: $showsCleanupConfirmation) {
+        .alert("彻底清理？", isPresented: $showsCleanupConfirmation) {
             Button("取消", role: .cancel) {}
             Button("清理", role: .destructive) { runCleanup() }
         } message: {
-            Text("将还原系统代理、停止内核，并删除订阅配置、运行配置、内核数据、日志与代理快照。App 本身与设置会保留。此操作不可撤销。")
+            Text("将删除订阅、内核、缓存与偏好；会先还原系统代理并停止内核 / TUN。已安装的特权组件需到「组件」里单独卸载。App 本身保留，完成后需重启。此操作不可撤销。")
         }
     }
 
@@ -385,20 +392,121 @@ struct SettingsPanelView: View {
                 Button {
                     showsCleanupConfirmation = true
                 } label: {
-                    Text("完全清理…")
+                    Text("彻底清理…")
                         .font(Typography.caption)
                         .foregroundStyle(Theme.error)
                         .frame(height: Metrics.hitTarget)
                 }
                 .buttonStyle(.borderless)
                 .disabled(isCleaningUp)
-                .accessibilityHint(Text("还原系统代理、停止内核并删除本地数据，App 本身保留"))
+                .accessibilityHint(Text("还原系统代理、停止内核 / TUN，删除数据、缓存与偏好；App 本身保留"))
             }
             .frame(height: Metrics.formRowHeight)
 
             if let maintenanceNotice {
                 noticeText(maintenanceNotice, isError: maintenanceFailed)
             }
+        }
+    }
+
+    // MARK: - 段五：存储
+
+    private var storageSection: some View {
+        section("存储") {
+            ForEach(storageTargets) { target in
+                storageRow(target)
+            }
+
+            HStack(spacing: Space.s) {
+                Text("体积按磁盘占用统计；缓存可安全删除")
+                    .font(Typography.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 4)
+
+                Button(isMeasuringStorage ? "计算中…" : "刷新") {
+                    refreshStorageUsage()
+                }
+                .controlSize(.small)
+                .buttonStyle(.borderless)
+                .disabled(isMeasuringStorage)
+            }
+            .frame(height: Metrics.formRowHeight)
+        }
+    }
+
+    /// 一行 = 名称 + 短路径 + 体积 + 在访达中显示
+    private func storageRow(_ target: StorageTarget) -> some View {
+        HStack(spacing: Space.s) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(target.title)
+                    .font(Typography.body)
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+
+                Text(target.displayPath)
+                    .font(Typography.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(target.url.path)
+            }
+
+            Spacer(minLength: 4)
+
+            Text(storageSizeText(for: target))
+                .font(Typography.caption)
+                .foregroundStyle(Theme.textSecondary)
+                .monospacedDigit()
+                .lineLimit(1)
+
+            IconButtonView(systemName: "folder", label: "在访达中显示") {
+                revealInFinder(target)
+            }
+        }
+        .frame(height: Metrics.formRowHeight + 8)
+    }
+
+    private func storageSizeText(for target: StorageTarget) -> String {
+        switch storageStates[target.kind] ?? .loading {
+        case .loading: "计算中…"
+        case .bytes(let bytes): TrafficFormat.bytes(bytes)
+        case .unavailable(let reason): reason
+        }
+    }
+
+    private func revealInFinder(_ target: StorageTarget) {
+        // 目录不存在时退到父目录，避免按钮点了没反应
+        let url = FileManager.default.fileExists(atPath: target.url.path)
+            ? target.url
+            : target.url.deletingLastPathComponent()
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    /// 进入页面 / 点「刷新」时算一次；体积全部在后台，body 里只读结果
+    private func refreshStorageUsage() {
+        let targets = StorageUsageProbe.targets(includeHelper: HelperInstaller.isInstalled)
+        storageTargets = targets
+        for target in targets {
+            storageStates[target.kind] = .loading
+        }
+        isMeasuringStorage = true
+
+        Task {
+            var measured: [StorageTarget.Kind: StorageSizeState] = [:]
+            await withTaskGroup(of: (StorageTarget.Kind, StorageSizeState).self) { group in
+                for target in targets {
+                    group.addTask {
+                        (target.kind, await StorageUsageProbe.measure(target.url))
+                    }
+                }
+                for await (kind, state) in group {
+                    measured[kind] = state
+                }
+            }
+            storageStates = measured
+            isMeasuringStorage = false
         }
     }
 
@@ -553,7 +661,7 @@ struct SettingsPanelView: View {
             let error = await model.performFullCleanup()
             isCleaningUp = false
             maintenanceFailed = error != nil
-            maintenanceNotice = error ?? "已清理，订阅与内核数据已删除"
+            maintenanceNotice = error ?? "已清理。请退出并重新打开 Clash（不会自动退出），以便重建数据目录。"
         }
     }
 }

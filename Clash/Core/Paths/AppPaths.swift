@@ -21,6 +21,23 @@ enum AppPaths {
         supportDirectory.appending(path: "settings.json")
     }
 
+    /// `~/Library/Caches/com.clash.app`：可再生的缓存（「完全清理」会删掉）。
+    ///
+    /// 不在这里 `ensure()`：没有缓存时不该凭空建目录，删除时也允许不存在。
+    static var cachesDirectory: URL {
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? URL.homeDirectory.appending(path: "Library/Caches", directoryHint: .isDirectory)
+        return base.appending(path: "com.clash.app", directoryHint: .isDirectory)
+    }
+
+    /// `~/Library/Preferences/com.clash.app.plist`（「完全清理」按存在与否删除）
+    static var preferencesPlistURL: URL {
+        let base = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first
+            ?? URL.homeDirectory.appending(path: "Library", directoryHint: .isDirectory)
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.clash.app"
+        return base.appending(path: "Preferences/\(bundleID).plist")
+    }
+
     /// `profiles/`：用户配置原样保存
     static let profilesDirectory = ensure(
         supportDirectory.appending(path: "profiles", directoryHint: .isDirectory),
