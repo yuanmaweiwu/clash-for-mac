@@ -16,6 +16,8 @@
 - [x] 路线图：`docs/03-ROADMAP.md`（v0.1 → v1.0 + 风险登记）
 - [x] ADR 0001–0005（自带内核 / macOS 15 / 手写 xcodeproj / TUN 与 helper 进 v1 / Yams 定案）
 - [x] 依赖定案：`Yams` 为唯一第三方解析库，Sparkle 到 v1.0；界面中文为主、预留本地化
+- [x] 技能补齐：`core-process`（内核/API/TUN）、`menubar-ui`（状态栏/浮层）
+- [x] 内核获取：`Scripts/fetch-kernel.sh` 取上游 latest + lipo 合成通用二进制；已实测 v1.19.34（x86_64+arm64）
 
 ## 进行中
 
@@ -26,7 +28,7 @@
 1. 收 UI 规范 → 与用户过一遍视觉方向再定稿
 2. 补齐技能（全部项目级）：`core-process`、`menubar-ui`、`system-proxy`、`build-release`
 3. v0.1 骨架：`.xcodeproj`（App / Helper / Tests）+ `MenuBarExtra` 空面板 + helper 安装 + 内核启停 + `/version`
-4. 探索 mihomo 二进制来源与签名方式（arm64/x86_64 通用包）
+4. 内核签名与 helper spawn 校验方案（v0.1 内落地）
 
 ## 关键上下文（续作必读）
 
