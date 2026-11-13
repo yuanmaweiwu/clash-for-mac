@@ -43,7 +43,7 @@ struct SubscriptionNewPanelView: View {
 
                 Text("导入前会用内核校验；失败不会覆盖已有配置")
                     .font(Typography.caption)
-                    .foregroundStyle(Theme.textTertiary)
+                    .foregroundStyle(Theme.textSecondary)
 
                 actions
                     .padding(.top, Space.xs)
@@ -91,7 +91,6 @@ struct SubscriptionNewPanelView: View {
             Button("导入") { submit() }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
-                .font(.system(size: 13, weight: .medium))
                 .disabled(trimmed.isEmpty)
                 .frame(height: Metrics.hitTarget)
         }

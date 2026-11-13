@@ -120,7 +120,7 @@ enum Theme {
 
     static let textPrimary = Color(nsColor: clashDynamicColor(light: clashRGB(0x1D1D1F), dark: clashRGB(0xF5F5F7)))
     static let textSecondary = Color(nsColor: clashDynamicColor(light: clashRGB(0x4A4A4F), dark: clashRGB(0xC7C7CC)))
-    static let textTertiary = Color(nsColor: clashDynamicColor(light: clashRGB(0x6E6E73), dark: clashRGB(0x98989F)))
+    static let textTertiary = Color(nsColor: clashDynamicColor(light: clashRGB(0x66666C), dark: clashRGB(0x98989F)))
     static let textOnAccent = Color(nsColor: clashRGB(0xFFFFFF))
 
     // MARK: 语义色（强调色跟随系统；数据色不跟随）

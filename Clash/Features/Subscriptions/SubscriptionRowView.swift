@@ -76,7 +76,7 @@ struct SubscriptionRowView: View {
                 if let expiry = profile.expiryText {
                     Text(expiry)
                         .font(Typography.caption)
-                        .foregroundStyle(Theme.textTertiary)
+                        .foregroundStyle(Theme.textSecondary)
                         .lineLimit(1)
                 } else {
                     Color.clear.frame(width: 1, height: 13)
