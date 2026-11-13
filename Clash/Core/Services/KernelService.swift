@@ -64,26 +64,34 @@ final class KernelService {
         do {
             let binaryURL = try Self.bundledKernelURL()
             let ports = try PortAllocator.allocateDistinct(2)
-            let config = RuntimeConfigBuilder.make(controllerPort: ports[0], dnsPort: ports[1])
-            try RuntimeConfigBuilder.write(config, to: AppPaths.runtimeConfigURL)
+
+            // 配置来源：CLASH_PROFILE（DEBUG）/ profiles 下唯一一份，都没有则用内置空配置
+            let profileURL = ProfileLocator.locate()
+            let injected = RuntimeConfigBuilder.Injected(
+                controllerPort: ports[0],
+                dnsPort: ports[1],
+                secret: RuntimeConfigBuilder.makeSecret()
+            )
+            let runtimeURL = try RuntimeConfigBuilder.build(from: profileURL, injected: injected)
+            Self.logger.notice("使用配置 profile=\(ProfileLocator.displayName(for: profileURL), privacy: .public)")
 
             // 校验通过才进 starting（core-process §4）
-            try await validateConfiguration(binaryURL: binaryURL, configPath: AppPaths.runtimeConfigURL)
+            try await validateConfiguration(binaryURL: binaryURL, configPath: runtimeURL)
 
             let runner = runner ?? makeRunner(binaryURL: binaryURL)
             phase = .starting
-            let pid = try runner.start(configPath: AppPaths.runtimeConfigURL)
+            let pid = try runner.start(configPath: runtimeURL)
 
-            port = config.controllerPort
-            secret = config.secret
+            port = injected.controllerPort
+            secret = injected.secret
             let client = ClashAPIClient(
-                port: config.controllerPort,
-                secret: config.secret,
+                port: injected.controllerPort,
+                secret: injected.secret,
                 timeout: Self.readinessRequestTimeout
             )
             self.client = client
 
-            Self.logger.notice("内核进程已拉起 pid=\(pid) controller=127.0.0.1:\(config.controllerPort)")
+            Self.logger.notice("内核进程已拉起 pid=\(pid) controller=127.0.0.1:\(injected.controllerPort)")
 
             kernelVersion = try await waitUntilReady(client: client, runner: runner)
             phase = .running

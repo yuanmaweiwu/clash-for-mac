@@ -30,7 +30,15 @@ fi
 echo "==> 产物：$APP"
 pkill -f "Build/Products/Debug/$APP_NAME" 2>/dev/null || true
 sleep 0.5
-open "$APP"
+
+# `open` 不继承 shell 环境：把 DEBUG 用的 CLASH_PROFILE 显式传给 App
+OPEN_ARGS=()
+if [[ -n "${CLASH_PROFILE:-}" ]]; then
+  OPEN_ARGS+=(--env "CLASH_PROFILE=$CLASH_PROFILE")
+  echo "==> 配置：$CLASH_PROFILE（CLASH_PROFILE）"
+fi
+
+open ${OPEN_ARGS[@]+"${OPEN_ARGS[@]}"} "$APP"
 sleep 2
 if pgrep -f "Build/Products/Debug/$APP_NAME" >/dev/null; then
   echo "==> 已启动（菜单栏图标可见，无 Dock 图标）"
