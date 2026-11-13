@@ -27,5 +27,12 @@ App bundle 内自带 `mihomo` 可执行文件，由 helper 以子进程方式管
 - 需处理二进制签名（同样用 Hardened Runtime）、架构（arm64 + x86_64 通用二进制）
 - 需跟随上游升级；升级节奏由我们自己排，不追最新
 - **GPL-3.0 合规**：mihomo 以独立进程调用（非链接），随包提供 `LICENSE` 与源码获取地址；发布页需说明
-- 包体积增加约 15–30MB（压缩后更小），可接受
+- 包体积：通用二进制约 115MB（arm64 + x86_64 各自约 40MB，`lipo` 合成后 117MB），DMG 压缩后预计 30–40MB，待实测
 - 内核缺失/签名失败必须在 UI 里有明确错误码，不允许静默启动失败
+
+## 补充 · 版本策略（2026-11-13 用户确认）
+
+- 取上游 **latest release**，不为稳定性锁旧版；风险由「发布前实测 + 可回退」承担
+- 上游不提供 universal 资产：`Scripts/fetch-kernel.sh` 下载 arm64 与 amd64 基线包后 `lipo -create`
+- 可复现性：`Resources/Kernel/VERSION` + `SHA256` 入库，二进制本身不入库
+- 升级内核单独一条 commit，message 带版本号；升级后必须跑一遍「启动 → API → TUN 开关 → 停止」

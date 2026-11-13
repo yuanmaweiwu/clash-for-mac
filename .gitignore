@@ -1,1 +1,10 @@
 .DS_Store
+xcuserdata/
+DerivedData/
+
+# 内核二进制由 Scripts/fetch-kernel.sh 生成，不入库（VERSION / SHA256 入库）
+Resources/Kernel/mihomo
+
+# 本地运行配置与日志
+Resources/Kernel/runtime/
+*.log
