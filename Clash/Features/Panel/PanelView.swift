@@ -10,7 +10,6 @@ struct PanelView: View {
     let model: PanelPreviewModel
     var onClose: () -> Void = {}
 
-    @Environment(\.openWindow) private var openWindow
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var panelShape: RoundedRectangle {
@@ -190,7 +189,7 @@ struct PanelView: View {
 
     /// 底栏「日志」/ 失败 banner：打开独立日志窗口（单例，重复点击只聚焦），并收起面板浮层
     private func openLogs() {
-        openWindow(id: AppWindow.logsID)
+        AppEnvironment.shared.openLogsWindow()
         // LSUIElement 应用不会自动到前台，窗口不激活的话用户看不到刚打开的日志
         NSApp.activate(ignoringOtherApps: true)
 
