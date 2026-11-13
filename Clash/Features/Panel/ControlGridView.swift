@@ -8,10 +8,10 @@ struct ControlGridView: View {
     var body: some View {
         VStack(spacing: Metrics.tileGap) {
             HStack(spacing: Metrics.tileGap) {
-                ConnectionTileView(status: model.status) {
+                ConnectionTileView(state: model.connectionState) {
                     model.toggleConnection()
                 }
-                .disabled(model.isKernelBusy)
+                .disabled(model.isConnectionBusy)
                 ProxyModeTileView(mode: model.mode) { mode in
                     model.selectMode(mode)
                 }

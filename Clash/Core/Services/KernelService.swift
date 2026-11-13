@@ -33,6 +33,9 @@ final class KernelService {
     private static let readinessRequestTimeout: TimeInterval = 1
     private static let logTailLineCount = 20
 
+    /// App 退出前的清理钩子（系统代理必须先于内核还原，顺序不能反）。
+    /// 由组合根（`PanelPreviewModel`）挂上，`KernelService` 只负责在退出时先调用它。
+    @ObservationIgnored var onWillTerminate: (@MainActor () -> Void)?
     @ObservationIgnored private var runner: KernelRunner?
     @ObservationIgnored private var client: ClashAPIClient?
     @ObservationIgnored private var userInitiatedStop = false
@@ -51,6 +54,8 @@ final class KernelService {
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated {
+                // 顺序不能反：先还原系统代理，再发 SIGTERM（否则会留下指向死端口的代理）
+                self?.onWillTerminate?()
                 self?.shutdownForTermination()
             }
         }

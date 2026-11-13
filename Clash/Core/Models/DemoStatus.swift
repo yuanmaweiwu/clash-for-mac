@@ -3,8 +3,9 @@ import Foundation
 
 /// 面板状态条的六种演示状态（对齐 `docs/02-UI-SPEC.md` §3.3）。
 ///
-/// v0.1 只会出现 `idle` / `starting` / `ready` / `failed`（ADR-0007：无系统代理）；
-/// `proxying` / `direct` 要等 v0.2 接管流量后才会被算出来。
+/// 六种都会出现：`proxying` 需要「内核 running + 系统代理读回校验通过」，
+/// `direct` 由代理模式算出来。`showsLiveTraffic` 仍为 false（`/traffic` 未接），
+/// 所以速率位显示 `—`。
 enum DemoStatus: String, CaseIterable, Identifiable, Sendable {
     case idle
     case starting
