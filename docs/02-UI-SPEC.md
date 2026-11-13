@@ -48,10 +48,12 @@
 
 | Token | 用途 | Light | Dark |
 |---|---|---|---|
-| `stroke/hairline` | 卡片边、行分隔（1px = 1/displayScale） | `#000000` 0.10 | `#FFFFFF` 0.12 |
+| `stroke/hairline` | 卡片边、行分隔（1px = 1/displayScale；布局里用 1pt 行高，见下） | `#000000` 0.10 | `#FFFFFF` 0.12 |
 | `stroke/emphasis` | hover / 分组边界强化 | `#000000` 0.18 | `#FFFFFF` 0.22 |
 | `stroke/focus` | 键盘焦点环，2pt，外扩 2pt | accent 0.70 | accent 0.70 |
 | `stroke/error` | 失败磁贴 / banner 描边 | `#D70015` 0.30 | `#FF453A` 0.35 |
+
+**分隔线的已知取舍**：`.frame(height: 0.5)` 放进 `VStack` 会被布局取整为 0，整条线消失（实测）。因此卡片内的分隔线用 **1pt 行高**（2x 下 2px），视觉上略重于 0.5pt 卡片描边，可接受；禁止为了凑 0.5pt 再退回 overlay——overlay 会被行背景覆盖。
 
 **阴影规则**：卡片与磁贴**一律不用阴影**，只用描边。面板投影交给 `NSPanel` 原生；若自绘：`#000000` 0.18 / y8 / blur24（Light），`#000000` 0.50（Dark）。禁止多层阴影叠加。
 
@@ -288,7 +290,9 @@
 
 ### 4.7 二级面板（完整节点列表）
 
-同宽同高推入。breadcrumb 行 32pt：`‹`（28pt 热区）+ 组名 `font/title`。列表 `LazyVStack` + `ScrollView`，行规格同 §4.4；支持 ↑/↓ 与首字母跳转。Esc 在二级页返回、在首层关面板。
+同宽同高推入。breadcrumb 行 32pt：`‹`（28pt 热区）+ 组名 `font/title`。列表 `LazyVStack` + `ScrollView`；支持 ↑/↓ 与首字母跳转。Esc 在二级页返回、在首层关面板。
+
+**行规格（二级列表统一）**：行高 44pt（单行名）/ 48pt（两行：名称 + 「N 个节点」或延迟），左右内边距 10pt；hover 胶囊与一级完全同参（`pillInsetH` 6 / `pillInsetV` 4）；当前项名称加粗 + `surface/row-selected` 胶囊，**不加 ✓**。行与行之间不留缝，靠胶囊与 hover 区分。
 
 ---
 
@@ -297,7 +301,7 @@
 由订阅磁贴推入，同宽同高，复用 §4.7 的推入规范。
 
 - **面包屑 32pt**：`‹` + 「订阅」
-- **列表行 48pt**（`radius/row`）：左 16pt 来源图标（URL= `link`、本地=`doc.text`，`text/tertiary`）→ 名称 `font/body` + 第二行 `font/caption` `text/secondary`（`3 小时前更新 · 已用 12.3/100 GB · 12月3日到期`，三段缺一即省，**不补占位**）
+- **列表行 48pt**（`radius/row`）：左 16pt 来源图标（URL= `link`、本地=`doc.text`，`text/tertiary`）→ 名称 `font/body` + 第二行 `font/caption` `text/secondary`（`3 小时前更新 · 12.3/100 GB`，到期信息移到行尾轻量文本 `12/3 到期`，缺字段即省、**不补占位**）。**第二行必须在 340pt 宽度内不截断**：宁可少一段，也不要出现 `…`。
 - **当前激活行**：左侧 3pt `accent/base` 竖条 + 名称加粗（与节点行一致，**不用 ✓**）；其余行无竖条
 - **状态**：更新中 → 行尾 10pt `ProgressView` + 第二行「更新中」；失败 → 行尾 `exclamationmark.triangle.fill`（`warning`）+ 第二行「更新失败，仍在使用旧配置」
 - **行操作**：hover 显示行尾「⋯」按钮 → 菜单（更新 / 切换为当前 / 重命名 / 复制链接 / 删除）；删除当前激活项需先提示「将停止内核」，**不使用**确认弹窗处理普通切换
