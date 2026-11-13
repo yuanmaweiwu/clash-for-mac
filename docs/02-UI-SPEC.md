@@ -1,4 +1,4 @@
-# Clash UI/UX 规范（v1）
+# Clash UI/UX 规范（v2）
 
 > 适用：macOS 15 Sequoia+，纯状态栏应用（`LSUIElement=true`，无 Dock 图标），SwiftUI 为主。
 > 关联：`00-PRODUCT.md`（范围与术语）、`01-ARCHITECTURE.md`（分层与内核状态机）、`03-ROADMAP.md`（里程碑验收）。
@@ -13,7 +13,7 @@
 
 **P2 界面浮在桌面上，不是一页网页** —— 面板由系统材质构成，背后桌面可见。禁止白色实心矩形、顶部品牌大标题、常驻滚动条。参照对象是控制中心与系统弹窗，不是浏览器页面。
 
-**P3 用层级与分隔代替留白装饰** —— 控制中心的密度来自「分组卡 + 极细分隔线 + 小圆角」。面板仅 340pt 宽，任何一处 24pt 空白都是浪费一次点击。
+**P3 用层级与间隙代替分隔线** —— 控制中心的密度来自「分组卡 + 卡间 12pt 间隙 + 小圆角」，卡内不画线。面板仅 340pt 宽，任何一处 24pt 以上的空白都是浪费一次点击；但 8–16pt 的呼吸区必须留足（「挨太近」同样是缺陷）。
 
 **P4 状态双编码：颜色 + 文字** —— 颜色只做加速识别，不承担唯一信息。延迟点必配数字或「超时」，运行状态必配中文短语；灰度截图与色盲用户都必须可读。
 
@@ -25,107 +25,149 @@
 
 ## 2. Design Token
 
-命名 `类别/语义`，落地为 `UI/Tokens/` 常量 + Assets 色彩资产。**视图只引用 token：不写 hex，不写 `if colorScheme == .dark`。**
+命名 `类别/语义`，落地为 `UI/Tokens/Tokens.swift`。**视图只引用 token：不写 hex，不写 `if colorScheme == .dark`。**
 
 ### 2.1 表面层级（共 3 层，禁止第 4 层材质）
 
+面板底永远是 `NSVisualEffectView`（`.popover`，`.behindWindow`）。材质会吃壁纸颜色：深色地图会把面板染成中灰，所以必须有 scrim 把对比度拉回稳定值。
+
 | Token | 用途 | Light | Dark |
 |---|---|---|---|
-| `surface/panel` | 面板底：`NSVisualEffectView`（`.popover`/`.hudWindow`），非自绘 | material | material |
-| `surface/panel-scrim` | 压材质、稳定对比度的叠加层 | `#FFFFFF` 0.22 | `#000000` 0.24 |
-| `surface/card` | 分组卡、磁贴底 | `#FFFFFF` 0.55 | `#FFFFFF` 0.06 |
-| `surface/card-pressed` | 卡片按下 | `#000000` 0.06 | `#FFFFFF` 0.10 |
-| `surface/row-hover` | 行 hover（实测 0.05 在浅色卡上几乎不可见，已加强） | `#000000` 0.08 | `#FFFFFF` 0.10 |
-| `surface/row-selected` | 选中行底 | accent 0.16 | accent 0.22 |
+| `surface/panel` | 面板底：系统材质，非自绘 | material | material |
+| `surface/panel-scrim` | 压壁纸、稳定对比度（**默认档 B**） | `#FFFFFF` 0.42 | `#000000` 0.40 |
+| `surface/card` | 分组卡、磁贴底（默认档 B） | `#FFFFFF` 0.62 | `#FFFFFF` 0.10 |
+| `surface/card-hover` | 卡片 hover | `#E9E9EB` @ card alpha | `#FFFFFF` 0.13 |
+| `surface/card-pressed` | 卡片按下 | `#000000` 0.12 | `#FFFFFF` 0.14 |
+| `surface/row-hover` | 行 hover | `#000000` 0.08 | `#FFFFFF` 0.10 |
+| `surface/row-selected` | 选中行底（跟随系统强调色） | accent 0.14 | accent 0.14 |
 | `surface/track` | 分段控件轨道、骨架块 | `#000000` 0.06 | `#FFFFFF` 0.08 |
-| `surface/opaque` | 需绝对对比的区域：banner、分段选中段 | `#FFFFFF` | `#1E1E20` |
+| `surface/opaque` | 需绝对对比的区域：banner、分段选中段 | `#FDFDFD` | `#1F1F22` |
+
+**背景三档（只切一个枚举，不提供 UI 开关）**
+
+`Theme.scrimStyle` 三档，改默认值即可全局切换：`ScrimStyle` = `.light` / `.balanced`（默认） / `.solid`。
+
+| 档位 | scrim Light / Dark | card Light / Dark | 观感 |
+|---|---|---|---|
+| A 轻透 | 0.28 / 0.28 | 0.58 / 0.07 | 壁纸参与最多，最「浮在桌面上」 |
+| **B 中等（默认）** | **0.42 / 0.40** | **0.62 / 0.10** | 压掉深色地图的染色，卡片仍能分层 |
+| C 实底 | 0.62 / 0.60 | 0.70 / 0.14 | 接近纸白，几乎不透过壁纸 |
 
 **material 与不透明色的分工**
 - material 只做最外层；卡片与行一律半透明 fill，材质全应用只出现一次。开启「提高对比度」或 Reduce Transparency 时，`surface/card` 与 `surface/row-selected` 换用 `surface/opaque` + 描边，保证信息不糊。
-- 必须用不透明色：错误/警告 banner、分段选中段、叠在曲线上方的数值——无法保证壁纸对比度。`surface/panel-scrim` 同样不可省：缺了它，浅色壁纸下的 11pt 次要文字会掉到 3:1 以下。
+- 必须用不透明色：错误/警告 banner、分段选中段、叠在曲线上方的数值——无法保证壁纸对比度。
 
 ### 2.2 描边与阴影
 
 | Token | 用途 | Light | Dark |
 |---|---|---|---|
-| `stroke/hairline` | 卡片边、行分隔（1px = 1/displayScale；布局里用 1pt 行高，见下） | `#000000` 0.10 | `#FFFFFF` 0.12 |
+| `stroke/hairline` | 卡片边（1pt / 1px） | `#000000` 0.10 | `#FFFFFF` 0.12 |
 | `stroke/emphasis` | hover / 分组边界强化 | `#000000` 0.18 | `#FFFFFF` 0.22 |
 | `stroke/focus` | 键盘焦点环，2pt，外扩 2pt | accent 0.70 | accent 0.70 |
 | `stroke/error` | 失败磁贴 / banner 描边 | `#D70015` 0.30 | `#FF453A` 0.35 |
+| `stroke/accent` | 磁贴「开」态描边 | accent 0.40 | accent 0.40 |
 
-**分隔线使用范围**：`stroke/hairline` 只用于**卡片外框**与**状态条底部**。分组卡内部、底部工具行顶部、二级面板的面包屑与底栏**一律不画横线**——横线在同一块毛玻璃上会切碎视觉。另记：`.frame(height: 0.5)` 放进 `VStack` 会被布局取整为 0（实测整条线消失），若确需线，用 1pt 行高或 overlay，但不要在卡内用。
+**分隔线使用范围**：`stroke/hairline` 只用于**卡片外框**与**状态条底部**。分组卡内部、底栏顶部、二级面板的面包屑与底栏**一律不画横线**——横线在同一块毛玻璃上会切碎视觉。
 
-**阴影规则**：卡片与磁贴**一律不用阴影**，只用描边。面板投影交给 `NSPanel` 原生；若自绘：`#000000` 0.18 / y8 / blur24（Light），`#000000` 0.50（Dark）。禁止多层阴影叠加。
+**阴影规则**：卡片与磁贴**一律不用阴影**，只用 fill + 1pt 描边分层。面板投影交给 `NSPanel` 原生（`hasShadow = true`），不自绘、不叠多层。
 
 ### 2.3 文本
 
 | Token | 用途 | Light | Dark |
 |---|---|---|---|
-| `text/primary` | 标题、节点名、当前值 | `#000000` 0.88 | `#FFFFFF` 0.94 |
-| `text/secondary` | 副标题、未选中段、更新时间 | `#000000` 0.55 | `#FFFFFF` 0.62 |
-| `text/tertiary` | 单位、提示、禁用 | `#000000` 0.36 | `#FFFFFF` 0.42 |
+| `text/primary` | 标题、节点名、当前值 | `#1D1D1F` | `#F5F5F7` |
+| `text/secondary` | 副标题、未选中段、更新时间 | `#4A4A4F` | `#C7C7CC` |
+| `text/tertiary` | 单位、提示、禁用 | `#6E6E73` | `#98989F` |
 | `text/on-accent` | 实心强调色上的文字/图标 | `#FFFFFF` | `#FFFFFF` |
+
+正文与次要文字在默认档 B 上实测 ≥4.5:1；`text/tertiary` 用于 11pt 辅助信息，实测 ≥4.5:1（不再用 42% 白这种不到的灰度）。**禁止纯黑 / 纯白**。
 
 ### 2.4 语义色
 
 | Token | 用途 | Light | Dark |
 |---|---|---|---|
-| `accent/base` | 主强调：跟随系统强调色（fallback） | `#007AFF` | `#0A84FF` |
+| `accent/base` | 主强调：**跟随系统强调色**（`NSColor.controlAccentColor`） | 系统 | 系统 |
 | `success` | 代理中、更新成功 | `#1E8E3E` | `#30D158` |
-| `warning` | 降级、待处理（如断连重试） | `#B25000` | `#FFD60A` |
+| `warning` | 降级、待处理、需要授权 | `#B25000` | `#FFD60A` |
 | `error` | 启动失败、授权失败 | `#D70015` | `#FF453A` |
 | `latency/fast` | < 100ms | `#1E8E3E` | `#30D158` |
 | `latency/ok` | 100–300ms | `#A07A00` | `#FFD60A` |
 | `latency/slow` | > 300ms | `#B25000` | `#FF9F0A` |
-| `latency/timeout` | 超时 / 不可用（空心环 + `text/tertiary`） | `#000000` 0.36 | `#FFFFFF` 0.42 |
-| `traffic/down` | 下行面积与图例 | `#007AFF` | `#0A84FF` |
+| `latency/timeout` | 超时 / 不可用（空心环 + `text/tertiary`） | `text/tertiary` | `text/tertiary` |
+| `traffic/down` | 下行面积与图例（数据色，不跟随强调色） | `#007AFF` | `#0A84FF` |
 | `traffic/up` | 上行面积与图例 | `#30B0C7` | `#40C8E0` |
 
-**色彩冲突规则**：强调色由用户系统设置决定。当 `accent/base` 与 `success` 色相差 < 30°（用户选了绿/青），连接磁贴「开」态改用 `text/primary` 实心反白，不用 accent 填充。延迟色阶与流量色**永不跟随强调色**——它们是数据色。
+**强调色只用于「选中 / 激活」**：选中行底、开态图标座、星标、焦点环。不用它铺大面积（标题、整卡、banner），也不用它染正文。延迟色阶与流量色**永不跟随强调色**——它们是数据色。
+
+**色彩冲突规则**：当 `accent/base` 与 `success` 色相差 < 30°（用户选了绿/青），连接磁贴「开」态改用 `text/primary` 实心反白，不用 accent 填充。
 
 ### 2.5 圆角
 
-`radius/panel` 12pt（外框，与系统弹窗一致）· `radius/card` 10pt（分组卡、磁贴）· `radius/row` 6pt（行选中底、chip）· `radius/track` 7pt（轨道，内项 6pt）· `radius/dot` 50%（状态点、延迟点）。约束：同一卡片内不再嵌套 > 6pt 的圆角容器；任何 token 不超过 12pt。
+`radius/panel` 16pt（外框）· `radius/card` 12pt（分组卡、磁贴、设置卡）· `radius/row` 7pt（行选中底、chip）· `radius/track` 7pt（分段轨道）· `radius/control` 6pt（分段选中块、小控件）· `radius/dot` 50%。
 
-### 2.6 间距阶梯（4pt 基准，含 2pt 视觉半格）
+约束：同一容器内不再嵌套 > 6pt 的圆角控件；任何容器圆角不超过 16pt。
 
-`space/hair` 2 · `space/xs` 4 · `space/s` 6 · `space/m` 8 · `space/l` 10 · `space/xl` 12 · `space/2xl` 16 · `space/3xl` 20 · `space/4xl` 24。
-用法：卡片内行距与图标微调 4；行内元素 6；区块之间与磁贴 gap 8–10；面板外边距 12；空态上下留白 20–24。
+### 2.6 间距阶梯（全项目只准用这七个值）
+
+| token | 值 | 用在哪 |
+|---|---|---|
+| `space/hair` | 2 | 图标与文字、行内微调 |
+| `space/xs` | 4 | 标签与其控件 |
+| `space/s` | 6 | 行内元素之间 |
+| `space/m` | 8 | 磁贴之间、底栏与前一个区块 |
+| `space/l` | 12 | 卡片内边距、卡片之间、面板外边距 |
+| `space/xl` | 16 | 区块之间（状态条 → 磁贴 → 曲线 → 策略组） |
+| `space/2xl` | 20 | 面板内主要分区（设置页三段之间） |
+
+**几何锁定（不在阶梯内调整）**：面板固定 340 宽；2×2 磁贴 `153 + 10 + 153 + 12×2 = 340`。除这两处，其余间距一律取上表。
 
 ### 2.7 尺寸
 
 | Token | 值 | 说明 |
 |---|---|---|
-| `size/panel-w` | 340pt | 固定宽，不随内容伸缩（320–360 待微调） |
-| `size/panel-h-max` / `-min` | 656 / 240pt | 超限仅分组区滚动；空态用最小高 |
+| `size/panel-w` | 340pt | 固定宽，不随内容伸缩 |
+| `size/panel-padding` | 12pt | 面板左右 / 上下外边距 |
+| `size/panel-h` | 678pt | 双卡满态自然高 |
+| `size/panel-h-max` / `-min` | 680 / 240pt | 上限；空态用最小高 |
+| `size/panel-h-single` | 530pt | 单卡态自然高 |
+| `size/panel-h-empty` | 498pt | 空态自然高 |
 | `size/status-bar` / `size/footer` | 36 / 32pt | 状态条 / 底部工具行 |
-| `size/tile` | 153×64pt | 磁贴（316 = 153×2 + 10） |
+| `size/control` | 138pt | 2×2 磁贴块（64 + 10 + 64） |
+| `size/tile` | 153×64pt | 磁贴，水平 gap 10（几何锁定） |
 | `size/segment` | 28pt | 分段控件 |
-| `size/row` | 32pt | 节点行；带副标题 36pt |
-| `size/curve-card` / `size/chart` | 80 / 296×40pt | 曲线卡总高 / 绘制区（316 − 卡内边距 10×2） |
-| `size/hit` | ≥28pt | 最小热区（图标视觉 16pt） |
+| `size/chart-card` / `size/chart` | 80 / 36pt | 曲线卡总高 / 绘制区（316 − 12×2 = 292 宽） |
+| `size/group-title` | 28pt | 区块标题（含「全部 ›」28pt 命中区） |
+| `size/card` | 136pt | 分组卡（卡头 32 + 3×32 + 上下 4×2） |
+| `size/breadcrumb` | 40pt | 二级页面包屑 |
+| `size/row` | 32pt | 一级卡片节点行 |
+| `size/list-row` | 48pt | 二级列表行（节点 / 订阅 / 连接 / 策略组） |
+| `size/form-row` | 36pt | 设置页表单行 |
+| `size/hit` | ≥28pt | 最小热区（图标视觉 12–16pt） |
 | `size/dot` | 8pt | 延迟点；状态条状态点 7pt |
 
 ### 2.8 字体（只用系统字体，不引入第三方字体）
 
 | Token | 规格 | 用途 |
 |---|---|---|
-| `font/section` | 11pt / semibold / `text/secondary` | 区块标题 |
+| `font/page-title` | 15pt / semibold | 二级页面标题（面包屑） |
 | `font/title` | 13pt / semibold | 卡片头、选中节点名 |
-| `font/body` | 13pt / regular | 节点名、磁贴标题 |
-| `font/caption` | 11pt / regular | 副标题、单位 |
+| `font/body` | 13pt / regular | 节点名、磁贴标题、设置行 |
+| `font/section` | 11pt / semibold | 区块标题、段名、图例 |
+| `font/caption` | 11pt / regular | 副标题、单位、说明 |
 | `font/number` | 12pt / medium / `.monospacedDigit()` | 延迟、行内速率 |
+| `font/caption-number` | 11pt / medium / `.monospacedDigit()` | 订阅磁贴用量（153pt 宽的极限） |
 | `font/number-lg` | 13pt / medium / `.monospacedDigit()` | 状态条速率 |
-| `font/status` | 12pt / medium | 状态条文案 |
+| `font/status` | 13pt / medium | 状态条文案 |
 
-中文走系统字体（自动 PingFang SC），**不手动指定中文字体**，避免中英混排基线跳动。所有变动数字强制 `monospacedDigit`，否则 1Hz 刷新会左右抖动。
+**只有 11 / 12 / 13 / 15 四档**（旧的 9pt / 10pt 全部收掉）。所有数字强制等宽，否则 1Hz 刷新会左右抖动。中文走系统字体（自动 PingFang SC），**不手动收紧中文字距**；数字与拉丁字母可随字号收 -0.1～-0.15。
 
-**字号与 Dynamic Type 的分工**：状态栏面板是固定尺寸工具面板（与系统控制中心一致），字号固定、**不随 Dynamic Type 放大**；设置窗口、日志、协议文本等自由排版的界面**必须**支持 Dynamic Type。两者都必须响应系统「加粗文本」。
+**字号与 Dynamic Type 的分工**：状态栏面板是固定尺寸工具面板（与系统控制中心一致），字号固定、**不随 Dynamic Type 放大**；设置窗口、日志等自由排版的界面**必须**支持 Dynamic Type。两者都必须响应系统「加粗文本」。
 
 ### 2.9 动效 token
 
-`motion/panel-in` `.spring(response: 0.26, dampingFraction: 0.86)` · `motion/panel-out` `.easeIn(0.12)` · `motion/tile` `.spring(0.28, 0.80)` · `motion/list` `.easeInOut(0.18)` · `motion/push` `.spring(0.32, 0.90)` · `motion/skeleton` `.easeInOut(1.2).repeatForever` · `motion/dot` `.easeInOut(0.25)` · `motion/chart` `.linear(1.0)`。
-场景对应见 §5。
+`motion/panel-in` `.spring(response: 0.24, dampingFraction: 0.88)` · `motion/panel-out` `.easeIn(0.12)` · `motion/tile` `.spring(0.22, 0.82)` · `motion/list` `.easeInOut(0.18)` · `motion/push` `.spring(0.30, 0.90)` · `motion/hover` `.easeOut(0.12–0.16)` · `motion/skeleton` `.easeInOut(1.2).repeatForever` · `motion/chart` `.linear(1.0)`。
+
+**时长区间 150–220ms**（面板进出可到 240ms）；只挂在状态变化上，不做页面级 stagger。Reduce Motion 下所有位移 / 缩放退化为淡入淡出。
 
 ---
 
@@ -149,7 +191,7 @@
 │ 流量             ↓ 8.4 MB/s   ↑ 1.2 MB/s │  曲线卡 80pt
 │ ▁▂▃▅▆▅▄▃▂▁▂▃▅▇▆▅▄▃▂▁▂▃▄▅▆▇▆▅▄▃▂▁▂▃▄▅▆▇▆▅▄│
 ├──────────────────────────────────────────┤
-│ 策略组                            全部 › │  区块标题 20pt
+│ 策略组                            全部 › │  区块标题 28pt
 │ ┌──────────────────────────────────────┐ │
 │ │ 节点选择                  香港 01  › │ │  卡头 32pt
 │ │ ● 香港 01                    32 ms   │ │  节点行 32pt
@@ -166,15 +208,16 @@
 
 | 分区 | 高度 | 内边距 | 内容 |
 |---|---|---|---|
-| 状态条 | 36pt | 左右 12pt | 左：7pt 状态点 + `font/status` 短语；右：`↑`/`↓` + `font/number-lg`。底部 1px hairline |
-| 主控区 | 138pt | 0，磁贴 gap 10 | 2×2 磁贴：连接 / 代理模式 / TUN / 订阅 |
-| 曲线卡 | 80pt | 10pt | 标题行 16pt（`font/section` + 双色图例点 + 数值）+ 间距 4pt + 绘制区 40pt |
-| 分组区 | 自适应 | 0 | 区块标题 20pt（`font/section` + 右侧「全部 ›」）+ N 张卡，卡间 10pt |
+| 状态条 | 36pt | 左右 12pt | 左：7pt 状态点 + `font/status` 短语；右：`↑`/`↓` + `font/number-lg`，两个速率之间 8pt。底部 1px hairline |
+| 主控区 | 138pt | 0，磁贴 gap 10（几何锁定） | 2×2 磁贴：连接 / 代理模式 / TUN / 订阅；磁贴内左右 12pt |
+| 曲线卡 | 80pt | 12pt | 标题行 16pt（`font/section` + 双色图例点 + 数值）+ 间距 4pt + 绘制区 36pt |
+| 分组区 | 自适应 | 0 | 区块标题 28pt（`font/section` + 右侧「全部 ›」28pt 命中区）+ N 张卡，卡间 12pt |
 | 底部行 | 32pt | 左右 12pt | 左：本 App 版本号（`CFBundleShortVersionString`，如 `v0.4.0`，11pt 等宽 `text/tertiary`）；右：**只有**连接列表（`link`）与设置（`gearshape`）两个图标。不放「N 分钟前更新」、刷新按钮、连接数、内核版本号（连接数是用户看不懂的占位，刷新归订阅管理页的 `⋯` 菜单）。**日志入口只在右键菜单**，面板底栏不放 ☰。**不画顶部横线** |
 
-高度预算（2 张卡满态）：36 + 138 + 10 + 80 + 10 + 20 + 136 + 10 + 136 + 10 + 32 = **618pt**；加面板上下内边距 12×2 = **642pt**，上限放宽到 **656pt**。
+高度预算（2 张卡满态）：12（上）+ 36 + 16 + 138 + 16 + 80 + 16 + 28（区块标题）+ 136 + 12 + 136 + 8 + 32（底栏）+ 12（下）= **678pt**；上限 **680pt**。
+- 区块之间统一 16（`space/xl`）；卡片之间 12（`space/l`）；底栏前 8（`space/m`）。
 
-**单卡变体**：未 pin 第二个组时分组区只有 1 张卡，总高 = 618 − 136 − 10 = **472pt**（含内边距 496pt），面板自然收窄，不拉伸留白。
+**单卡变体**：未 pin 第二个组时分组区只有 1 张卡，总高 = 678 − 136 − 12 = **530pt**，面板自然收窄，不拉伸留白。**空态**（未导入配置）= **498pt**。
 
 **banner 不额外增高**：错误/断连 banner 出现时从「分组区」滚动区扣除高度（分组区本就自适应），面板上限不变；因此 banner 与满态 2 张卡不会同时成立——此时分组区自动只露 1 张卡并可滚动。
 
@@ -202,7 +245,7 @@
   1. **选中项恒第一**（切换后立即重排，即使它排在第 9 也提上来）——卡内不能滚，这是「不看高亮也知道现在用哪个」的唯一保证
   2. 其余按**延迟升序**取前 2（低的在前）
   3. 超时 / 未测速的排最后，按配置顺序
-- 卡高 = 卡头 32 + 3×32 + **上下内边距 4×2 = 136pt**
+- 卡高 = 卡头 32 + 3×32 + **上下内边距 4×2 = 136pt**（左右内边距 12）
 - **不设「溢出行」**：早期版本把入口放在第 4 行，会把卡高撑到 156pt 并破坏 626pt 高度预算；入口一律收进卡头右侧。
 - 卡内**不滚动**（嵌套滚动在触控板上极易误触）；**卡片内部不画任何分隔线**（卡头与首行之间也不画）——分隔靠留白 + hover 胶囊，横线会把卡片切碎。
 - 首屏最多 2 张卡，且**只显示被 pin 的组**：默认仅**主组**（= 配置里第一个 `select` 组，名字取自配置，真实订阅里常是机场名如「机场A」，**不要写死「节点选择」**；主组不可 unpin）；第二张由用户在「全部策略组」里星标。未 pin 时不占位，面板收窄到 488pt。
@@ -235,16 +278,16 @@
 
 ### 4.2 总开关磁贴（连接）
 
-**结构** 153×64pt，`radius/card`，`surface/card` + `stroke/hairline`。左 28pt 圆形图标座（`power` 14pt semibold），右侧标题「连接」`font/body` + 副标题 `font/caption`。
+**结构** 153×64pt，`radius/card`，`surface/card` + `stroke/hairline`，左右内边距 12pt。左 28pt 圆形图标座（`power` 14pt semibold），右侧 8pt 后接标题「连接」`font/body` + 副标题 `font/caption`（上下 2pt）。
 
 | 状态 | 图标座 | 底/描边 | 副标题 |
 |---|---|---|---|
 | 关 | `surface/row-hover` + `text/secondary` | 默认 | 已关闭 |
-| 开 | `accent/base` 实心 + `text/on-accent` | 描边改 accent 0.35 | 已开启（`text/primary`） |
+| 开 | `accent/base` 实心 + `text/on-accent` | 描边改 accent 0.40 | 已开启（`text/primary`） |
 | 过渡中 | 14pt `ProgressView`（small） | 同关态 | 正在启动 |
 | 失败 | `error` 0.14 圆底 + `exclamationmark` | `stroke/error` | 启动失败（`error`） |
 
-**交互**：单击切换，乐观更新；1.5s 无回执则回滚并进失败态。hover 底 +0.04，按下 scale 0.98。右键：重启内核 / 查看日志。
+**交互**：单击切换，乐观更新；1.5s 无回执则回滚并进失败态。hover 换 `surface/card-hover`，按下换 `surface/card-pressed` + scale 0.98。右键：重启内核 / 查看日志。
 **语义边界**：这个磁贴只控制系统代理，**不控制内核**。关代理后内核继续运行，节点列表、测速、切换节点全部照常可用；只有当 App 退出、订阅被删空或内核崩溃时内核才停。
 **可访问性**：`.isButton` + `.isSelected`（开时）；label「连接」，value = 副标题，hint 随态切换「按下开启代理」/「按下关闭代理」。
 
@@ -253,18 +296,18 @@
   - **授权前置说明**（首次点「需要授权」时）：先弹我们自己的说明卡，再弹系统密码框。文案：「需要管理员密码安装网络组件，仅此一次」+ 三条说明（只写 `/Library/PrivilegedHelperTools`、只用于开关系统代理与 TUN、可在设置里一键卸载）。用户取消则回到「已关闭」，不重复弹。
   - 系统密码框由 macOS 弹出（`osascript … with administrator privileges`），**我们不经手、不存储密码**；密码错误或用户取消 → 「授权失败」，给「重试」按钮。
   - helper 更新会再要一次密码：届时应显示「组件需要更新，需再次授权」而不是无声失败。
-- **订阅**：纯导航磁贴，无开关态，**不显示「订阅」标题**。153×64，内容区 133pt（左右各 10）、上下各 10pt 呼吸区，**商家名在左上、数据块贴底**：
+- **订阅**：纯导航磁贴，无开关态，**不显示「订阅」标题**。153×64，内容区 129pt（左右各 12）、上下各 12pt 呼吸区，**商家名在左上、数据块贴底**：
   ```
   ┌─────────────────────────┐ 153×64
   │ 机场A                3 │ 13pt 商家名（尾部截断）+ 条数徽标
   │                         │
-  │ 12/3 到期   100.8/128 GB │ 9pt 到期（左）· 10pt 等宽用量（右）
+  │ 12/3 到期   100.8/128 GB │ 11pt 到期（左）· 11pt 等宽用量（右）
   │ ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ │ 3pt 满宽用量条
   └─────────────────────────┘
   ```
   - 商家名 = **当前激活的 profile 名**（`font/body` 13pt，单行 `.truncationMode(.tail)`）；未导入时「未添加」`text/secondary`。更新失败追加「· 更新失败」（「已过期」不进名称，由到期行表达）。
   - 右上角条数徽标：仅订阅库 > 1 条时出现（10pt 等宽，底 `surface/track`），只表示条数，不用彩色。
-  - 数据行（条上方一行）：左到期 `font/micro` 9pt `text/secondary`（`12/3 到期`；已过期显示「已过期」`error`），右用量 `font/number` 10pt 等宽 `text/primary`（`100.8/128 GB`）。**缺 `expire` 时左侧留白，用量照常右对齐**（不许因此改变右缘位置）。
+  - 数据行（条上方一行）：左到期 `font/caption` 11pt `text/secondary`（`12/3 到期`；已过期显示「已过期」`error`），右用量 `font/caption-number` 11pt 等宽 `text/primary`（`100.8/128 GB`）。**缺 `expire` 时左侧留白，用量照常右对齐**（不许因此改变右缘位置）。
   - 用量条：**满宽度**（左右各 10pt 内边距之内）3pt 圆角条，track `surface/track`；条**只做辅助**，数字必须在场；>90% 条与数字同步转 `warning`，≥100% 转 `error`，长度按 100% 封顶。
   - 缺 `download` / `total`（本地 YAML / 无 `subscription-info` 头）→ **不画条也不画数据行**，只留商家名。
   - 空库：只显示「未添加」，不画条、不留空行。
@@ -274,7 +317,7 @@
 
 ### 4.3 分段模式切换（规则 / 全局 / 直连）
 
-**结构** 153×28pt 轨道（`radius/track`，`surface/track`），三段等分，段内 4pt 内边距；选中段 `surface/opaque` + `radius/row` + `font/caption` medium `text/primary`；未选中 `text/secondary`。上方 14pt 标题「代理模式」（`font/caption`，`text/secondary`）。
+**结构** 153×28pt 轨道（`radius/track`，`surface/track`），三段等分，段内 4pt 内边距；选中段 `surface/opaque` + `radius/control` + 11pt semibold `text/primary`；未选中 11pt regular `text/secondary`。上方标题「代理模式」（`font/caption`，`text/secondary`），标题与轨道间距 4pt。
 
 **状态**：默认 / hover（未选中段文字转 `text/primary`）/ 切换中（选中段文字换 12pt `ProgressView`，表示下发配置）/ 失败（选中段描边闪 `error` 一次，400ms 后回真实值）。
 
@@ -283,12 +326,12 @@
 
 ### 4.4 节点行
 
-**结构**（行高 32pt，带副标题时 36pt，左右内边距 10pt）：8pt 延迟点 + `space/s` + 节点名（单行中间截断）+ 弹性空隙 + 延迟（`font/number`，右对齐，右缘距卡边 10pt）。**行尾不设 ✓**。
+**结构**（行高 32pt，左右内边距 12pt）：8pt 延迟点 + `space/s` + 节点名（单行中间截断）+ 弹性空隙 + 延迟（`font/number`，右对齐，右缘距卡边 12pt）。**行尾不设 ✓**。
 
 | 状态 | 表现 |
 |---|---|
 | 默认 | 延迟点按色阶；名称 `text/primary` |
-| hover | `surface/row-hover` + `radius/row`；胶囊左右内缩 **6pt**、上下内缩 **2pt**（高 28pt），文字距胶囊边 4pt |
+| hover | `surface/row-hover` + `radius/row`；胶囊左右内缩 **6pt**、上下内缩 **2pt**（高 28pt），文字距胶囊边 6pt |
 | 选中 | `surface/row-selected` + 名称 `font/title`（加粗）；**不加 ✓**——浅蓝底 + 字重即选中信号。几何与 hover 胶囊完全一致（同样 6/2 内缩） |
 | 超时 / 不可用 | 1pt 空心环，名称 40% 透明，延迟位「超时」，禁用交互 |
 | 嵌套策略组 | 延迟点换 16pt `square.stack.3d.up`，右侧 `chevron.right`，副标题「策略组」→ 二级面板 |
@@ -299,33 +342,33 @@
 
 ### 4.5 迷你流量曲线
 
-**结构** 296×40pt 绘制区（卡内 316 − 内边距 20）；上行在下、下行在上，允许重叠但以 0.18 填充 + 1.5pt 顶线区分；标题行含 6pt 双色图例点与右侧数值。
+**结构** 292×36pt 绘制区（卡内 316 − 内边距 24）；上行在下、下行在上，允许重叠但以 0.18 填充 + 1.5pt 顶线区分；标题行含 6pt 双色图例点与右侧数值。
 **数据与格式** 60 点 / 1Hz / 窗口 60s；Y 轴自适应（取窗口峰值，最小刻度 1 KB/s）；不画网格、坐标轴、时间刻度；数值按 `B/s → KB/s → MB/s` 换算，保留 1 位小数，`monospacedDigit`，上下行顺序与图例一致。
 **空态** 仅一条 `stroke/hairline` 水平虚线 + 居中「暂无流量」（`font/caption`，`text/tertiary`）；**断连态** 曲线 30% 透明，数值变「—」。
 **可访问性** 容器 `children: .ignore`；label「实时流量」，value「下载 8.4 兆字节每秒，上传 1.2 兆字节每秒」。**不加** `.updatesFrequently`（1Hz 会打断正在朗读的内容），改为焦点进入时朗读一次。
 
 ### 4.6 卡片分组容器
 
-`surface/card` + `radius/card` + 外框描边（**只有这一条线**）。
+`surface/card` + `radius/card`（12）+ 外框描边（**只有这一条线**）。
 
 - **描边必须连续清晰**：1pt 线宽 + `compositingGroup()` 把「填充 + 描边」合成一层。0.5pt 在 2x 屏上会铺成 2–3px 的半透明过渡带，圆角处还会断，看起来就是毛边。
 - **卡内上下各留 4pt 内边距**：卡头 hover 胶囊与末行胶囊距卡顶/卡底 = 4（内边距）+ 2（胶囊内缩）= **6pt**。只留 2pt 时胶囊会贴着圆角，像被切掉一块。
-- 可选卡头 32pt（标题左、action 右）；卡内左右边距 10pt；**卡内无任何分隔线**（含卡头与首行之间），行与行靠 hover / 选中胶囊区分。
+- 可选卡头 32pt（标题左、action 右）；卡内左右边距 12pt；**卡内无任何分隔线**（含卡头与首行之间），行与行靠 hover / 选中胶囊区分。
 
 **胶囊几何（一级卡片）**：行高 32pt，胶囊高 **28pt**（上下各 2pt）、左右各 6pt；卡头 hover 胶囊同参。24pt 的胶囊配 13pt 文字会显得扁（上下各 5.5pt），28pt 才站得住。距卡边的呼吸区由卡片 4pt 内边距提供，合计 6pt。
 
-规则：一卡一语义单元；禁止卡片套卡片；禁止阴影；卡间 gap 固定 10pt。
+规则：一卡一语义单元；禁止卡片套卡片；禁止阴影；卡间 gap 固定 12pt。
 
 ### 4.7 二级面板（完整节点列表）
 
-同宽同高推入。breadcrumb 行 32pt：`‹`（28pt 热区）+ 组名 `font/title`，**不显示当前节点名**（选中态已有底色，重复）；右侧放**批量测速按钮**（`speedometer` 16pt，热区 28pt，label「测速全部节点」）。
+同宽同高推入。breadcrumb 行 40pt：`‹`（28pt 热区）+ 组名 `font/page-title`，**不显示当前节点名**（选中态已有底色，重复）；右侧放**批量测速按钮**（`speedometer` 16pt，热区 28pt，label「测速全部节点」）。
 - 点击后：所有行延迟位进入「测速中」（10pt `ProgressView`），1–2s 后数值刷新并重排
 - **测速进行中按钮必须禁用且不可重复触发**：图标换成 12pt `ProgressView`，hover 不出高亮、点击无响应（不是「排进队列」也不是「重启一轮」）；测速结束后恢复可点。防止用户连点导致多轮竞态、结果互相覆盖
 - 列表 `LazyVStack` + `ScrollView`；支持 ↑/↓ 与首字母跳转。Esc 在二级页返回、在首层关面板。**面包屑与底栏都不画横线**。
 
 **排序**：二级节点列表默认按**延迟升序**（超时/未测速排最后，同延迟按配置顺序）；批量测速完成后自动重排，用交叉淡入，不要整列跳动。组列表（「全部策略组」）保持配置顺序，不按延迟排。
 
-**行规格（二级列表统一）**：行高 44pt（单行名）/ 48pt（两行：名称 + 「N 个节点」或延迟），左右内边距 10pt；hover 胶囊与一级完全同参（`pillInsetH` 6 / `pillInsetV` 4）；当前项名称加粗 + `surface/row-selected` 胶囊，**不加 ✓**。行与行之间不留缝，靠胶囊与 hover 区分。
+**行规格（二级列表统一）**：行高 48pt（单行名 / 两行：名称 + 「N 个节点」或延迟），左右内边距 12pt；hover 胶囊与一级同参（`pillInsetH` 6 / `pillInsetV` 4）；当前项名称加粗 + `surface/row-selected` 胶囊，**不加 ✓**。行与行之间不留缝，靠胶囊与 hover 区分。
 
 ---
 
@@ -333,8 +376,8 @@
 
 由订阅磁贴推入，同宽同高，复用 §4.7 的推入规范。
 
-- **面包屑 32pt**：`‹` + 「订阅」
-- **列表行 48pt**（`radius/row`）：左 16pt 来源图标（URL= `link`、本地=`doc.text`，`text/tertiary`）→ 名称 `font/body` + 第二行 `font/caption` `text/secondary`（`3 小时前更新 · 12.3/100 GB`，到期信息移到行尾轻量文本 `12/3 到期`，缺字段即省、**不补占位**）。**第二行必须在 340pt 宽度内不截断**：宁可少一段，也不要出现 `…`。
+- **面包屑 40pt**：`‹` + 「订阅」
+- **列表行 48pt**（`radius/row`）：左 12pt 内边距 + 16pt 来源图标（URL= `link`、本地=`doc.text`，`text/tertiary`）→ 8pt → 名称 `font/body` + 第二行 `font/caption` `text/secondary`（`3 小时前更新 · 12.3/100 GB`，到期信息移到行尾轻量文本 `12/3 到期`，缺字段即省、**不补占位**）。**第二行必须在 340pt 宽度内不截断**：宁可少一段，也不要出现 `…`。
 - **当前激活行**：左侧 3pt `accent/base` 竖条 + 名称加粗（与节点行一致，**不用 ✓**）；其余行无竖条
 - **状态**：更新中 → 行尾 10pt `ProgressView` + 第二行「更新中」；失败 → 行尾 `exclamationmark.triangle.fill`（`warning`）+ 第二行「更新失败，仍在使用旧配置」
 - **行操作**：hover 显示行尾「⋯」按钮 → 菜单（更新 / 切换为当前 / 重命名 / 复制链接 / 删除）；删除当前激活项需先提示「将停止内核」，**不使用**确认弹窗处理普通切换
@@ -353,7 +396,7 @@
 
 - 路由 `.settings`，同宽 340，面包屑 `‹ 设置`，内容可滚动（隐藏滚动条），底部留白 12pt，无底栏
 - 三段：**代理**（混合端口 / 允许局域网 / 关代理保留内核）、**订阅**（UA / 默认更新间隔）、**组件与维护**（特权组件状态 + 操作、开机自启、日志级别、打开目录、完全清理）
-- 行高 32pt：label 左、控件右（开关、64pt 数字框、`Menu` 选择、小按钮）；分组用 16pt 间距 + 11pt 小标题，**不画横线**
+- 每段 = 11pt 段名 + 一张卡（`surface/card` / `radius/card` / 1pt 描边，内边距 12）；段与段之间 20pt。行高 36pt：label 13pt 左、控件右（系统开关、64pt 数字框、`Menu`、系统尺寸按钮）；**卡内不画横线**
 - 端口/日志级别改动后，页内出现一条「需要重启内核生效 · 立即重启」提示行
 - 入口：底栏 ⚙ 与 `⌘,` 都推入该页（面板未开时先开面板）
 - **仍然允许弹窗的**：系统授权密码框、`NSOpenPanel`、完全清理的破坏性确认
@@ -361,7 +404,7 @@
 ### 4.10 添加订阅（面板内页面）
 
 - 路由 `.subscriptionNew`，面包屑 `‹ 添加订阅`
-- URL 输入框占满宽度 + 一行说明「导入前会用内核校验；失败不会覆盖已有配置」+ 主按钮「导入」+ 次级「选择 YAML…」
+- URL 输入框占满宽度（系统 `.roundedBorder`，13pt，regular 尺寸）+ 一行说明「导入前会用内核校验；失败不会覆盖已有配置」+ 主按钮「导入」（prominent）+ 次级「选择 YAML…」（bordered）；间距 12pt，动作行命中区 28pt
 - 导入中：按钮换 `ProgressView` + 「正在获取…」，输入框禁用
 - 失败：输入框下方红色文案（**不弹 alert**）
 - 成功：自动返回订阅页并选中新项
@@ -370,15 +413,15 @@
 
 | 场景 | 表现 | 参数 | Reduce Motion 降级 |
 |---|---|---|---|
-| 面板出现 | 透明度 0→1 + 上移 6pt | `motion/panel-in` | 仅淡入 120ms，无位移 |
+| 面板出现 | 透明度 0→1 + 上移 6pt | `motion/panel-in`（0.24 / 0.88） | 仅淡入 120ms，无位移 |
 | 面板消失 | 淡出 + 下移 4pt | `motion/panel-out` | 仅淡出 80ms |
-| 磁贴开关 | 图标座底色过渡 + 图标 `.symbolEffect(.replace)` + 整卡 0.98 | `motion/tile` | 不缩放、不做符号替换，仅颜色 0.15s |
+| 磁贴开关 | 图标座底色过渡 + 图标 `.symbolEffect(.replace)` + 整卡 0.98 | `motion/tile`（0.22 / 0.82） | 不缩放、不做符号替换，仅颜色 0.15s |
 | 分段选中 / 列表选中 | 选中段位移 + 底色；行底淡入 + 名称字重过渡 | `motion/list` | 跳过位移，仅底色 |
-| 二级面板推入 | 横向 16pt + 淡入，旧内容降 0.3 透明度 | `motion/push` | 交叉淡入 150ms |
+| 二级面板推入 | 横向 16pt + 淡入，旧内容降 0.3 透明度 | `motion/push`（0.30 / 0.90） | 交叉淡入 150ms |
 | 加载骨架 | 3 个等高灰块呼吸（0.35↔0.65） | `motion/skeleton` | 静态 `surface/track` 块 |
 | 曲线更新 | 每 1s 左插新点、整体左移 1px | `motion/chart` | 关闭位移插值，改 5s 批量刷新 |
 
-**约束**：全应用只有这 7 处动画；不做页面级 stagger、hover 弹跳、滚动视差。一次交互只跑一条动画，且必须挂在 `.animation(_:value:)` 上。
+**约束**：全应用只有这几处动画，时长 150–220ms（面板进出 240ms 内）；不做页面级 stagger、hover 弹跳、滚动视差。一次交互只跑一条动画，且必须挂在 `.animation(_:value:)` 上。hover / press 只改底色，位移不超过 1–2pt。
 
 ---
 
@@ -419,7 +462,7 @@
 
 | 场景 | 文案 | 视觉处理 |
 |---|---|---|
-| 未导入配置 | 「还没有配置」 | 分组区换占位卡（高 120pt）：`tray` 24pt `text/tertiary` 居中 + 文案 + 「导入订阅」（accent 28pt 填充按钮）与「选择 YAML」（文字按钮）。订阅磁贴副标题「未添加」 |
+| 未导入配置 | 「还没有配置」 | 分组区换占位卡（高 132pt，`radius/card`）：`tray` 24pt `text/tertiary` 居中 + 文案 + 「导入订阅」（prominent）与「选择 YAML」（文字按钮）。订阅磁贴副标题「未添加」 |
 | 内核启动失败 | 「内核启动失败，点此查看日志」 | 顶部 banner（`surface/opaque` + `stroke/error`，36pt，整条可点）；状态条点转 `error`「启动失败」；连接磁贴进失败态；分组区 45% 不透明且禁用 |
 | 订阅更新失败 | 「更新失败，继续使用旧配置」 | 订阅管理页顶部提示条（3s 后自动消失）+ 该行转「更新失败，仍在使用旧配置」；订阅磁贴名称后追加「· 更新失败」；不弹窗、不占用底栏 |
 | API 断连 | 「与内核的连接中断，正在重试…」 | 顶部 banner（`warning` 0.12 底 + 12pt `ProgressView`）；状态条「连接中断」、速率「—」；曲线 30% 透明；交互禁用但保留最后数据，区块标题右侧加「数据可能已过期」 |
@@ -452,13 +495,13 @@
 ## 9. 验收标准
 
 **结构**
-- [ ] 面板固定宽 340pt（内容区 316pt），最大高 656pt，空态最小高 240pt；单卡态 496pt
+- [ ] 面板固定宽 340pt（内容区 316pt），最大高 680pt，空态最小高 240pt；单卡态 530pt、空态 498pt、双卡满态 678pt
 - [ ] 滚动时状态条、主控区、曲线卡、底部行固定，仅分组区滚动；分组卡内无嵌套滚动，溢出走「还有 N 个 ›」
-- [ ] 656pt 内可见 4 个磁贴 + 曲线 + 2 张分组卡（各 3 节点行），实测总高 642pt
+- [ ] 680pt 内可见 4 个磁贴 + 曲线 + 2 张分组卡（各 3 节点行），实测总高 678pt
 
 **视觉**
 - [ ] View 层无 hex 硬编码；深浅色只靠 token，无 `colorScheme` 分支
-- [ ] material 仅出现在面板底；卡片为半透明 fill + 1px 描边、无阴影、圆角全来自 token（最大 12pt、无嵌套）
+- [ ] material 仅出现在面板底；卡片为半透明 fill + 1px 描边、无阴影、圆角全来自 token（面板 16 / 卡片 12 / 行 7，无嵌套）
 - [ ] 速率与延迟刷新时宽度不抖动（`monospacedDigit` 生效）
 - [ ] 系统强调色为绿/青时，连接磁贴「开」态自动转反白实心（§2.4）
 
@@ -467,12 +510,12 @@
 - [ ] 磁贴四态齐全：关 / 开 / 过渡中 / 失败，且 1.5s 超时回滚生效；TUN 覆盖「需要授权 → 等待授权 → 已开启」，失败时回落系统代理并出 banner
 - [ ] 模式切换为乐观更新，失败时描边闪一次并回到真实值
 - [ ] 节点行选中态 = 底色 + 字重加粗，**行尾无 ✓**；超时节点为空心环 + 「超时」且不可点
-- [ ] 一级卡片胶囊 28pt（上下各 2pt、左右各 6pt），卡内上下各留 4pt → 距卡边 6pt；二级列表胶囊 6/4；卡内无任何分隔线
+- [ ] 一级卡片胶囊 28pt（上下各 2pt、左右各 6pt），卡内上下各留 4pt → 距卡边 6pt；二级列表行高 48、胶囊 6/4；卡内无任何分隔线
 - [ ] 切换节点后，选中项立即排到卡片第一行（不依赖高亮也能认出当前节点）
 - [ ] 节点默认按延迟升序；超时/未测速沉底；测速完成后自动重排
 - [ ] 曲线 60s 双色、无坐标轴；无数据显示虚线 + 「暂无流量」
 - [ ] 二级面板同宽同高，返回保留滚动位置
-- [ ] 分组卡只显示 pin 过的组：默认 1 张（496pt），pin 后 2 张（642pt），unpin 后立刻收窄
+- [ ] 分组卡只显示 pin 过的组：默认 1 张（530pt），pin 后 2 张（678pt），unpin 后立刻收窄
 - [ ] 订阅磁贴：商家名 + （到期 / 用量）+ 3pt 满宽条在 64pt 内不溢出；缺 `expire` 左侧留白但用量仍右对齐；缺用量只留商家名；>90% 转 warning、≥100% 转 error，条按 100% 封顶，且数字与条同时在场
 - [ ] 面板底栏：左为本 App 版本号（`v0.4.0`），右只有连接列表与设置两个图标，无「N 分钟前更新」/刷新按钮/连接数/内核版本号
 - [ ] 订阅页三态：读取中（`ProgressView` +「正在读取订阅…」）/ 读取失败（文案 + 重试）/ 已加载为空（空态卡），任一路径都不出现纯白板
