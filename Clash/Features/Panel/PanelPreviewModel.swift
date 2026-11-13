@@ -83,7 +83,11 @@ final class PanelPreviewModel {
     private(set) var downSeries = DemoTraffic.downSeries
     private(set) var upSeries = DemoTraffic.upSeries
 
-    @ObservationIgnored private var transitionTask: Task<Void, Never>?
+    @ObservationIgnored private var bootstrapTask: Task<Void, Never>?
+    /// 内核生命周期串行链：同一时刻只有一条 start / stop 在跑
+    @ObservationIgnored private var kernelTask: Task<Void, Never>?
+    /// 串行链代号：新指令让旧指令让位，保证「只保留最新意图」
+    @ObservationIgnored private var kernelTaskID = 0
     @ObservationIgnored private var feedTask: Task<Void, Never>?
     @ObservationIgnored private var subscriptionTask: Task<Void, Never>?
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
@@ -94,12 +98,12 @@ final class PanelPreviewModel {
     @ObservationIgnored private var modeTask: Task<Void, Never>?
     @ObservationIgnored private var proxyRefreshTask: Task<Void, Never>?
     @ObservationIgnored private var connectionTask: Task<Void, Never>?
-    @ObservationIgnored private var launchRestoreTask: Task<Void, Never>?
 
     init(
         kernel: KernelService = KernelService(),
         profileStore: ProfileStore = ProfileStore(),
-        systemProxy: SystemProxyService = SystemProxyService()
+        systemProxy: SystemProxyService = SystemProxyService(),
+        autoStartsKernel: Bool = true
     ) {
         self.kernel = kernel
         self.profiles = profileStore
@@ -112,13 +116,11 @@ final class PanelPreviewModel {
             self?.handleKernelPhase(phase)
         }
 
-        // 退出顺序：先还原系统代理（同步），再停内核
-        kernel.onWillTerminate = { [weak systemProxy] in
-            systemProxy?.disableSynchronouslyForTermination()
-        }
+        // 退出顺序（先还原系统代理、再停内核）由 `AppTerminationGuard` 统一负责，
+        // 覆盖 ⌘Q 与 SIGTERM / SIGINT / SIGHUP 三条路径。
 
         startTrafficFeed()
-        restoreProxyAtLaunch()
+        bootstrap(autoStartsKernel: autoStartsKernel)
     }
 
     // MARK: - 派生状态
@@ -132,9 +134,9 @@ final class PanelPreviewModel {
     /// 连接磁贴不可再点：内核启停中，或系统代理正在写入
     var isConnectionBusy: Bool { kernel.isTransitioning || connectionState.isBusy }
 
-    /// 状态条文案（§3.3）：代理中 = 内核 running 且系统代理读回校验通过。
+    /// 状态条文案（§3.3）：内核 running + 代理关 = 已就绪，代理开 = 代理中。
     ///
-    /// 直连模式下即使接管了系统代理也显示「直连」（§3.3 第 5 行）。
+    /// 连接磁贴只表示系统代理，内核由 App 生命周期管理，所以「代理关」不再是「未运行」。
     var status: DemoStatus {
         switch phase {
         case .stopped:
@@ -144,8 +146,7 @@ final class PanelPreviewModel {
         case .failed:
             return .failed
         case .running:
-            guard isSystemProxyOn else { return mode == .direct ? .direct : .ready }
-            return mode == .direct ? .direct : .proxying
+            return isSystemProxyOn ? .proxying : .ready
         }
     }
 
@@ -158,13 +159,14 @@ final class PanelPreviewModel {
     var pinnedGroups: [ProxyGroupModel] { proxies.pinnedGroups }
     var pinnedGroupIDs: Set<String> { Set(pinnedGroups.map(\.id)) }
 
-    /// 空态文案：没配置「还没有配置」/ 有配置但内核没跑「启用代理后显示节点」/ 跑了但没组「当前配置没有策略组」
+    /// 空态文案：没配置「还没有配置」/ 有配置但内核没跑「内核未运行」/ 跑了但没组「当前配置没有策略组」
     var emptyGroupTitle: String {
         guard hasConfiguredProfile else { return "还没有配置" }
-        return proxies.hasLoaded ? "当前配置没有策略组" : "启用代理后显示节点"
+        if proxies.hasLoaded { return "当前配置没有策略组" }
+        return phase == .failed ? "内核未运行" : "正在启动内核"
     }
 
-    /// 已经导入订阅就不摆「导入订阅 / 选择 YAML」：用户不是没导入，只是还没启用代理
+    /// 已经导入订阅就不摆「导入订阅 / 选择 YAML」：用户不是没导入，只是内核还没就绪
     var showsEmptyGroupImportActions: Bool { !hasConfiguredProfile }
 
     /// 是否已有可用配置：订阅库有 active，或本次内核用了用户配置（DEBUG 的 `CLASH_PROFILE` 也算）
@@ -206,26 +208,64 @@ final class PanelPreviewModel {
         }
     }
 
-    // MARK: - 启动兜底
+    // MARK: - App 启动 / 内核生命周期
 
-    /// 上次退出没还原干净（崩溃 / 强杀）→ 启动时立即还原。
-    /// 此刻内核一定是新起的、没在跑，所以快照存在就直接 `disable()`（`system-proxy` §6）。
-    private func restoreProxyAtLaunch() {
-        launchRestoreTask?.cancel()
-        launchRestoreTask = Task { [weak self] in
+    /// App 启动：先兜底还原上次会话遗留的系统代理，再在有激活订阅时静默启动内核。
+    ///
+    /// 内核由 App 生命周期管理，与系统代理解耦（架构 §4）：启动后即使不开启代理，
+    /// 面板也能立刻拿到节点供挑选 / 测速。
+    private func bootstrap(autoStartsKernel: Bool) {
+        bootstrapTask?.cancel()
+        bootstrapTask = Task { [weak self] in
             guard let self else { return }
-            await self.systemProxy.restoreIfNeeded(kernelRunning: self.kernel.phase == .running)
+
+            // 新进程里内核还没跑：盘上留着的快照一定来自旧会话（指向已死端口），必须还原
+            await self.systemProxy.restoreIfNeeded(kernelRunning: false)
             guard !Task.isCancelled else { return }
+
             self.connectionState = self.systemProxy.isEnabled ? .on : .off
             if let error = self.systemProxy.lastError {
                 self.failConnection(.disable, message: error.userMessage)
             }
+
+            guard autoStartsKernel else { return }
+            // 没有订阅就不启动内核，保留空态引导导入
+            self.startKernelIfNeeded()
+        }
+    }
+
+    /// 自动启动内核（App 启动 / 订阅切换 / 失败后切换订阅共用）。
+    ///
+    /// 防抖：相位已 running、正在过渡、或启动链已排队时直接返回，重复调用只会触发一次 start。
+    private func startKernelIfNeeded() {
+        guard hasConfiguredProfile else { return }
+        guard kernel.phase != .running, !kernel.isTransitioning else { return }
+        guard kernelTask == nil else { return }
+        enqueueKernelOperation { [weak self] in
+            await self?.kernel.start()
+        }
+    }
+
+    /// 内核生命周期串行化：同一时刻只有一条 start / stop 链，
+    /// 因此不会在 `isTransitioning` 期间并发 start。
+    ///
+    /// 新操作排在链尾；排队期间若又来了更新的操作，旧操作直接让位（只保留最新意图）。
+    private func enqueueKernelOperation(_ operation: @escaping @MainActor () async -> Void) {
+        kernelTaskID += 1
+        let operationID = kernelTaskID
+        let previous = kernelTask
+        kernelTask = Task { [weak self] in
+            await previous?.value
+            guard let self, self.kernelTaskID == operationID else { return }
+            await operation()
+            if self.kernelTaskID == operationID { self.kernelTask = nil }
         }
     }
 
     // MARK: - 连接磁贴（系统代理总开关）
 
-    /// 关闭 → 起内核 + 接管系统代理；开启 → 还原系统代理 + 停内核；过渡中忽略点击。
+    /// 关闭 → 只还原系统代理（内核继续跑，节点仍可见可选）；开启 → 内核没跑先启动，再接管系统代理。
+    /// 过渡中忽略点击。
     func toggleConnection() {
         guard !isConnectionBusy else { return }
         if isSystemProxyOn {
@@ -268,7 +308,8 @@ final class PanelPreviewModel {
         }
     }
 
-    /// 关闭：先还原系统代理，再停内核（顺序不能反，否则内核先死会留下指向死端口的代理）。
+    /// 关闭：只还原系统代理，**不停内核**——节点继续可见可选（架构 §4）。
+    /// 顺序上仍先撤代理；内核留到 App 退出 / 订阅删空时再停。
     private func turnOffProxy() {
         connectionTask?.cancel()
         connectionState = .turningOff
@@ -283,8 +324,6 @@ final class PanelPreviewModel {
                 return
             }
             guard !Task.isCancelled else { return }
-            // TODO(v0.2+): 设置项「关闭代理时保留内核」打开后跳过下面这行
-            await self.kernel.stop()
             self.connectionState = .off
         }
     }
@@ -469,29 +508,34 @@ final class PanelPreviewModel {
         (error as? ProfileStoreError)?.userMessage ?? fallback
     }
 
-    /// active 变了：内核在跑就 stop → start，让 `KernelService` 按新 active 重建 runtime
+    /// active 变了：先 stop 再 start，让 `KernelService` 按新 active 重建 runtime。
+    /// 走同一条串行链，running 时也不会并发 start；内核没在跑（如自动启动失败）时也能救回来。
     private func restartKernelForProfileChange() {
-        guard kernel.phase == .running else { return }
-        transitionTask?.cancel()
-        transitionTask = Task { [weak self] in
+        guard hasConfiguredProfile else {
+            stopKernelForProfileChange()
+            return
+        }
+        enqueueKernelOperation { [weak self] in
             guard let self else { return }
             await self.kernel.stop()
-            guard !Task.isCancelled else { return }
             await self.kernel.start()
         }
     }
 
-    /// 库空了：停内核，避免继续跑已删除的配置
+    /// 库空了：先撤系统代理（撤不干净就保留内核，避免代理指向死端口），再停内核
     private func stopKernelForProfileChange() {
-        guard kernel.phase == .running else { return }
-        transitionTask?.cancel()
-        // 代理开着就必须一起撤掉，否则会指向一个已经停掉的内核
-        if isSystemProxyOn {
-            turnOffProxy()
-            return
-        }
-        transitionTask = Task { [weak self] in
-            await self?.kernel.stop()
+        enqueueKernelOperation { [weak self] in
+            guard let self else { return }
+            if self.isSystemProxyOn {
+                do {
+                    try await self.systemProxy.disable()
+                    self.connectionState = .off
+                } catch {
+                    self.failConnection(.disable, error: error)
+                    return
+                }
+            }
+            await self.kernel.stop()
         }
     }
 

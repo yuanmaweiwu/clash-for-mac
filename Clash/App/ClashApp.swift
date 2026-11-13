@@ -12,13 +12,20 @@ struct ClashApp: App {
 
     @State private var model: PanelPreviewModel
 
+    /// 退出清理：`applicationWillTerminate` 与 `SIGTERM` / `SIGINT` / `SIGHUP` 共用一份实现
+    private let terminationGuard: AppTerminationGuard
+
     init() {
         #if DEBUG
         // CLI 自检入口（`CLASH_PROFILE_HARNESS` / `CLASH_PROXY_HARNESS`），正常启动不受影响
         ProfileStoreHarness.runIfRequested()
         SystemProxyHarness.runIfRequested()
         #endif
-        _model = State(initialValue: PanelPreviewModel())
+        // 服务先于 model / guard 建好：两者共享同一实例，退出清理才看得见真实状态
+        let systemProxy = SystemProxyService()
+        let kernel = KernelService()
+        _model = State(initialValue: PanelPreviewModel(kernel: kernel, systemProxy: systemProxy))
+        terminationGuard = AppTerminationGuard(kernel: kernel, systemProxy: systemProxy)
         Self.logger.info("Clash 启动（v0.2 系统代理）")
     }
 

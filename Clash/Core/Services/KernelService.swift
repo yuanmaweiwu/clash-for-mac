@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 import OSLog
 
@@ -33,32 +32,17 @@ final class KernelService {
     private static let readinessRequestTimeout: TimeInterval = 1
     private static let logTailLineCount = 20
 
-    /// App 退出前的清理钩子（系统代理必须先于内核还原，顺序不能反）。
-    /// 由组合根（`PanelPreviewModel`）挂上，`KernelService` 只负责在退出时先调用它。
-    @ObservationIgnored var onWillTerminate: (@MainActor () -> Void)?
     @ObservationIgnored private var runner: KernelRunner?
     @ObservationIgnored private var client: ClashAPIClient?
     @ObservationIgnored private var userInitiatedStop = false
-    @ObservationIgnored private var terminationObserver: NSObjectProtocol?
 
     init(runner: KernelRunner? = nil) {
         self.runner = runner
         runner?.onExit = { [weak self] code in
             self?.handleUnexpectedExit(code: code)
         }
-
-        // App 退出即停（ADR-0007）：子进程不会随父进程自动结束，这里补一刀
-        terminationObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.willTerminateNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                // 顺序不能反：先还原系统代理，再发 SIGTERM（否则会留下指向死端口的代理）
-                self?.onWillTerminate?()
-                self?.shutdownForTermination()
-            }
-        }
+        // 退出清理（含「先还原系统代理再发 SIGTERM」的顺序）统一由
+        // `AppTerminationGuard` 负责，本类只提供 `shutdownForTermination()`。
     }
 
     // MARK: - 相位
@@ -82,12 +66,26 @@ final class KernelService {
 
         do {
             let binaryURL = try Self.bundledKernelURL()
+
+            // 强杀兜底：`SIGKILL` / 系统强杀时 `AppTerminationGuard` 没机会跑，旧内核会被
+            // launchd 收留并继续占着 mixed-port。先按「可执行路径完全相等」清掉，再起新的。
+            // 正常退出 / SIGTERM 路径不经过这里（那条路已由 `AppTerminationGuard` 处理）。
+            await OrphanKernelReaper.reapOrphans(matching: binaryURL)
+
+            // 清完孤儿仍被占 → 是别的程序占着（或孤儿杀不掉）：报 portInUse，不硬起
+            let mixedPort = RuntimeConfigBuilder.defaultMixedPort
+            guard PortAllocator.isAvailable(port: mixedPort) else {
+                Self.logger.error("mixed-port \(mixedPort) 已被占用，拒绝启动内核")
+                throw KernelError.portInUse
+            }
+
             let ports = try PortAllocator.allocateDistinct(2)
 
             // 配置来源：CLASH_PROFILE（DEBUG）/ profiles 下唯一一份，都没有则用内置空配置
             let profileURL = ProfileLocator.locate()
             hasProfile = profileURL != nil
             let injected = RuntimeConfigBuilder.Injected(
+                mixedPort: mixedPort,
                 controllerPort: ports[0],
                 dnsPort: ports[1],
                 secret: RuntimeConfigBuilder.makeSecret()
@@ -141,7 +139,9 @@ final class KernelService {
         Self.logger.notice("内核已停止")
     }
 
-    /// App 即将退出：只发 SIGTERM，不等待
+    /// App 即将退出：只发 SIGTERM，不等待。
+    /// 由 `AppTerminationGuard` 在 `applicationWillTerminate` 与信号路径里调用，必须排在
+    /// 系统代理还原之后（`core-process` §3）。
     func shutdownForTermination() {
         userInitiatedStop = true
         runner?.terminateImmediately()

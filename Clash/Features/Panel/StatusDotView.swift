@@ -20,7 +20,7 @@ struct StatusDotView: View {
                 Circle()
                     .fill(Theme.success)
                     .frame(width: 7, height: 7)
-            case .ready, .direct:
+            case .ready:
                 Circle()
                     .fill(Theme.textSecondary)
                     .frame(width: 7, height: 7)

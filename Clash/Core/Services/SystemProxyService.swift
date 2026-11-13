@@ -160,7 +160,10 @@ final class SystemProxyService {
         }
     }
 
-    /// App 启动兜底：快照存在 且 内核未运行 → 立即还原（`system-proxy` §6 不变式）
+    /// App 启动兜底：快照存在 且 内核未运行 → 立即还原（`system-proxy` §6 不变式）。
+    ///
+    /// 这是**唯一拦不住的路径**的兜底：`SIGKILL`（`kill -9`）、掉电、内核 panic 时进程无法做任何
+    /// 清理，代理会停在指向死端口的状态；下次启动必须由这里按快照还原回来。
     func restoreIfNeeded(kernelRunning: Bool) async {
         guard hasSnapshot else {
             isEnabled = false
@@ -179,16 +182,17 @@ final class SystemProxyService {
         }
     }
 
-    /// App 退出路径（`willTerminate`，无法 await）：同步还原，失败则保留快照并记日志。
+    /// 退出路径（`willTerminate` / `SIGTERM` 等，无法 await）：同步还原，失败则保留快照并记日志。
     ///
     /// 调用方必须先调它、再停内核（顺序不能反，否则内核先死会留下指向死端口的代理）。
+    /// 统一入口见 `AppTerminationGuard`；实现走并发版本（见 `Networksetup.deactivateForTermination`）。
     func disableSynchronouslyForTermination() {
         guard hasSnapshot else {
             isEnabled = false
             return
         }
         do {
-            try Networksetup.deactivate(snapshotURL: snapshotURL)
+            try Networksetup.deactivateForTermination(snapshotURL: snapshotURL)
             isEnabled = false
             systemProxyLogger.notice("退出前已还原系统代理")
         } catch {
@@ -648,6 +652,71 @@ private enum Networksetup {
         }
         try restore(snapshot)
         try removeSnapshot(at: snapshotURL)
+    }
+
+    /// 退出路径专用还原：**各服务并发**跑，其余步骤与 `deactivate` 完全一致。
+    ///
+    /// 为什么必须并发：退出路径跑在主线程（两个服务都是 `@MainActor`），而
+    /// `NSConcreteTask.waitUntilExit` 在主线程会泵嵌套 run loop —— 单次 `networksetup`
+    /// 从后台线程的 ~10ms 涨到 ~150ms。本机 4 个服务 × 14 次调用串行要 5s+，
+    /// 直接撞穿 3s 退出预算（实测：代理已还原但快照没删成）。
+    /// 服务之间互不影响，所以丢到全局队列并发跑（实测 4 服务并发写无锁冲突）。
+    static func deactivateForTermination(snapshotURL: URL) throws {
+        guard let snapshot = try load(from: snapshotURL) else {
+            throw SystemProxyError.snapshotMissing
+        }
+        try forEachServiceConcurrently(snapshot.services) { try restore(service: $0) }
+        try forEachServiceConcurrently(snapshot.services) { try verifyRestored($0) }
+        try removeSnapshot(at: snapshotURL)
+    }
+
+    /// 并发跑每个服务的单服务事务，收集第一个错误：一个服务失败不阻断其余服务
+    /// （尽量把能还原的都还原掉），最后由调用方决定是否保留快照。
+    private static func forEachServiceConcurrently(
+        _ services: [ServiceProxyState],
+        _ body: @escaping @Sendable (ServiceProxyState) throws -> Void
+    ) throws {
+        guard !services.isEmpty else { return }
+
+        // 不用 `concurrentPerform`：它会拿调用线程（主线程）跑其中一个分片，
+        // 那一份又要吃主线程的 `waitUntilExit` 开销，等于没提速。
+        let failures = FailureBox()
+        let group = DispatchGroup()
+        for service in services {
+            group.enter()
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    try body(service)
+                } catch {
+                    failures.record(
+                        error as? SystemProxyError
+                            ?? .commandFailed(service: service.name, detail: String(describing: error))
+                    )
+                }
+                group.leave()
+            }
+        }
+        group.wait()
+
+        if let first = failures.first { throw first }
+    }
+
+    /// 并发收集错误（`forEachServiceConcurrently` 专用）
+    private final class FailureBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: SystemProxyError?
+
+        func record(_ error: SystemProxyError) {
+            lock.lock()
+            defer { lock.unlock() }
+            if stored == nil { stored = error }
+        }
+
+        var first: SystemProxyError? {
+            lock.lock()
+            defer { lock.unlock() }
+            return stored
+        }
     }
 
     /// 逐服务还原；一个服务失败不阻断其余服务（尽量把能还原的都还原掉），最后再抛第一个错误

@@ -1,17 +1,16 @@
 // TODO(v0.2): 替换为真实模型，当前为面板假数据
 import Foundation
 
-/// 面板状态条的六种演示状态（对齐 `docs/02-UI-SPEC.md` §3.3）。
+/// 面板状态条的五种状态（对齐 `docs/02-UI-SPEC.md` §3.3）。
 ///
-/// 六种都会出现：`proxying` 需要「内核 running + 系统代理读回校验通过」，
-/// `direct` 由代理模式算出来。`showsLiveTraffic` 仍为 false（`/traffic` 未接），
-/// 所以速率位显示 `—`。
+/// 状态只由「内核相位 + 是否接管系统代理」决定；代理模式（规则/全局/直连）
+/// 不再影响状态条文案。`proxying` = 内核 running + 系统代理读回校验通过。
+/// `showsLiveTraffic` 仍为 false（`/traffic` 未接），所以速率位显示 `—`。
 enum DemoStatus: String, CaseIterable, Identifiable, Sendable {
     case idle
     case starting
     case ready
     case proxying
-    case direct
     case failed
 
     var id: String { rawValue }
@@ -23,7 +22,6 @@ enum DemoStatus: String, CaseIterable, Identifiable, Sendable {
         case .starting: "启动中"
         case .ready: "已就绪"
         case .proxying: "代理中"
-        case .direct: "直连"
         case .failed: "启动失败"
         }
     }
@@ -31,7 +29,7 @@ enum DemoStatus: String, CaseIterable, Identifiable, Sendable {
     /// 有实时速率的状态
     var hasLiveRates: Bool {
         switch self {
-        case .ready, .proxying, .direct: true
+        case .ready, .proxying: true
         case .idle, .starting, .failed: false
         }
     }

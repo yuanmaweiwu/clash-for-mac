@@ -89,7 +89,11 @@ enum SystemProxyHarness {
         case "readonly":
             failures += await runReadOnly(service: service)
         case "panel":
-            failures += await runPanel()
+            failures += await runPanel(hold: false)
+        case "panel-hold":
+            // 与 panel 相同，但在「代理开」「代理关」两个状态各停 8 秒，
+            // 让外部 shell 用 networksetup / pgrep / curl 取证（不点菜单栏）
+            failures += await runPanel(hold: true)
         default:
             failures += report("mode", false, "未知模式 \(mode)")
         }
@@ -217,11 +221,15 @@ enum SystemProxyHarness {
         return failures
     }
 
-    /// 面板语义（连接磁贴 = 系统代理总开关）：点一下 → 起内核 + 接管代理；再点一下 → 还原 + 停内核
-    private static func runPanel() async -> Int {
+    /// 面板语义（连接磁贴 = 系统代理总开关）：点一下 → 起内核（若没在跑）+ 接管代理；
+    /// 再点一下 → 只还原系统代理，内核继续运行。
+    /// `hold = true` 时在两个状态各停 8 秒，供外部取证。
+    private static func runPanel(hold: Bool = false) async -> Int {
         var failures = 0
         let kernel = KernelService()
-        let model = PanelPreviewModel(kernel: kernel)
+        let systemProxy = SystemProxyService()
+        // 自检不让模型自动启内核：初始相位固定为 stopped，方便逐步断言
+        let model = PanelPreviewModel(kernel: kernel, systemProxy: systemProxy, autoStartsKernel: false)
 
         failures += report(
             "initial-off",
@@ -241,12 +249,17 @@ enum SystemProxyHarness {
             "state=\(model.connectionState) error=\(String(describing: model.errorMessage))"
         )
         failures += report("kernel-running", model.phase == .running, "phase=\(model.phase)")
-        failures += report("status-proxying", model.status == .proxying || model.status == .direct, "\(model.status)")
+        failures += report("status-proxying", model.status == .proxying, "\(model.status)")
         failures += report("traffic-placeholder", !model.showsLiveTraffic, "showsLiveTraffic=\(model.showsLiveTraffic)")
+
+        if hold {
+            print("HOLD proxy-on port=\(kernel.port ?? 0) version=\(kernel.kernelVersion ?? "-")")
+            try? await Task.sleep(for: .seconds(8))
+        }
 
         model.toggleConnection()
         waited = 0.0
-        while waited < 60, model.isSystemProxyOn || model.phase != .stopped {
+        while waited < 60, model.isSystemProxyOn {
             try? await Task.sleep(for: .milliseconds(200))
             waited += 0.2
         }
@@ -255,12 +268,18 @@ enum SystemProxyHarness {
             !model.isSystemProxyOn && model.connectionState == .off,
             "state=\(model.connectionState) error=\(String(describing: model.errorMessage))"
         )
-        failures += report("kernel-stopped", model.phase == .stopped, "phase=\(model.phase)")
-        failures += report("status-idle", model.status == .idle, "\(model.status)")
+        // 关代理不停内核：节点仍然可见可选，状态条回到「已就绪」
+        failures += report("kernel-kept", model.phase == .running, "phase=\(model.phase)")
+        failures += report("status-ready", model.status == .ready, "\(model.status)")
 
-        // 清理：代理与内核都不能留在运行态
+        if hold {
+            print("HOLD proxy-off kernel-phase=\(model.phase)")
+            try? await Task.sleep(for: .seconds(8))
+        }
+
+        // 清理：代理与内核都不能留在运行态（与 App 退出走同一套同步实现）
         if model.isSystemProxyOn {
-            kernel.onWillTerminate?()
+            systemProxy.disableSynchronouslyForTermination()
         }
         if kernel.phase != .stopped {
             await kernel.stop()

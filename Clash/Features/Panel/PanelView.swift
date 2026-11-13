@@ -150,7 +150,7 @@ struct PanelView: View {
 #if DEBUG
 // Preview 夹具用到 DEBUG-only 的模型方法，整套只在 Debug 编译（Release 不加载概览）
 #Preview("首层 · 单卡") {
-    PanelView(model: PanelPreviewModel())
+    PanelView(model: PanelPreviewModel(autoStartsKernel: false))
 }
 
 #Preview("首层 · 双卡 + 失败") {
@@ -174,7 +174,9 @@ private func panelPreviewModel(pinnedFailure: Bool = false, empty: Bool = false)
         // 预览不读写真实系统代理快照
         systemProxy: SystemProxyService(
             snapshotURL: directory.appending(path: "systemproxy-snapshot.json")
-        )
+        ),
+        // 预览不启动真实内核
+        autoStartsKernel: false
     )
     if !empty {
         model.applyPreviewGroups()
