@@ -186,9 +186,11 @@
 |---|---|---|---|
 | `idle` | 空心 `text/tertiary` | 未运行 | `—` |
 | `starting` / `stopping` | 6pt `ProgressView` | 启动中 / 停止中 | `—` |
-| `running` + 系统代理关 | 实心 `text/secondary` | 已就绪 | 实时 |
+| `running` + 系统代理关 | 实心 `text/secondary` | 已就绪 | 实时（无流量通道时为 `—`，见下） |
 | `running` + 系统代理开 | 实心 `success` | 代理中 | 实时 |
 | `running` + 模式=直连 | 实心 `text/secondary` | 直连 | 实时（仅内核自身流量） |
+
+> **v0.1 口径**：此时还没有 `/traffic` 通道，速率位一律 `—`、曲线走「暂无流量」。不要用假数据填充（宁可空）——真实采样在 v0.2 随系统代理一起接。
 | `failed` | 实心 `error` | 启动失败 | `—` |
 | API/WS 断连 | 实心 `warning` | 连接中断 | `—` |
 
