@@ -90,12 +90,6 @@ final class PanelPreviewModel {
     /// 测速完成后的「刚刚更新」短暂提示
     private(set) var speedResultFlash = false
 
-    /// 底栏更新时间：无订阅 →「未导入配置」；有订阅但从未成功更新 →「尚未更新」；否则相对时间
-    var footerUpdatedText: String {
-        guard let profile = activeSubscription else { return "未导入配置" }
-        return profile.updatedAgoText
-    }
-
     /// 实时速率（字节 / 秒）与 60 点曲线，均来自 `TrafficService`
     var downRate: Double { traffic.down }
     var upRate: Double { traffic.up }
@@ -176,9 +170,6 @@ final class PanelPreviewModel {
     /// 内核相位（转发 `KernelService`，只读）
     var phase: KernelPhase { kernel.phase }
 
-    /// 内核版本（`/version` 的 `version` 字段）；未运行时为 nil
-    var kernelVersion: String? { kernel.kernelVersion }
-
     /// 连接磁贴不可再点：内核启停中、系统代理正在写入、或 TUN 正在过渡
     var isConnectionBusy: Bool { kernel.isTransitioning || connectionState.isBusy || tun.isBusy }
 
@@ -230,6 +221,9 @@ final class PanelPreviewModel {
     }
 
     var subscriptionBadgeCount: Int { subscriptions.count }
+
+    /// 订阅页三态（§4.8）：读取中 / 读取失败（带 `ProfileStore` 的失败文案）/ 已加载
+    var subscriptionPanelState: SubscriptionPanelState { profiles.loadState.panelState }
 
     // MARK: - 内核相位
 
@@ -567,7 +561,19 @@ final class PanelPreviewModel {
     // MARK: - 导航
 
     func openAllGroups() { route = .allGroups }
-    func openSubscriptions() { route = .subscriptions }
+
+    /// 订阅磁贴 → 订阅管理页。
+    ///
+    /// 推入前同步取一次索引快照：库还没读完（延迟加载 / 慢盘）时先读，
+    /// 保证路由与数据同一帧就绪，不会先渲染空数组再补数据、闪一下白。
+    func openSubscriptions() {
+        if case .loading = profiles.loadState { profiles.reload() }
+        route = .subscriptions
+    }
+
+    /// 订阅页失败态「重试」：重读索引（失败文案由 store 的 `lastError` 给出）
+    func retrySubscriptions() { profiles.reload() }
+
     func openConnections() { route = .connections }
 
     /// 设置页（`docs/02-UI-SPEC.md` §4.9）：只改路由，保证 App 层（⚙ / ⌘, / 菜单项）

@@ -17,57 +17,72 @@ struct SubscriptionPanelView: View {
                     .padding(.top, 8)
             }
 
-            if model.subscriptions.isEmpty {
-                EmptySubscriptionView(
-                    onImportURL: { model.openSubscriptionNewPage() },
-                    onImportYAML: { chooseYAMLFile() }
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollViewReader { proxy in
-                    ScrollView(.vertical) {
-                        LazyVStack(spacing: 0) {
-                            ForEach(model.subscriptions) { profile in
-                                SubscriptionRowView(
-                                    profile: profile,
-                                    isActive: profile.id == model.activeSubscriptionID,
-                                    isHighlighted: profile.id == model.recentlyImportedProfileID,
-                                    isUpdating: profile.id == model.updatingProfileID,
-                                    onActivate: { model.activateSubscription(profile.id) },
-                                    onUpdate: { model.updateSubscription(profile.id) },
-                                    onRename: {
-                                        SubscriptionEditPanel.showRename(current: profile.name) { name in
-                                            model.renameSubscription(profile.id, to: name)
-                                        }
-                                    },
-                                    onCopyLink: { copyLink(of: profile) },
-                                    onDelete: { model.deleteSubscription(profile.id) }
-                                )
-                                .id(profile.id)
-                            }
-                        }
-                    }
-                    .scrollIndicators(.hidden)
-                    .onAppear {
-                        // 导入成功时页面才被推回来：那时 `onChange` 已经错过，这里补一次定位
-                        guard let id = model.recentlyImportedProfileID else { return }
-                        proxy.scrollTo(id, anchor: .center)
-                    }
-                    .onChange(of: model.recentlyImportedProfileID) { _, id in
-                        guard let id else { return }
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            proxy.scrollTo(id, anchor: .center)
-                        }
-                    }
+            switch model.subscriptionPanelState {
+            case .loading:
+                SubscriptionStateView(kind: .loading)
+            case .failed(let message):
+                SubscriptionStateView(kind: .failed(message)) {
+                    model.retrySubscriptions()
                 }
-
-                footer
+            case .loaded:
+                subscriptionList
             }
         }
         .frame(
             width: Metrics.panelWidth - Metrics.panelPadding * 2,
             height: Metrics.panelHeight - Metrics.panelPadding * 2
         )
+    }
+
+    /// 已加载：空库 → 占位卡；有条目 → 列表 + 底部说明
+    @ViewBuilder
+    private var subscriptionList: some View {
+        if model.subscriptions.isEmpty {
+            EmptySubscriptionView(
+                onImportURL: { model.openSubscriptionNewPage() },
+                onImportYAML: { chooseYAMLFile() }
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollViewReader { proxy in
+                ScrollView(.vertical) {
+                    LazyVStack(spacing: 0) {
+                        ForEach(model.subscriptions) { profile in
+                            SubscriptionRowView(
+                                profile: profile,
+                                isActive: profile.id == model.activeSubscriptionID,
+                                isHighlighted: profile.id == model.recentlyImportedProfileID,
+                                isUpdating: profile.id == model.updatingProfileID,
+                                onActivate: { model.activateSubscription(profile.id) },
+                                onUpdate: { model.updateSubscription(profile.id) },
+                                onRename: {
+                                    SubscriptionEditPanel.showRename(current: profile.name) { name in
+                                        model.renameSubscription(profile.id, to: name)
+                                    }
+                                },
+                                onCopyLink: { copyLink(of: profile) },
+                                onDelete: { model.deleteSubscription(profile.id) }
+                            )
+                            .id(profile.id)
+                        }
+                    }
+                }
+                .scrollIndicators(.hidden)
+                .onAppear {
+                    // 导入成功时页面才被推回来：那时 `onChange` 已经错过，这里补一次定位
+                    guard let id = model.recentlyImportedProfileID else { return }
+                    proxy.scrollTo(id, anchor: .center)
+                }
+                .onChange(of: model.recentlyImportedProfileID) { _, id in
+                    guard let id else { return }
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        proxy.scrollTo(id, anchor: .center)
+                    }
+                }
+            }
+
+            footer
+        }
     }
 
     private var breadcrumb: some View {

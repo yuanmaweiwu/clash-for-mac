@@ -1,10 +1,30 @@
 import Foundation
 
-/// 订阅磁贴的四行内容（§4.2）：标题固定「订阅」，名称 / 用量 / 到期缺字段即省行。
+/// 订阅管理页的三态（§4.8）：读取中 / 读取失败 / 已加载（含空库）。
+///
+/// 视图只做三选一渲染，不再用「列表为空」同时表达「还没读完」「读失败」「真的没有订阅」。
+enum SubscriptionPanelState: Equatable, Sendable {
+    case loading
+    case failed(String)
+    case loaded
+}
+
+/// 订阅管理页的展示派生
+extension ProfileStoreLoadState {
+    var panelState: SubscriptionPanelState {
+        switch self {
+        case .loading: .loading
+        case .ready: .loaded
+        case .failed(let message): .failed(message)
+        }
+    }
+}
+
+/// 订阅磁贴的内容（§4.2）：商家名 / 用量 / 到期缺字段即省行。
 ///
 /// 视图只负责摆位置与配色，不再判断「有没有字段」，避免格式化在视图里再写一遍。
 struct SubscriptionTileContent: Equatable, Sendable {
-    /// 名称行（激活那条，可带「· 更新失败」）；nil = 还没导入
+    /// 商家名（激活那条，可带「· 更新失败」）；nil = 还没导入 → 显示「未添加」
     var name: String?
     /// 用量 `100.4/128 GB`；缺 `download` / `total` → nil（不画条）
     var quotaText: String?

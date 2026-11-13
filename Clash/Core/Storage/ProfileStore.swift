@@ -12,6 +12,15 @@ enum ProfileActivationChange: Equatable, Sendable {
     case cleared
 }
 
+/// 订阅库的加载态：UI 三态兜底的唯一来源（`docs/02-UI-SPEC.md` §4.8）。
+///
+/// `failed` 带用户可读文案，订阅页直接显示并给「重试」；不再让读盘失败表现为空列表。
+enum ProfileStoreLoadState: Equatable, Sendable {
+    case loading
+    case ready
+    case failed(String)
+}
+
 /// 订阅库：`profiles/index.json` 的唯一读写者（`docs/01-ARCHITECTURE.md` §4.1）。
 ///
 /// 边界：
@@ -29,6 +38,10 @@ final class ProfileStore {
     private(set) var entries: [ProfileEntry] = []
     /// 同一时刻只有一条 active
     private(set) var activeProfileID: String?
+    /// 加载态：订阅页据此显示「读取中 / 失败可重试 / 已加载」
+    private(set) var loadState: ProfileStoreLoadState = .loading
+    /// 最近一次加载失败的用户可读文案（成功加载后清空）；订阅页「重试」旁边显示
+    private(set) var lastError: String?
 
     var activeProfile: ProfileEntry? {
         guard let activeProfileID else { return nil }
@@ -50,17 +63,19 @@ final class ProfileStore {
     ///   - directory: `profiles/` 目录（自检 harness 用临时目录）
     ///   - now: 注入时钟，测试可固定时间
     ///   - settings: 设置来源；设置里的 UA 非空时作为首选（仍保留 422 换 UA 重试）
+    ///   - loadsImmediately: false 时保持 `.loading`，由调用方稍后 `reload()`（演示 / 自检延迟加载）
     init(
         directory: URL = AppPaths.profilesDirectory,
         indexURL: URL? = nil,
         now: @escaping () -> Date = Date.init,
-        settings: SettingsStore? = nil
+        settings: SettingsStore? = nil,
+        loadsImmediately: Bool = true
     ) {
         self.directory = directory
         self.indexURL = indexURL ?? directory.appending(path: "index.json")
         self.now = now
         self.settings = settings
-        load()
+        if loadsImmediately { reload() }
     }
 
     func yamlURL(for id: String) -> URL {
@@ -73,11 +88,24 @@ final class ProfileStore {
 
     // MARK: - 索引读写
 
+    /// 重读索引（同步）。打开订阅页前调用一次，可保证数据与路由同一帧就绪；
+    /// 订阅页的「重试」也走这里。
+    func reload() {
+        loadState = .loading
+        lastError = nil
+        load()
+    }
+
     private func load() {
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         } catch {
             Self.logger.error("创建 profiles 目录失败：\(error.localizedDescription, privacy: .public)")
+            entries = []
+            activeProfileID = nil
+            loadState = .failed("无法创建订阅目录：\(error.localizedDescription)")
+            lastError = "无法创建订阅目录：\(error.localizedDescription)"
+            return
         }
 
         guard FileManager.default.fileExists(atPath: indexURL.path) else {
@@ -85,8 +113,11 @@ final class ProfileStore {
             activeProfileID = nil
             do {
                 try persistIndex()
+                loadState = .ready
             } catch {
                 Self.logger.error("创建空索引失败：\(error.localizedDescription, privacy: .public)")
+                loadState = .failed("无法创建订阅索引：\(error.localizedDescription)")
+                lastError = "无法创建订阅索引：\(error.localizedDescription)"
             }
             return
         }
@@ -95,6 +126,7 @@ final class ProfileStore {
             let index = try ProfileIndexFile.load(from: indexURL)
             entries = index.profiles
             activeProfileID = index.activeProfileID
+            loadState = .ready
         } catch {
             // 索引损坏：留证据、按空库运行，绝不覆盖原文件当没事发生
             Self.logger.error("index.json 解析失败：\(error.localizedDescription, privacy: .public)")
@@ -103,6 +135,11 @@ final class ProfileStore {
             entries = []
             activeProfileID = nil
             try? persistIndex()
+
+            // 不再让「读不出来」表现为空列表：订阅页据此显示失败态 + 重试
+            let message = "订阅索引损坏，已备份原文件"
+            loadState = .failed(message)
+            lastError = message
             return
         }
 
@@ -123,6 +160,10 @@ final class ProfileStore {
             Self.logger.error("写 index.json 失败：\(error.localizedDescription, privacy: .public)")
             throw ProfileStoreError.storageFailure
         }
+        // 索引写得进去 = 库可用：从失败 / 读取中回到 ready（导入、切换、删除都走这条路径，
+        // 免得修好之后订阅页还停在「读取订阅失败」）
+        loadState = .ready
+        lastError = nil
     }
 
     // MARK: - 导入
@@ -276,6 +317,8 @@ final class ProfileStore {
     func forgetAllAfterCleanup() {
         entries = []
         activeProfileID = nil
+        loadState = .ready
+        lastError = nil
     }
 
     // MARK: - 切换 / 重命名 / 删除
