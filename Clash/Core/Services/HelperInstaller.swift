@@ -147,6 +147,7 @@ enum HelperInstaller {
 
         HELPER_SRC=\(shellQuoted(helperSource))
         KERNEL_SRC=\(shellQuoted(kernelSource))
+        KERNEL_SRC_DIR=\(shellQuoted(bundleURL.appending(path: "Contents/Resources/Kernel").path))
         HELPER_DST=\(shellQuoted(HelperLayout.helperToolPath))
         KERNEL_DST=\(shellQuoted(HelperLayout.kernelToolPath))
         SUPPORT_DIR=\(shellQuoted(HelperLayout.supportDirectory))
@@ -163,6 +164,8 @@ enum HelperInstaller {
           && (launchctl bootout system/\(HelperLayout.machServiceName) 2>/dev/null || true) \\
           && cp -f "$HELPER_SRC" "$HELPER_DST" \\
           && cp -f "$KERNEL_SRC" "$KERNEL_DST" \\
+          && ( for f in geoip.metadb geosite.dat; do if [ -f "$KERNEL_SRC_DIR/$f" ]; then cp -f "$KERNEL_SRC_DIR/$f" "$SUPPORT_DIR/$f"; fi; done ) \\
+          && ( chmod 0644 "$SUPPORT_DIR"/geoip.metadb "$SUPPORT_DIR"/geosite.dat 2>/dev/null || true ) \\
           && chown root:wheel "$HELPER_DST" "$KERNEL_DST" \\
           && chmod 0755 "$HELPER_DST" "$KERNEL_DST" \\
           && printf '%s\\n' "$PLIST_BODY" > "$PLIST" \\
@@ -219,9 +222,9 @@ enum HelperInstaller {
         \t<key>ThrottleInterval</key>
         \t<integer>5</integer>
         \t<key>StandardOutPath</key>
-        \t<string>\(HelperLayout.supportDirectory)/helper.log</string>
+        \t<string>\(HelperLayout.helperLogPath)</string>
         \t<key>StandardErrorPath</key>
-        \t<string>\(HelperLayout.supportDirectory)/helper.log</string>
+        \t<string>\(HelperLayout.helperLogPath)</string>
         </dict>
         </plist>
         """

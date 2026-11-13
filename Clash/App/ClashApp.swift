@@ -28,6 +28,12 @@ struct ClashApp: App {
         KernelSettingsHarness.runIfRequested()
         TunConfigHarness.runIfRequested()
         #endif
+        #if DEBUG
+        // 真机 TUN 自检（会真的起 root 内核）：命中时不让面板自动起本地内核，避免抢端口
+        let smokeMode = TunSmokeHarness.requestedMode()
+        #else
+        let smokeMode: String? = nil
+        #endif
         // 设置只建一份：内核注入端口 / 面板开代理 / 设置窗口写偏好都指向同一实例
         let settings = SettingsStore()
         // 服务先于 model / guard 建好：两者共享同一实例，退出清理才看得见真实状态
@@ -39,11 +45,24 @@ struct ClashApp: App {
             kernel: kernel,
             systemProxy: systemProxy,
             settings: settings,
-            tun: tun
+            tun: tun,
+            autoStartsKernel: smokeMode == nil
         ))
         _settings = State(initialValue: settings)
         terminationGuard = AppTerminationGuard(kernel: kernel, systemProxy: systemProxy, tun: tun)
         Self.logger.info("Clash 启动（v0.2 系统代理 + TUN）")
+
+        #if DEBUG
+        if let smokeMode {
+            TunSmokeHarness.startIfRequested(
+                mode: smokeMode,
+                settings: settings,
+                systemProxy: systemProxy,
+                kernel: kernel,
+                tun: tun
+            )
+        }
+        #endif
     }
 
     var body: some Scene {

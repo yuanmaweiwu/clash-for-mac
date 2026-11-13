@@ -31,6 +31,8 @@ enum HelperLayout {
     static let runtimeConfigPath = supportDirectory + "/runtime.yaml"
     /// mihomo 的 stdout / stderr
     static let kernelLogPath = supportDirectory + "/kernel.log"
+    /// helper 自己的日志（unified log 的落盘副本；plist 的 `StandardOutPath` 同路径）
+    static let helperLogPath = supportDirectory + "/helper.log"
     /// LaunchDaemon 定义
     static let daemonPlistPath = "/Library/LaunchDaemons/com.clash.helper.plist"
 

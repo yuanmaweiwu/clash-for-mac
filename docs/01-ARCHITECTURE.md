@@ -95,6 +95,7 @@ idle ──start──► starting ──ok──► running ──stop──►
 - **安全默认值必须覆盖订阅里的值**：实测真实订阅带 `allow-lan: true`、`dns.listen: 0.0.0.0:1053`——照搬等于把代理与 DNS 暴露到局域网。默认一律收紧为 `allow-lan: false` + `127.0.0.1`，用户显式开启才放开
 - **`tun` 段整段替换**（不 merge）：TUN 开 → `enable/stack/auto-route/auto-detect-interface/dns-hijack` 全由 App 决定，`dns` 强制 `enhanced-mode: fake-ip` + `fake-ip-range: 198.18.0.1/16`；TUN 关 → 只写 `tun.enable: false`，不复用订阅里的 tun 配置
 - **TUN 模式下配置正文经 XPC 送 helper**（`adr/0010`）：App 只生成字符串，helper 校验后原子写 root 目录
+- **geodata 随组件安装**：订阅里有 `GEOIP,` / `GEOSITE,` 规则时，内核必须在 `-d` 目录（helper 运行目录）找到 `geoip.metadb` / `geosite.dat`；缺失会触发内核在线下载（国内 90s 超时，表现为「未就绪」）。安装脚本从 App 包内 `Contents/Resources/Kernel/` 拷贝；App 在启动 TUN 前做存在性预检并给出具体原因
 - 注入方式：解析原 YAML → 覆盖顶层键 → 输出；**不用字符串拼接**。实测把同名键追加到文件末尾会让 `mihomo -t` 直接失败：`mapping key "mixed-port" already defined at line 1`
 - secret 只存在内存 + 运行配置；App 存于内存，禁止落盘明文到日志
 - 端口冲突：启动前探测，被占用则让用户在设置里改，不静默换端口

@@ -1,6 +1,5 @@
 import Darwin
 import Foundation
-import OSLog
 import Yams
 
 /// helper 侧运行配置的落盘器（协议 v2）。
@@ -19,20 +18,19 @@ import Yams
 /// - 顶层必须是映射：数组 / 标量 / 空文档一律拒绝（mihomo 只接受键值对）
 enum RuntimeConfigWriter {
 
-    private static let logger = Logger(subsystem: "com.clash.helper", category: "config")
 
     /// 校验并原子写入。`nil` 消息 = 成功。
     static func apply(_ bytes: Data) -> KernelCommandResult {
         guard !bytes.isEmpty else {
-            logger.error("拒绝空配置正文")
+            HelperLog.error("拒绝空配置正文")
             return .failure("运行配置为空，无法写入")
         }
         guard bytes.count <= HelperMaxRuntimeConfigBytes else {
-            logger.error("拒绝超大配置：\(bytes.count) bytes")
+            HelperLog.error("拒绝超大配置：\(bytes.count) bytes")
             return .failure("运行配置过大（\(bytes.count / 1024) KB），上限 \(HelperMaxRuntimeConfigBytes / 1024 / 1024) MB")
         }
         guard let text = String(data: bytes, encoding: .utf8) else {
-            logger.error("拒绝非 UTF-8 配置正文")
+            HelperLog.error("拒绝非 UTF-8 配置正文")
             return .failure("运行配置不是 UTF-8 文本")
         }
 
@@ -45,10 +43,10 @@ enum RuntimeConfigWriter {
                 return .failure("运行配置顶层必须是键值对（映射）")
             }
         } catch let error as YamlError {
-            logger.error("YAML 解析失败：\(String(describing: error), privacy: .public)")
+            HelperLog.error("YAML 解析失败：\(error.localizedDescription)")
             return .failure(parseFailureReason(error))
         } catch {
-            logger.error("YAML 解析失败：\(error.localizedDescription, privacy: .public)")
+            HelperLog.error("YAML 解析失败：\(error.localizedDescription)")
             return .failure("运行配置不是合法 YAML")
         }
 
@@ -56,11 +54,11 @@ enum RuntimeConfigWriter {
             try ensureSupportDirectory()
             try writeAtomically(bytes, to: HelperLayout.runtimeConfigPath)
         } catch {
-            logger.error("写入运行配置失败：\(error.localizedDescription, privacy: .public)")
+            HelperLog.error("写入运行配置失败：\(error.localizedDescription)")
             return .failure("写入运行配置失败：\(error.localizedDescription)")
         }
 
-        logger.notice("运行配置已更新 \(bytes.count) bytes")
+        HelperLog.notice("运行配置已更新 \(bytes.count) bytes")
         return .success()
     }
 

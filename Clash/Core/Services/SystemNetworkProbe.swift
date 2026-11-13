@@ -16,6 +16,8 @@ struct SystemNetworkSnapshot: Equatable, Sendable {
     let defaultGateway: String?
     /// `resolv.conf` 里的 nameserver 列表，按出现顺序
     let nameServers: [String]
+    /// 接管默认路由的拆分路由（mihomo 用 `0/1` + `128.0/1`），例如 `128.0/1 utun4`
+    let tunnelRoutes: [String]
 
     /// 与基线对比，返回给用户看的中文差异；完全一致 → nil
     func differences(from baseline: SystemNetworkSnapshot) -> [String] {
@@ -35,6 +37,10 @@ struct SystemNetworkSnapshot: Equatable, Sendable {
             let current = nameServers.isEmpty ? "无" : nameServers.joined(separator: "、")
             messages.append("系统 DNS 为 \(current)")
         }
+        if tunnelRoutes != baseline.tunnelRoutes {
+            let current = tunnelRoutes.isEmpty ? "已清空" : tunnelRoutes.joined(separator: "、")
+            messages.append("仍有 TUN 分流路由（\(current)）")
+        }
         return messages
     }
 }
@@ -51,7 +57,8 @@ enum SystemNetworkProbe {
         return SystemNetworkSnapshot(
             defaultInterface: route.interface,
             defaultGateway: route.gateway,
-            nameServers: nameServers()
+            nameServers: nameServers(),
+            tunnelRoutes: tunnelRoutes()
         )
     }
 
@@ -59,7 +66,7 @@ enum SystemNetworkProbe {
 
     private static func defaultRoute() -> (interface: String?, gateway: String?) {
         // 没有默认路由时 route 退出码非 0，输出为空 → 两个字段都是 nil
-        guard let output = run(routePath, ["-n", "get", "default"]) else {
+        guard let output = runCommand(routePath, ["-n", "get", "default"]) else {
             return (nil, nil)
         }
         return (
@@ -79,6 +86,20 @@ enum SystemNetworkProbe {
         return nil
     }
 
+    // MARK: - 分流路由
+
+    /// `0/1`、`128.0/1` 这两条是 mihomo / 别家 TUN 接管默认路由的典型手法（不改 `default`）
+    private static func tunnelRoutes() -> [String] {
+        guard let table = runCommand("/usr/sbin/netstat", ["-rn", "-f", "inet"]) else { return [] }
+        return table.split(separator: "\n").compactMap { line in
+            let fields = String(line).split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+            guard let destination = fields.first else { return nil }
+            guard destination == "0/1" || destination == "128.0/1" else { return nil }
+            let interface = fields.last ?? "?"
+            return "\(destination) → \(interface)"
+        }
+    }
+
     // MARK: - DNS
 
     private static func nameServers() -> [String] {
@@ -93,8 +114,9 @@ enum SystemNetworkProbe {
 
     // MARK: - 进程
 
-    /// 同步跑一个只读命令；输出合并 stdout / stderr，失败返回 nil
-    private static func run(_ path: String, _ arguments: [String]) -> String? {
+    /// 同步跑一个只读命令；输出合并 stdout / stderr，失败返回 nil。
+    /// `internal` 供 `TunConflictDetector` 复用（不重复实现 Process 管道）。
+    static func runCommand(_ path: String, _ arguments: [String]) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = arguments

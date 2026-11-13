@@ -5,19 +5,20 @@ import OSLog
 ///
 /// 状态流转（§4.2）：
 /// ```
-/// off ──点击──▶ needsInstall ──确认──▶ awaitingAuthorization ──安装成功──▶ starting ──就绪──▶ on
-///  ▲                │（取消）                    │（失败 / 超时）                    │
-///  └────────────────┴───────────────────────────┴──────────────▶ failed(原因)
+/// off ──点击──▶ needsInstall ──说明卡确认──▶ awaitingAuthorization ──装好──▶ starting ──就绪──▶ on
+///  ▲                │（取消）                       │（失败 / 超时）                │
+///  └────────────────┴──────────────────────────────┴──────────────▶ failed(原因) ──点击──▶ 重试
 /// on ──点击──▶ stopping ──确认内核已停──▶ off
 /// ```
 ///
-/// 边界：
-/// - **不执行任何 root 写操作**：安装走 `HelperInstaller`（osascript 一次授权），
-///   运行配置 / 内核启停走 XPC；本类只做编排与校验
-/// - **与系统代理互斥**：开 TUN 前先 `systemProxy.disable()`；开代理前由面板先关 TUN
-/// - **失败必回落**：helper 起不来就把本地内核拉回来，并在 banner 给可执行建议
-/// - **退出不留尾巴**：App 退出时由 `AppTerminationGuard` 同步 `stopKernel`
-///   （helper 是 launchd 常驻，不随 App 退出）
+/// ## 不变量（本轮修的就是这几条）
+/// 1. **任何终态都能再点**：忙碌判断只看 `starting / stopping`；安装流程用 `defer` 复位，
+///    超时、取消、失败、崩溃路径都不会留下「磁贴永久 disabled」的闩锁
+/// 2. **失败原因要分得开**：授权类（`authFailed`）与启动类（`startFailed`）是两种磁贴态，
+///    banner 给的具体原因来自 helper 的中文回复（写配置失败 / spawn 失败 / 日志尾部）
+/// 3. **不与别家 TUN 抢路由**：启动前检测默认路由与活跃 utun，发现其它客户端在接管流量就
+///    明确拒绝并给可执行建议，而不是起一个必然打不通的内核
+/// 4. **不改系统状态的东西一概不做**：不在没有授权的路径上跑 `osascript`，不 kill 别家进程
 @MainActor
 @Observable
 final class TunService {
@@ -51,7 +52,9 @@ final class TunService {
         case versionMismatch
         /// 授权窗口超过预算（`authorizationTimeout`）
         case timeout
-        /// 配置 / 启动 / 就绪失败（参数是中文原因）
+        /// 别的客户端已经在接管流量
+        case conflict(String)
+        /// 配置 / 启动 / 就绪失败（参数是中文原因，来自 helper 或本机校验）
         case startup(String)
 
         var userMessage: String {
@@ -65,33 +68,41 @@ final class TunService {
             case .versionMismatch:
                 "管理员组件需要更新，需再次授权"
             case .timeout:
-                "等待授权超时，请重试"
+                "等待授权超时；若系统密码框仍在，请先取消它再重试"
+            case .conflict(let message):
+                message
             case .startup(let reason):
                 "TUN 未开启：\(reason)"
             }
         }
 
-        /// 授权类失败（磁贴走「授权失败」态）；启动失败另算
+        /// 授权类失败（磁贴走「授权失败」）；启动 / 冲突类走「开启失败」
         var isAuthorizationFailure: Bool {
             switch self {
-            case .startup: false
+            case .startup, .conflict: false
             case .userCancelled, .installFailed, .daemonNotRunning, .versionMismatch, .timeout: true
             }
         }
     }
 
     private(set) var phase: Phase = .off
-    /// 失败文案（banner 用）；成功 / 关闭成功后清空
+    /// 失败文案（banner 用）；下一次操作时清空
     private(set) var failureMessage: String?
     /// 关闭后的复原校验提示（默认路由 / DNS 未回到基线）：TUN 确实关了，但网络可能还没恢复
     private(set) var restoreWarning: String?
+    /// 说明卡：非 nil 时面板弹我们自己的授权说明（SwiftUI `.alert`，不用 `runModal`）
+    ///
+    /// 为什么不用 `NSAlert.runModal()`：菜单栏浮层是 `.popUpMenu` 级面板，模态会话一旦
+    /// 不可见就会**吞掉所有点击**（真机现象：磁贴点了没反应、也没有窗口）。声明式 alert
+    /// 不会有不可见模态会话。
+    private(set) var installPrompt: TunInstallBlocker?
 
     private static let logger = Logger(subsystem: "com.clash.app", category: "tun")
     /// 等 `/version` 就绪的预算（与 `KernelService` 一致）
     private static let readinessTimeout: Duration = .seconds(8)
     private static let readinessPollInterval: Duration = .milliseconds(100)
-    /// 「等待授权」的上限：超时不再等（osascript 进程本身不会被打断，见 `awaitInstallOutcome`）
-    private static let authorizationTimeout: Duration = .seconds(180)
+    /// 「等待授权」的预算：超时后放弃等待（osascript 不会被我们打断，见 `awaitInstallOutcome`）
+    static let authorizationTimeout: Duration = .seconds(180)
 
     @ObservationIgnored private let settings: SettingsStore
     @ObservationIgnored private let systemProxy: SystemProxyService
@@ -99,12 +110,12 @@ final class TunService {
     @ObservationIgnored private let client: HelperClient
 
     @ObservationIgnored private var enableTask: Task<Void, Never>?
-    /// `osascript` 是否真的还在跑：超时不会打断密码框，所以重入判断看这个
-    /// （而不是看 Task 句柄——句柄在超时那一刻就已经结束了）
-    @ObservationIgnored private var installInFlight = false
+    /// 安装流程是否在跑：**只在 `installThenEnable` 的 `defer` 里复位**，
+    /// 超时 / 取消 / 抛错 / 该 Task 被丢弃都一定会走到
+    @ObservationIgnored private var installFlowActive = false
     /// 开 TUN 前的网络基线：关闭时对比，判断路由 / DNS 是否复原
     @ObservationIgnored private var baseline: SystemNetworkSnapshot?
-    /// helper 内核是否**可能**在跑（spawn 已成功，但还没被 `KernelService` 接管的那段时间也算）
+    /// helper 内核是否**可能**在跑（spawn 成功但还没被 `KernelService` 接管的那段时间也算）
     @ObservationIgnored private var hasHelperKernel = false
 
     init(
@@ -125,17 +136,21 @@ final class TunService {
 
     var isOn: Bool { phase == .on }
 
-    /// helper 侧可能仍有 root 内核在跑（含「已 spawn 但尚未接管」的窗口）。
-    /// 退出清理、代理互斥都以它判断，避免漏掉那几百毫秒。
+    /// helper 侧可能仍有 root 内核在跑（含「已 spawn 但尚未接管」的窗口）
     var isHelperKernelRunning: Bool { hasHelperKernel || kernel.isExternal }
 
-    /// 过渡态 / 授权中：磁贴禁用，忽略重复点击
+    /// 只有真正的过渡态才禁用磁贴。
+    ///
+    /// `needsInstall / awaitingAuthorization / failed / off` 一律可点：用户点下去必须
+    /// 有反馈（弹说明卡 / 提示「密码框已弹出」/ 直接重试），不能变成死的。
     var isBusy: Bool {
         switch phase {
-        case .awaitingAuthorization, .starting, .stopping: true
-        case .off, .needsInstall, .on, .failed: false
+        case .starting, .stopping: true
+        case .off, .needsInstall, .awaitingAuthorization, .on, .failed: false
         }
     }
+
+    var isInstalling: Bool { installFlowActive }
 
     /// 磁贴状态（§4.2）：五态 + 过渡 + 启动失败
     var tileState: TunState {
@@ -155,69 +170,90 @@ final class TunService {
 
     // MARK: - 入口
 
-    /// 磁贴点击。过渡中 / 授权中一律忽略（重复点击的边界处理）。
+    /// 磁贴点击：任何「不是过渡态」的状态都要有明确反馈。
     func toggle() {
         switch phase {
         case .on:
             Task { [weak self] in await self?.disable() }
-        case .awaitingAuthorization, .starting, .stopping:
+        case .starting, .stopping:
             return
+        case .awaitingAuthorization:
+            // 授权窗口在 osascript 进程里：我们没法把它拉到前台，只能提示别重复点
+            failureMessage = "系统密码框已弹出，请完成或取消后再点 TUN"
         case .off, .needsInstall, .failed:
             requestEnable()
         }
     }
 
+    /// 编程入口（自检 / 未来的自动重连）：跳过说明卡，直接走启动
+    func enable() async {
+        guard !isBusy, phase != .on, !installFlowActive else { return }
+        await enableInternal(retryingAfterInstall: false)
+    }
+
     private func requestEnable() {
         guard !isBusy else { return }
-        // 上一次授权窗口还没关：再点只会再起一个 osascript（两个密码框），直接拒绝
-        guard !installInFlight else {
-            failureMessage = "正在等待上一次授权结果，请先取消或完成那个密码框"
+        guard !installFlowActive else {
+            failureMessage = "正在安装组件，请稍候"
             return
         }
         failureMessage = nil
         restoreWarning = nil
+        installPrompt = nil
 
-        // 已装（且 launchd 里 job 在）→ 直接走启动；版本是否匹配在 enable 里查
+        // 已装（且 launchd 里 job 在）→ 直接走启动；版本 / 运行时是否齐全在 enable 里查
         if HelperInstaller.isInstalled {
             startEnable()
             return
         }
 
-        // 未装：先「需要授权」再弹我们自己的说明卡，确认后才可能弹系统密码框
+        // 未装：先进「需要授权」，再弹我们自己的说明卡；确认之前绝不碰 osascript
         phase = .needsInstall(.notInstalled)
-        confirmAndInstall(blocker: .notInstalled)
+        installPrompt = .notInstalled
     }
 
-    var isInstalling: Bool { installInFlight }
+    // MARK: - 说明卡（由面板以 SwiftUI alert 呈现）
 
-    // MARK: - 安装流程（不执行系统授权框，需用户确认）
+    func confirmInstallPrompt() {
+        guard installPrompt != nil else { return }
+        installPrompt = nil
+        beginInstall()
+    }
 
-    /// 说明卡 → 确认后调 `HelperInstaller.install()`。
-    ///
-    /// **本轮不执行安装**：这里只实现流程，实际点「继续」才会进 `install()`。
-    private func confirmAndInstall(blocker: TunInstallBlocker) {
-        guard !installInFlight else { return }
+    func cancelInstallPrompt() {
+        guard installPrompt != nil else { return }
+        installPrompt = nil
+        phase = .off
+        failureMessage = TunFailure.userCancelled.userMessage
+    }
 
-        let confirmed = TunInstallPrompt.confirm(updating: blocker == .outdated)
-        guard confirmed else {
-            phase = .off
-            failureMessage = TunFailure.userCancelled.userMessage
-            return
-        }
+    /// 用户按 Esc / 点外部关闭：只收起说明卡，保持「需要授权」，不改变其它状态
+    func dismissInstallPrompt() {
+        installPrompt = nil
+    }
 
-        installInFlight = true
+    // MARK: - 安装（本轮允许真跑，但只在用户确认后）
+
+    private func beginInstall() {
+        guard !installFlowActive else { return }
+        installFlowActive = true
         Task { [weak self] in
             await self?.installThenEnable()
         }
     }
 
+    /// 安装 → 成功后直接启动。
+    ///
+    /// `defer` 是硬性要求：**任何**退出路径（成功 / 取消 / 失败 / 超时 / 抛错）都必须
+    /// 把 `installFlowActive` 复位，否则磁贴会永久 disabled —— 这正是真机卡死的原因。
     private func installThenEnable() async {
+        defer { installFlowActive = false }
+
         phase = .awaitingAuthorization
         let outcome = await awaitInstallOutcome()
 
         switch outcome {
         case .installed:
-            // 装完不一定真跑起来：以 launchd 的 job 状态为准
             guard HelperInstaller.isInstalled else {
                 fail(.daemonNotRunning)
                 return
@@ -259,9 +295,6 @@ final class TunService {
                     outcome = .failed(.installFailed(detail: error.localizedDescription))
                 }
 
-                // 系统密码框这时才真的关了：从这里开始允许再次点击
-                self.installInFlight = false
-
                 guard gate.claim() else {
                     // 超时之后迟到的结果：只记日志，不自动开启（用户可能已经放弃）
                     Self.logger.notice("安装结果迟到（已超时）：\(String(describing: outcome), privacy: .public)")
@@ -283,19 +316,22 @@ final class TunService {
     private func startEnable() {
         enableTask?.cancel()
         enableTask = Task { [weak self] in
+            defer { self?.enableTask = nil }
             await self?.enableInternal(retryingAfterInstall: false)
         }
     }
 
-    /// 开启主流程：版本 → 互斥关代理 → 本地内核让位 → 生成正文 → 送配置 → 启动 → 就绪 → 接管端点
+    /// 开启主流程：版本/运行时 → 冲突检测 → 互斥关代理 → 本地内核让位 → 生成正文 →
+    /// 送配置 → 启动 → 就绪 → 接管端点
     private func enableInternal(retryingAfterInstall: Bool) async {
         failureMessage = nil
         restoreWarning = nil
         phase = .starting
 
-        // 1. 协议版本：不一致就先引导更新（覆盖安装要再授权一次）
+        // 1. 协议版本 + 运行时自检（缺内核 / 目录不完整时直接给准确原因，不去 spawn 再失败）
+        let snapshot: HelperRuntimeSnapshot
         do {
-            try await client.checkVersion()
+            snapshot = try await client.checkVersion()
         } catch HelperClientError.versionMismatch {
             if retryingAfterInstall {
                 fail(.versionMismatch)
@@ -303,7 +339,7 @@ final class TunService {
             }
             phase = .needsInstall(.outdated)
             failureMessage = "管理员组件需要更新，需再次授权"
-            confirmAndInstall(blocker: .outdated)
+            installPrompt = .outdated
             return
         } catch {
             if retryingAfterInstall {
@@ -311,11 +347,33 @@ final class TunService {
                 return
             }
             phase = .needsInstall(.notInstalled)
-            confirmAndInstall(blocker: .notInstalled)
+            installPrompt = .notInstalled
             return
         }
 
-        // 2. 互斥：系统代理与 TUN 不能同时接管流量
+        if snapshot.kernelBinaryPresent == false || snapshot.supportDirectoryPresent == false {
+            var missing: [String] = []
+            if snapshot.kernelBinaryPresent == false { missing.append("内核文件") }
+            if snapshot.supportDirectoryPresent == false { missing.append("运行目录") }
+            fail(.startup("管理员组件不完整（缺少\(missing.joined(separator: "、"))），请在设置里重新安装"))
+            return
+        }
+
+        // 2. 别家 TUN / VPN 已在接管流量：不抢路由，直接给可执行建议
+        if let conflict = TunConflictDetector.detect() {
+            Self.logger.error("TUN 冲突：\(conflict.summary, privacy: .public)")
+            fail(.conflict(conflict.userMessage))
+            return
+        }
+
+        // 3. GeoIP / GeoSite 数据库：缺了内核会去 GitHub 下载（90s 超时），先拦下并给准确原因
+        let profileURL = ProfileLocator.locate()
+        if let missingGeodata = TunGeodataProbe.missingDescription(profileURL: profileURL) {
+            fail(.startup(missingGeodata))
+            return
+        }
+
+        // 4. 互斥：系统代理与 TUN 不能同时接管流量
         if systemProxy.isEnabled {
             do {
                 try await systemProxy.disable()
@@ -325,12 +383,12 @@ final class TunService {
             }
         }
 
-        // 3. 本地内核让位：两者用同一个 mixed-port
+        // 5. 本地内核让位：两者用同一个 mixed-port
         if kernel.phase == .running || kernel.phase == .starting {
             await kernel.stop()
         }
 
-        // 4. 生成本轮的端点与正文（端口 / secret 由 App 决定，随正文一起送 helper）
+        // 6. 生成本轮端点与正文（端口 / secret 由 App 决定，随正文一起送 helper）
         let ports: [Int]
         do {
             ports = try PortAllocator.allocateDistinct(2)
@@ -340,7 +398,7 @@ final class TunService {
         }
 
         let mixedPort = settings.mixedPort
-        guard PortAllocator.isAvailable(port: mixedPort) else {
+        guard await waitForPortRelease(mixedPort) else {
             fail(.startup("端口 \(mixedPort) 已被占用，请先释放"))
             return
         }
@@ -357,7 +415,6 @@ final class TunService {
             tunStack: .gvisor
         )
 
-        let profileURL = ProfileLocator.locate()
         let yaml: String
         do {
             yaml = try RuntimeConfigBuilder.yaml(from: profileURL, injected: injected)
@@ -366,32 +423,34 @@ final class TunService {
             return
         }
 
-        // 5. 抓基线：关闭时用它判断路由 / DNS 是否复原
+        // 7. 抓基线：关闭时用它判断路由 / DNS 是否复原
         baseline = SystemNetworkProbe.capture()
 
-        // 6. 送配置 → 启动 root 内核（两步 XPC，失败时停一次防半开）
+        // 8. 送配置 → 启动 root 内核（两步 XPC；失败时停一次防半开）
         let runner = HelperKernelRunner(client: client)
         do {
             _ = try await runner.start(configData: Data(yaml.utf8))
             hasHelperKernel = true
         } catch {
             await runner.stop()
+            hasHelperKernel = false
             fail(.startup(Self.describe(error)))
             return
         }
 
-        // 7. 等 `/version`：spawn 成功不等于可用（端口冲突 / 配置错误都在这一步暴露）
+        // 9. 等 `/version`：spawn 成功不等于可用（端口冲突 / 配置错误都在这一步暴露）
         let version: String
         do {
             version = try await waitUntilReady(port: ports[0], secret: secret)
         } catch {
             await runner.stop()
             hasHelperKernel = false
-            fail(.startup("内核启动后 8 秒内未就绪"))
+            fail(.startup("内核启动后 \(Int(Self.readinessTimeout.components.seconds)) 秒内未就绪"
+                + "（详见 \(HelperLayout.kernelLogPath)）"))
             return
         }
 
-        // 8. 接管 API 端点：面板的策略组 / 流量 / 连接 / 日志都从这里取数
+        // 10. 接管 API 端点：面板的策略组 / 流量 / 连接 / 日志都从这里取数
         kernel.adoptExternalKernel(
             port: ports[0],
             secret: secret,
@@ -403,7 +462,18 @@ final class TunService {
         )
 
         phase = .on
+        failureMessage = nil
         Self.logger.notice("TUN 已开启 controller=127.0.0.1:\(ports[0]) version=\(version, privacy: .public)")
+    }
+
+    /// 等 mixed-port 真正释放：刚停掉本地内核时，进程退出 / TIME_WAIT 会让第一次探测失败
+    private func waitForPortRelease(_ port: Int) async -> Bool {
+        for attempt in 0..<10 {
+            if PortAllocator.isAvailable(port: port) { return true }
+            if attempt == 9 { break }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        return false
     }
 
     /// 轮询 `/version`；成功即就绪
@@ -456,7 +526,6 @@ final class TunService {
         failureMessage = nil
         Self.logger.notice("TUN 已关闭")
 
-        // 回落：把本地内核拉回来，面板不至于没有节点可选
         if restartLocalKernel {
             await restartLocalKernelIfNeeded()
         }
@@ -468,6 +537,7 @@ final class TunService {
         phase = .failed(failure)
         failureMessage = failure.userMessage
         hasHelperKernel = false
+        installPrompt = nil
         kernel.releaseExternalKernel()
         Self.logger.error("TUN 失败：\(failure.userMessage, privacy: .public)")
 

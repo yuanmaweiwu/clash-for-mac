@@ -219,7 +219,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -eu\n\nSRC=\"$SRCROOT/Resources/Kernel/mihomo\"\nDEST_DIR=\"$BUILT_PRODUCTS_DIR/$CONTENTS_FOLDER_PATH/Resources/Kernel\"\n\nif [ ! -f \"$SRC\" ]; then\n  echo \"warning: 内核二进制缺失（$SRC），跳过拷贝；先运行 Scripts/fetch-kernel.sh\"\n  exit 0\nfi\n\nmkdir -p \"$DEST_DIR\"\nditto \"$SRC\" \"$DEST_DIR/mihomo\"\nchmod 0755 \"$DEST_DIR/mihomo\"\nif [ -f \"$SRCROOT/Resources/Kernel/VERSION\" ]; then\n  ditto \"$SRCROOT/Resources/Kernel/VERSION\" \"$DEST_DIR/VERSION\"\nfi\necho \"Copied kernel: $DEST_DIR/mihomo\"\n";
+			shellScript = "set -eu\n\nSRC=\"$SRCROOT/Resources/Kernel/mihomo\"\nDEST_DIR=\"$BUILT_PRODUCTS_DIR/$CONTENTS_FOLDER_PATH/Resources/Kernel\"\n\nif [ ! -f \"$SRC\" ]; then\n  echo \"warning: 内核二进制缺失（$SRC），跳过拷贝；先运行 Scripts/fetch-kernel.sh\"\n  exit 0\nfi\n\nmkdir -p \"$DEST_DIR\"\nditto \"$SRC\" \"$DEST_DIR/mihomo\"\nchmod 0755 \"$DEST_DIR/mihomo\"\nif [ -f \"$SRCROOT/Resources/Kernel/VERSION\" ]; then\n  ditto \"$SRCROOT/Resources/Kernel/VERSION\" \"$DEST_DIR/VERSION\"\nfi\nfor name in geoip.metadb geosite.dat; do\n  if [ -f \"$SRCROOT/Resources/Kernel/$name\" ]; then\n    ditto \"$SRCROOT/Resources/Kernel/$name\" \"$DEST_DIR/$name\"\n  fi\ndone\necho \"Copied kernel: $DEST_DIR/mihomo\"\n";
 		};
 		1A2B3C4D5E6F7A8B9C0D003B /* Copy helper */ = {
 			isa = PBXShellScriptBuildPhase;

@@ -1,6 +1,5 @@
 import Darwin
 import Foundation
-import OSLog
 
 /// 一个命令的结果：`ok == false` 时 `message` 是给用户看的原因。
 struct KernelCommandResult: Sendable {
@@ -27,7 +26,6 @@ final class KernelSupervisor: @unchecked Sendable {
 
     static let shared = KernelSupervisor()
 
-    private static let logger = Logger(subsystem: "com.clash.helper", category: "kernel")
     /// `SIGTERM` 后的宽限（`core-process` §2）
     private static let terminationGrace: TimeInterval = 3
     private static let killGrace: TimeInterval = 1
@@ -64,18 +62,18 @@ final class KernelSupervisor: @unchecked Sendable {
         // 单实例：已有实例在跑就回报既有 pid，绝不重复 spawn
         if let process, process.isRunning {
             let pid = process.processIdentifier
-            Self.logger.notice("内核已在运行，复用 pid=\(pid)")
+            HelperLog.notice("内核已在运行，复用 pid=\(pid)")
             return .success("pid=\(pid)")
         }
         closeLog()
 
         let fileManager = FileManager.default
         guard fileManager.isExecutableFile(atPath: HelperLayout.kernelToolPath) else {
-            Self.logger.error("内核不存在或不可执行：\(HelperLayout.kernelToolPath, privacy: .public)")
+            HelperLog.error("内核不存在或不可执行：\(HelperLayout.kernelToolPath)")
             return .failure("内核文件缺失，请重新安装组件")
         }
         guard fileManager.fileExists(atPath: HelperLayout.runtimeConfigPath) else {
-            Self.logger.error("运行配置缺失：\(HelperLayout.runtimeConfigPath, privacy: .public)")
+            HelperLog.error("运行配置缺失：\(HelperLayout.runtimeConfigPath)")
             return .failure("运行配置缺失，请重新开启 TUN")
         }
 
@@ -83,7 +81,7 @@ final class KernelSupervisor: @unchecked Sendable {
         do {
             handle = try openLogHandle()
         } catch {
-            Self.logger.error("打开内核日志失败：\(String(describing: error), privacy: .public)")
+            HelperLog.error("打开内核日志失败：\(error.localizedDescription)")
             return .failure("无法写入内核日志")
         }
 
@@ -102,21 +100,21 @@ final class KernelSupervisor: @unchecked Sendable {
             try child.run()
         } catch {
             try? handle.close()
-            Self.logger.error("spawn 失败：\(String(describing: error), privacy: .public)")
+            HelperLog.error("spawn 失败：\(error.localizedDescription)")
             return .failure("无法启动内核（spawn 失败）")
         }
 
         let pid = child.processIdentifier
         process = child
         logHandle = handle
-        Self.logger.notice("以 root 启动内核 pid=\(pid)")
+        HelperLog.notice("以 root 启动内核 pid=\(pid)")
 
         // 立刻退出的多半是配置 / 端口 / 权限问题，读日志末行给出可读原因
         Thread.sleep(forTimeInterval: Self.spawnProbeInterval)
         guard child.isRunning else {
             let code = child.terminationStatus
             let tail = logTail()
-            Self.logger.error("内核启动后立即退出 code=\(code)")
+            HelperLog.error("内核启动后立即退出 code=\(code) tail=\(tail.isEmpty ? "（无输出）" : tail)")
             closeLog()
             process = nil
             return .failure(tail.isEmpty ? "内核启动失败（退出码 \(code)）" : tail)
@@ -136,13 +134,13 @@ final class KernelSupervisor: @unchecked Sendable {
         if process.isRunning {
             process.terminate() // SIGTERM
             if !waitForExit(process, within: Self.terminationGrace) {
-                Self.logger.warning("SIGTERM 超时，改用 SIGKILL pid=\(process.processIdentifier)")
+                HelperLog.warning("SIGTERM 超时，改用 SIGKILL pid=\(process.processIdentifier)")
                 kill(process.processIdentifier, SIGKILL)
                 stopped = waitForExit(process, within: Self.killGrace)
             }
         }
 
-        Self.logger.notice("内核已停止（\(stopped ? "确认退出" : "未能退出", privacy: .public)）")
+        HelperLog.notice("内核已停止（\(stopped ? "确认退出" : "未能退出")）")
         self.process = nil
         closeLog()
         return stopped

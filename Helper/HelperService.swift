@@ -44,21 +44,19 @@ enum HelperClientValidator {
 /// `NSXPCListener` 的 delegate：只放行来自本 App 的连接，并按连接发一个 session 对象。
 final class HelperService: NSObject, NSXPCListenerDelegate, @unchecked Sendable {
 
-    private static let logger = Logger(subsystem: "com.clash.helper", category: "xpc")
-
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection newConnection: NSXPCConnection) -> Bool {
         guard HelperClientValidator.isAllowed(newConnection) else {
-            Self.logger.error("拒绝 XPC 连接：\(HelperClientValidator.describe(newConnection), privacy: .public)")
+            HelperLog.error("拒绝 XPC 连接：\(HelperClientValidator.describe(newConnection))")
             newConnection.invalidate()
             return false
         }
 
-        Self.logger.notice("接受 XPC 连接：\(HelperClientValidator.describe(newConnection), privacy: .public)")
+        HelperLog.notice("接受 XPC 连接：\(HelperClientValidator.describe(newConnection))")
 
         newConnection.exportedInterface = NSXPCInterface(with: KernelHelperProtocol.self)
         newConnection.exportedObject = HelperSession()
         newConnection.invalidationHandler = {
-            Self.logger.notice("XPC 连接已失效")
+            HelperLog.notice("XPC 连接已失效")
         }
         newConnection.resume()
         return true
@@ -70,8 +68,11 @@ final class HelperService: NSObject, NSXPCListenerDelegate, @unchecked Sendable 
 /// 唯一从 XPC 进来的内容是「配置正文」，落盘路径由 helper 自己推导（`HelperLayout`）。
 final class HelperSession: NSObject, KernelHelperProtocol {
 
+    /// 版本 + 运行时自检（内核二进制 / 运行配置 / 运行目录）。旧 App 仍能当纯版本号解析。
     func ping(_ reply: @escaping (String) -> Void) {
-        reply(String(HelperVersion))
+        let snapshot = HelperRuntimeSnapshot.current()
+        HelperLog.notice("ping → \(snapshot.wireValue)")
+        reply(snapshot.wireValue)
     }
 
     func applyRuntimeConfig(_ bytes: Data, reply: @escaping (Bool, String?) -> Void) {
@@ -81,11 +82,16 @@ final class HelperSession: NSObject, KernelHelperProtocol {
 
     func startKernel(_ reply: @escaping (Bool, String?) -> Void) {
         let result = KernelSupervisor.shared.start()
+        if !result.ok {
+            HelperLog.error("startKernel 失败：\(result.message ?? "未知原因")")
+        }
         reply(result.ok, result.message)
     }
 
     func stopKernel(_ reply: @escaping (Bool) -> Void) {
-        reply(KernelSupervisor.shared.stop())
+        let stopped = KernelSupervisor.shared.stop()
+        HelperLog.notice("stopKernel → \(stopped ? "已确认退出" : "未能退出")")
+        reply(stopped)
     }
 
     func kernelState(_ reply: @escaping (Bool, String?) -> Void) {

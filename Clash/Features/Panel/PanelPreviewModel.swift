@@ -551,6 +551,14 @@ final class PanelPreviewModel {
         tun.toggle()
     }
 
+    /// 授权说明卡（非 nil 时面板弹 alert）；内容见 `TunInstallPrompt`
+    var tunInstallPrompt: TunService.TunInstallBlocker? { tun.installPrompt }
+
+    func confirmTunInstall() { tun.confirmInstallPrompt() }
+    func cancelTunInstall() { tun.cancelInstallPrompt() }
+    /// Esc / 点外部关闭：只收起说明卡，保持「需要授权」，不进入安装
+    func dismissTunInstallPrompt() { tun.dismissInstallPrompt() }
+
     // MARK: - 导航
 
     func openAllGroups() { route = .allGroups }

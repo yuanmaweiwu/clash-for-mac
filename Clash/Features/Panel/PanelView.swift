@@ -59,6 +59,27 @@ struct PanelView: View {
                 onClose()
             }
         }
+        // TUN 授权说明卡：声明式 alert（不用 NSAlert.runModal，避免不可见模态会话吞点击）
+        .alert(
+            TunInstallPrompt.title(updating: model.tunInstallPrompt == .outdated),
+            isPresented: installPromptBinding
+        ) {
+            Button("取消", role: .cancel) { model.cancelTunInstall() }
+            Button("继续") { model.confirmTunInstall() }
+        } message: {
+            Text(TunInstallPrompt.message)
+        }
+    }
+
+    /// 关闭 alert 时不带选择（Esc / 点外部）→ 只收起说明卡，保持「需要授权」
+    private var installPromptBinding: Binding<Bool> {
+        Binding(
+            get: { model.tunInstallPrompt != nil },
+            set: { isPresented in
+                guard !isPresented else { return }
+                model.dismissTunInstallPrompt()
+            }
+        )
     }
 
     @ViewBuilder

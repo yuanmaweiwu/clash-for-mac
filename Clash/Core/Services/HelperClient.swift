@@ -39,24 +39,29 @@ final class HelperClient {
 
     // MARK: - 白名单方法
 
-    /// helper 协议版本；不一致时由 `checkVersion()` 抛 `.versionMismatch`
-    func ping() async throws -> Int {
+    /// helper 运行时快照：版本 + 内核二进制 / 运行配置 / 运行目录是否在位。
+    ///
+    /// 旧 helper（v2 安装版）只会回纯版本号，此时三个 `Bool?` 都是 nil（= 未知），
+    /// 上层不做判断、交给 `startKernel` 报具体原因。
+    func probe() async throws -> HelperRuntimeSnapshot {
         let raw: String = try await call { proxy, reply in proxy.ping(reply) }
         isConnected = true
-        guard let actual = Int(raw) else {
+        guard let snapshot = HelperRuntimeSnapshot(wireValue: raw) else {
             Self.logger.error("helper 返回无法解析的版本：\(raw, privacy: .public)")
             throw HelperClientError.versionMismatch(expected: HelperVersion, actual: nil)
         }
-        return actual
+        return snapshot
     }
 
     /// App 启动 / 安装后调用：版本不齐直接抛错，触发「组件需要更新」
-    func checkVersion() async throws {
-        let actual = try await ping()
-        guard actual == HelperVersion else {
-            Self.logger.error("helper 版本不符 expected=\(HelperVersion) actual=\(actual)")
-            throw HelperClientError.versionMismatch(expected: HelperVersion, actual: actual)
+    @discardableResult
+    func checkVersion() async throws -> HelperRuntimeSnapshot {
+        let snapshot = try await probe()
+        guard snapshot.version == HelperVersion else {
+            Self.logger.error("helper 版本不符 expected=\(HelperVersion) actual=\(snapshot.version)")
+            throw HelperClientError.versionMismatch(expected: HelperVersion, actual: snapshot.version)
         }
+        return snapshot
     }
 
     /// 送运行配置正文（v2）：helper 校验后原子写 `runtime.yaml`，**不启动内核**。

@@ -51,12 +51,17 @@
 - [x] TUN 协议 v2：配置正文经 XPC 送达，helper 校验（Yams 顶层映射）+ 原子写 0600 root:wheel，**不自动启动**
 - [x] `RuntimeConfigBuilder` TUN 段：开 → 整段覆盖 + fake-ip DNS；关 → 只留 `tun.enable=false`
 - [x] `TunService` 状态机（off / needsInstall / awaitingAuthorization / starting / on / stopping / failed）+ 与系统代理互斥
-- [x] TUN 磁贴五态 + 安装说明卡（未执行 `HelperInstaller.install()`，等真机授权）
+- [x] TUN 磁贴五态 + 安装说明卡（改成 SwiftUI alert，不用 `NSAlert.runModal`）+ 失败后必可重试
 - [x] 退出清理：TUN 开着时 `stopKernel` 同步确认（1.5s 上限）+ 启动时回收遗留 root 内核
+- [x] 真机验证（2026-11-13）：root mihomo → utun4=198.18.0.1 → `/version` 就绪 → 关闭后
+  utun 消失、`128.0/1` 分流路由清空、无残留进程；非法 YAML 被 helper 拒并给中文原因
+- [ ] **geodata 缺口**：helper 运行目录缺 `geoip.metadb`，真订阅（含 `GEOIP,CN`）一启动就去
+  GitHub 下载（90s 超时）。安装脚本已改成从包内拷贝；当前这台机器需一次 root 拷贝或重新授权安装
 
 ## 下一步（按优先级）
 
-1. TUN 真机安装：执行一次 `HelperInstaller.install()` → 验证 XPC → utun 起来 → 退出/崩溃各一次
+1. TUN 补 geodata（一次 root 拷贝，或重新授权安装把新 helper + geodata 一起装上）→ 用真订阅再跑一遍
+   `CLASH_TUN_SMOKE=1`；随后验证 ⌘Q 与 `kill -9` 各一次（后者靠启动时回收遗留 root 内核）
 2. 真实节点数据：Yams 配置合并 + `profiles/index.json` + 订阅导入（进行中）
 2. `ProxyService`：`/proxies` 策略组与节点、选择、测速、`PATCH /configs` 模式
 3. helper（管理员授权安装）+ 系统代理快照还原
@@ -73,6 +78,8 @@
 - v0.2 起系统代理/TUN 依赖 helper 安装流程，属于必做项，不再等证书
 - 架构要点：**helper（root）是内核与系统写操作的唯一持有者**；App 只通过 XPC + mihomo HTTP/WS 通信
 - 配置原则：用户 YAML 永不改写，注入只进 `runtime/`；订阅库多条、单条 active、`pinnedGroups` 只是 UI 偏好
+- **TUN 的 geodata 是硬依赖**：`mihomo -d` 目录里要有 `geoip.metadb` / `geosite.dat`，缺失时内核
+  会在线下载（国内 90s 超时，表现为「8 秒未就绪」）；`Scripts/fetch-kernel.sh` 已会拉，安装脚本会拷
 - 构建命令已写入 `.agents/skills/swiftui-app/SKILL.md` §6（工程创建后需实测修正）
 - 唯一 Swift 代码在 `Prototype/`（可交互原型，未接内核；正式工程 v0.1 再建）
 
