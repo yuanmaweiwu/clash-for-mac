@@ -1,4 +1,4 @@
-// TODO(v0.3): 日志窗口仍是空态；连接列表已接 `/connections`
+// TODO(v0.3): 设置窗口仍是占位；连接列表 / 日志窗口已接真实数据
 import CoreGraphics
 import Foundation
 import Observation
@@ -16,8 +16,9 @@ import Observation
 ///   （`profiles/index.json` + `profiles/<id>.yaml`）
 /// - 实时速率与 60 点曲线，来自 `TrafficService`（`/traffic` WS，1Hz）
 /// - 连接列表（条数 / 规则 / 节点 / 关闭），来自 `ConnectionService`（`/connections`，面板打开时 2s 轮询）
+/// - 日志窗口（级别 / 暂停 / 清空 / 导出），来自 `LogStore`（`/logs` WS，窗口打开期间才连）
 ///
-/// **还没接的**：日志窗口、TUN（helper）。
+/// **还没接的**：设置窗口、TUN（helper）。
 @MainActor
 @Observable
 final class PanelPreviewModel {
@@ -36,6 +37,8 @@ final class PanelPreviewModel {
     @ObservationIgnored private let traffic: TrafficService
     /// 真实连接列表（`/connections` 轮询）
     @ObservationIgnored private let connections: ConnectionService
+    /// 日志窗口的缓冲与 `/logs` WS（窗口打开才连，关窗即停）
+    @ObservationIgnored let logStore: LogStore
 
     /// 连接磁贴的五态（§4.2）；开 / 关成功与否都以读回校验为准
     private(set) var connectionState: ConnectionState = .off
@@ -130,6 +133,7 @@ final class PanelPreviewModel {
         self.proxies = ProxyService(kernel: kernel)
         self.traffic = TrafficService(kernel: kernel)
         self.connections = ConnectionService(kernel: kernel)
+        self.logStore = LogStore(kernel: kernel)
         self.connectionState = systemProxy.isEnabled ? .on : .off
 
         // 内核一就绪就拉真实策略组；停止 / 失败即清空

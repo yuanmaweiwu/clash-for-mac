@@ -11,6 +11,8 @@ struct FooterView: View {
     let onRefresh: () -> Void
     /// 底栏「连接」图标：推入连接列表二级页
     let onOpenConnections: () -> Void
+    /// 底栏「日志」图标：打开独立日志窗口
+    let onOpenLogs: () -> Void
 
     @Environment(\.openSettings) private var openSettings
 
@@ -44,10 +46,7 @@ struct FooterView: View {
             }
 
             IconButtonView(systemName: "text.alignleft", label: "日志", iconSize: 12) {
-                PlaceholderPanel.show(
-                    title: "日志",
-                    detail: "日志窗口会在接入内核后提供，这里先只验证入口。"
-                )
+                onOpenLogs()
             }
 
             IconButtonView(systemName: "gearshape", label: "设置", iconSize: 12) {

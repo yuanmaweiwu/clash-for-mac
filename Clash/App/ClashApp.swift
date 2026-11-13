@@ -20,6 +20,7 @@ struct ClashApp: App {
         // CLI 自检入口（`CLASH_PROFILE_HARNESS` / `CLASH_PROXY_HARNESS`），正常启动不受影响
         ProfileStoreHarness.runIfRequested()
         SystemProxyHarness.runIfRequested()
+        LogStoreHarness.runIfRequested()
         #endif
         // 服务先于 model / guard 建好：两者共享同一实例，退出清理才看得见真实状态
         let systemProxy = SystemProxyService()
@@ -39,6 +40,13 @@ struct ClashApp: App {
         }
         .menuBarExtraStyle(.window)
 
+        // 日志窗口：单例（`Window` 重复 openWindow 只聚焦已有窗口），不是二级面板
+        Window("日志", id: AppWindow.logsID) {
+            LogWindowView(store: model.logStore)
+        }
+        .defaultSize(width: 760, height: 520)
+        .defaultPosition(.center)
+
         Settings {
             SettingsPlaceholderView()
         }
@@ -53,4 +61,9 @@ struct ClashApp: App {
     private var phaseAccessibilityLabel: String {
         model.status.title
     }
+}
+
+/// 独立窗口的 id（`openWindow(id:)` 与 `Window(id:)` 必须一致）
+enum AppWindow {
+    static let logsID = "logs"
 }

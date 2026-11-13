@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// 340pt 宽的控制面板本体（§3.1 线框 / §3.2 分区规格）。
@@ -9,6 +10,7 @@ struct PanelView: View {
     let model: PanelPreviewModel
     var onClose: () -> Void = {}
 
+    @Environment(\.openWindow) private var openWindow
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var panelShape: RoundedRectangle {
@@ -113,10 +115,7 @@ struct PanelView: View {
             // 顶部 banner：插在状态条正下方，占固定高度，不把面板撑高（§7）
             if let message = model.errorMessage {
                 ErrorBannerView(message: message) {
-                    PlaceholderPanel.show(
-                        title: "日志",
-                        detail: "日志窗口会在接入内核后提供，先在这里展示内核输出。"
-                    )
+                    openLogs()
                 }
                 .padding(.top, Metrics.bannerSpacing)
                 .padding(.bottom, Metrics.bannerSpacing)
@@ -146,12 +145,26 @@ struct PanelView: View {
                 connectionCount: nil,
                 kernelVersion: model.kernelVersion,
                 onRefresh: { model.refreshProfile() },
-                onOpenConnections: { model.openConnections() }
+                onOpenConnections: { model.openConnections() },
+                onOpenLogs: { openLogs() }
             )
             .padding(.top, Metrics.tileGap)
         }
         .padding(.horizontal, Metrics.panelPadding)
         .padding(.vertical, Metrics.panelPadding)
+    }
+
+    /// 底栏「日志」/ 失败 banner：打开独立日志窗口（单例，重复点击只聚焦），并收起菜单栏浮层
+    private func openLogs() {
+        openWindow(id: AppWindow.logsID)
+        // LSUIElement 应用不会自动到前台，窗口不激活的话用户看不到刚打开的日志
+        NSApp.activate(ignoringOtherApps: true)
+
+        // `PopoverCloser` 按 keyWindow 关，此时 key 已是日志窗口，找不到浮层；
+        // `MenuBarExtra` 的浮层是 `.popUpMenu` 级别的 NSPanel（状态栏图标窗口是 `.statusBar`，不会被误关）
+        for window in NSApp.windows where window.isVisible && window.level == .popUpMenu {
+            window.close()
+        }
     }
 }
 

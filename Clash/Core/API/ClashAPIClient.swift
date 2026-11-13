@@ -52,6 +52,8 @@ actor ClashAPIClient {
     private let streamSession: URLSession
     /// 在连的 `/traffic` socket；`stopTraffic()` 与内核重启时统一关闭
     private var sockets: [UUID: URLSessionWebSocketTask] = [:]
+    /// 在连的 `/logs` socket；与 `/traffic` 分开记账，日志窗口关窗不会连累流量曲线
+    private var logSockets: [UUID: URLSessionWebSocketTask] = [:]
 
     init(port: Int, secret: String, timeout: TimeInterval = 5) {
         self.port = port
@@ -218,12 +220,81 @@ actor ClashAPIClient {
         sockets.removeValue(forKey: id)
     }
 
-    private func streamRequest(path: String) -> URLRequest {
+    // MARK: - 内核日志（WS）
+
+    /// `/logs?level=<level>`：内核日志推送（`core-process` §5）。
+    ///
+    /// - 鉴权走 `Authorization` 头，同 `/traffic`：secret 不进 URL
+    /// - 单帧解析失败直接跳过，不中断流
+    /// - 看门狗阈值比 `/traffic` 宽得多：日志流本身可能长时间没有一帧（内核空闲），
+    ///   用 3s 会一直误杀重连；这里只兜「socket 半开、`receive()` 永不返回」的极端情况
+    /// - 取消：`stopLogs()` 或流被释放都会关 socket，消费端 `for await` 正常退出
+    func logs(level: String, idleTimeout: Duration = .seconds(600)) -> AsyncThrowingStream<LogLine, Error> {
+        let socket = streamSession.webSocketTask(
+            with: streamRequest(path: "logs", query: [URLQueryItem(name: "level", value: level)])
+        )
+        let id = UUID()
+        logSockets[id] = socket
+
+        return AsyncThrowingStream { continuation in
+            let activity = FrameActivity()
+
+            let producer = Task {
+                socket.resume()
+
+                // 看门狗：只负责「多久没帧」，收到帧的判定在收包循环里做
+                let watchdog = Task {
+                    while !Task.isCancelled {
+                        try? await Task.sleep(for: .milliseconds(500))
+                        guard await activity.isIdle(beyond: idleTimeout) else { continue }
+                        socket.cancel(with: .goingAway, reason: nil)
+                        return
+                    }
+                }
+                defer { watchdog.cancel() }
+
+                do {
+                    while !Task.isCancelled {
+                        let message = try await socket.receive()
+                        await activity.touch()
+                        guard let line = Self.decodeLog(message) else { continue }
+                        continuation.yield(line)
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: LogStreamError.interrupted)
+                }
+            }
+
+            continuation.onTermination = { _ in
+                producer.cancel()
+                socket.cancel(with: .goingAway, reason: nil)
+                Task { await self.removeLogSocket(id) }
+            }
+        }
+    }
+
+    /// 关闭所有 `/logs` 连接（日志窗口关闭 / 内核停止）；消费端随后从 `for await` 退出
+    func stopLogs() {
+        for socket in logSockets.values {
+            socket.cancel(with: .goingAway, reason: nil)
+        }
+        logSockets.removeAll()
+    }
+
+    private func removeLogSocket(_ id: UUID) {
+        logSockets.removeValue(forKey: id)
+    }
+
+    private func streamRequest(path: String, query: [URLQueryItem] = []) -> URLRequest {
         var components = URLComponents()
         components.scheme = "ws"
         components.host = "127.0.0.1"
         components.port = port
         components.path = "/" + path
+        if !query.isEmpty {
+            components.queryItems = query
+        }
 
         var request = URLRequest(url: components.url ?? URL(string: "ws://127.0.0.1")!)
         request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
@@ -231,16 +302,24 @@ actor ClashAPIClient {
     }
 
     private static func decodeTraffic(_ message: URLSessionWebSocketTask.Message) -> TrafficSample? {
-        let data: Data
+        guard let data = payloadData(of: message) else { return nil }
+        return try? JSONDecoder().decode(TrafficSample.self, from: data)
+    }
+
+    private static func decodeLog(_ message: URLSessionWebSocketTask.Message) -> LogLine? {
+        guard let data = payloadData(of: message) else { return nil }
+        return LogLine(wire: data)
+    }
+
+    private static func payloadData(of message: URLSessionWebSocketTask.Message) -> Data? {
         switch message {
         case .data(let payload):
-            data = payload
+            return payload
         case .string(let text):
-            data = Data(text.utf8)
+            return Data(text.utf8)
         @unknown default:
             return nil
         }
-        return try? JSONDecoder().decode(TrafficSample.self, from: data)
     }
 
     // MARK: - 请求
@@ -332,6 +411,11 @@ extension ClashAPIClient.APIError {
 
 /// `/traffic` 流的中断原因：握手失败、socket 被关、或断流（长时间无帧）。
 enum TrafficStreamError: Error, Equatable, Sendable {
+    case interrupted
+}
+
+/// `/logs` 流的中断原因（同上）
+enum LogStreamError: Error, Equatable, Sendable {
     case interrupted
 }
 
