@@ -41,6 +41,10 @@ final class ConnectionService {
 
     /// 面板出现：立刻拉一次，之后每 2s 一次；重复调用幂等
     func startPolling() {
+        #if DEBUG
+        // 截图夹具：不启动轮询，否则一次 refresh 就把摆好的连接清空
+        if Self.isPreview { return }
+        #endif
         guard pollTask == nil else { return }
 
         pollTask = Task { [weak self] in
@@ -158,7 +162,11 @@ final class ConnectionService {
 #if DEBUG
 extension ConnectionService {
     /// 预览夹具：不请求内核，摆几条连接（截图走查用）
+    /// 预览夹具开关：只影响 Debug 构建
+    static var isPreview = false
+
     func applyPreviewConnections() {
+        Self.isPreview = true
         entries = [
             ConnectionEntry(previewHost: "www.google.com", processName: "Safari", rule: "DomainSuffix(google.com)", node: "香港 01", upload: 24_576, download: 1_258_291),
             ConnectionEntry(previewHost: "api.github.com", processName: "Xcode", rule: "DomainSuffix(github.com)", node: "日本 02", upload: 8_192, download: 348_160),

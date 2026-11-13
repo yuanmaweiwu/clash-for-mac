@@ -11,8 +11,8 @@ struct ConnectionRowView: View {
     @State private var isHovering = false
 
     var body: some View {
-        HStack(spacing: 6) {
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: Space.s) {
+            VStack(alignment: .leading, spacing: Space.hair) {
                 Text(displayHost)
                     .font(Typography.body)
                     .foregroundStyle(Theme.textPrimary)
@@ -30,7 +30,7 @@ struct ConnectionRowView: View {
             .accessibilityLabel(Text(accessibilityLabel))
             .accessibilityValue(Text(accessibilityValue))
 
-            Spacer(minLength: 6)
+            Spacer(minLength: Space.s)
 
             Text(trafficText)
                 .font(Typography.number)
@@ -45,7 +45,7 @@ struct ConnectionRowView: View {
         }
         .padding(.horizontal, Metrics.cardPadding)
         .frame(maxWidth: .infinity)
-        .frame(height: 48)
+        .frame(height: Metrics.listRowHeight)
         .background { hoverPill }
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }

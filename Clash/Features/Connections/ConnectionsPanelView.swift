@@ -33,16 +33,16 @@ struct ConnectionsPanelView: View {
     // MARK: - 面包屑
 
     private var breadcrumb: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: Space.xs) {
             IconButtonView(systemName: "chevron.left", label: "返回", iconSize: 12) {
                 onBack()
             }
 
             Text("连接")
-                .font(Typography.title)
+                .font(Typography.pageTitle)
                 .foregroundStyle(Theme.textPrimary)
 
-            Spacer(minLength: 6)
+            Spacer(minLength: Space.s)
 
             if model.connectionCount > 0 {
                 TextActionButton(title: "全部关闭") {
@@ -51,7 +51,7 @@ struct ConnectionsPanelView: View {
                 .accessibilityHint(Text("关闭列表中的全部连接"))
             }
         }
-        .frame(height: Metrics.cardHeaderHeight)
+        .frame(height: Metrics.breadcrumbHeight)
     }
 
     // MARK: - 列表 / 空态
@@ -77,7 +77,7 @@ struct ConnectionsPanelView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: Space.m) {
             Image(systemName: "link")
                 .font(.system(size: 24, weight: .regular))
                 .foregroundStyle(Theme.textTertiary)
@@ -92,7 +92,7 @@ struct ConnectionsPanelView: View {
 
     /// 失败不静默（§7）：挂在面包屑下，不挤占底栏
     private func noticeRow(_ text: String) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Space.s) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(Theme.warning)
@@ -104,19 +104,19 @@ struct ConnectionsPanelView: View {
 
             Spacer(minLength: 0)
         }
-        .frame(height: 16)
+        .frame(height: 24)
         .accessibilityElement(children: .combine)
     }
 
     // MARK: - 底栏
 
     private var footer: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Space.s) {
             Text("共 \(model.connectionCount) 条")
                 .font(Typography.caption)
                 .foregroundStyle(Theme.textSecondary)
 
-            Spacer(minLength: 6)
+            Spacer(minLength: Space.s)
 
             Text(totalsText)
                 .font(Typography.number)
@@ -149,8 +149,8 @@ private struct TextActionButton: View {
             Text(title)
                 .font(Typography.caption)
                 .foregroundStyle(isHovering ? Theme.textPrimary : Theme.textSecondary)
-                .padding(.horizontal, 8)
-                .frame(height: 28)
+                .padding(.horizontal, Space.m)
+                .frame(height: Metrics.hitTarget)
                 .contentShape(Rectangle())
         }
         .buttonStyle(PressableButtonStyle())
