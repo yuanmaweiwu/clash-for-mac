@@ -18,7 +18,6 @@ enum TunSmokeHarness {
 
     static func startIfRequested(
         mode: String,
-        settings: SettingsStore,
         systemProxy: SystemProxyService,
         kernel: KernelService,
         tun: TunService
@@ -43,7 +42,6 @@ enum TunSmokeHarness {
             print(failures == 0 ? "SMOKE DONE failures=0" : "SMOKE DONE failures=\(failures)")
             exit(failures == 0 ? 0 : 1)
         }
-        _ = settings
     }
 
     // MARK: - 模式

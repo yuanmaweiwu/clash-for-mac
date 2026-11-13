@@ -56,7 +56,6 @@ struct ClashApp: App {
         if let smokeMode {
             TunSmokeHarness.startIfRequested(
                 mode: smokeMode,
-                settings: settings,
                 systemProxy: systemProxy,
                 kernel: kernel,
                 tun: tun
