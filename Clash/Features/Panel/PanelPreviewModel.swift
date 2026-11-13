@@ -190,6 +190,10 @@ final class PanelPreviewModel {
 
     /// 内核 / geodata 下载进度（ADR-0012）：`idle` / `downloading` / `verifying` / `ready` / `failed`
     var kernelProvisioning: KernelProvisioner.Phase { kernel.provisioningPhase }
+    /// 状态条副文案：下载百分比 / 校验中；`nil` = 没有额外阶段要展示
+    var kernelProvisioningStage: String? { kernel.provisioningPhase.statusText }
+    /// 不确定进度条用；总长度未知时为 nil
+    var kernelProvisioningProgress: Double? { kernel.provisioningPhase.progress }
 
     /// 连接磁贴不可再点：内核启停中、系统代理正在写入、或 TUN 正在过渡
     var isConnectionBusy: Bool { kernel.isTransitioning || connectionState.isBusy || tun.isBusy }

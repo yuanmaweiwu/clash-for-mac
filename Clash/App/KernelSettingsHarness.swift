@@ -51,6 +51,7 @@ enum KernelSettingsHarness {
         case "panel-pages": return await runPanelPages()
         case "settings-port-restart": return await runSettingsPortRestart()
         case "kernel-provision": return await runKernelProvision()
+        case "kernel-triple": return await runKernelTripleStart()
         default:
             print("FAIL unknown-mode \(mode)")
             return 1
@@ -158,7 +159,7 @@ enum KernelSettingsHarness {
     // MARK: - 内核按需下载（ADR-0012）
 
     /// `kernel-provision`：走真实的 `KernelService.start()`（缺内核时会下载 + 校验 + 落盘），
-    /// 校验 `/proxies` 可用、下载后相位为 `ready`、失败时不留临时文件。
+    /// 校验 `/proxies` 可用、下载后相位为 `ready`、失败时不留临时文件，并打印阶段变化。
     private static func runKernelProvision() async -> Int {
         var failures = 0
         let settings = SettingsStore()
@@ -167,7 +168,10 @@ enum KernelSettingsHarness {
         let existed = FileManager.default.isExecutableFile(atPath: AppPaths.kernelBinaryURL.path)
         print("NOTE kernel-before=\(existed ? "present" : "missing")")
 
-        await kernel.start()
+        let startTask = Task { await kernel.start() }
+        await printStageTransitions(of: kernel)
+        await startTask.value
+
         print("NOTE provision-phase=\(kernel.provisioningPhase)")
         print("NOTE kernel-error=\(kernel.lastError?.userMessage ?? "-")")
         failures += report(
@@ -197,6 +201,49 @@ enum KernelSettingsHarness {
             .filter { $0.hasPrefix(".") }
         failures += report("no-partial-files", leftovers.isEmpty, "leftovers=\(leftovers)")
         print("NOTE kernel-final=\(FileManager.default.isExecutableFile(atPath: AppPaths.kernelBinaryURL.path) ? "present" : "missing")")
+        return failures
+    }
+
+    /// 每 100ms 打印阶段变化，便于真机定位卡住的位置
+    private static func printStageTransitions(of kernel: KernelService) async {
+        var last = ""
+        for _ in 0 ..< 1200 {
+            var stage = kernel.provisioningPhase.statusText ?? kernel.phase.rawValue
+            if kernel.phase == .failed, let error = kernel.lastError, kernel.provisioningPhase.statusText == nil {
+                stage += "（\(error.userMessage)）"
+            }
+            if stage != last {
+                print("NOTE stage=\(stage)")
+                last = stage
+            }
+            if kernel.phase == .running || kernel.phase == .failed { return }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+    }
+
+    /// `kernel-triple`：连点三次「连接」的等价并发调用，必须只起一个内核且状态一致
+    private static func runKernelTripleStart() async -> Int {
+        var failures = 0
+        let settings = SettingsStore()
+        let kernel = KernelService(settings: settings)
+
+        async let a: Void = kernel.start()
+        async let b: Void = kernel.start()
+        async let c: Void = kernel.start()
+        _ = await (a, b, c)
+
+        failures += report(
+            "triple-start-running",
+            kernel.phase == .running,
+            "phase=\(kernel.phase) err=\(kernel.lastError?.userMessage ?? "-")"
+        )
+        failures += report("triple-start-not-transitioning", !kernel.isTransitioning)
+        if kernel.phase == .running, let port = kernel.port, let secret = kernel.secret {
+            let client = ClashAPIClient(port: port, secret: secret)
+            let proxies = try? await client.proxies()
+            failures += report("triple-proxies-http-200", proxies?.isEmpty == false)
+        }
+        await kernel.stop()
         return failures
     }
 

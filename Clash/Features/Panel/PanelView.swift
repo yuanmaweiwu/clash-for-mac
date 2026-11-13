@@ -139,6 +139,7 @@ struct PanelView: View {
         VStack(spacing: 0) {
             StatusStripView(
                 status: model.status,
+                detail: model.phase == .starting ? model.kernelProvisioningStage : nil,
                 showsRates: model.showsLiveTraffic,
                 downText: model.downRateText,
                 upText: model.upRateText

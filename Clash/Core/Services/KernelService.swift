@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import OSLog
 
@@ -39,6 +40,10 @@ final class KernelService {
     private static let readinessPollInterval: Duration = .milliseconds(100)
     private static let readinessRequestTimeout: TimeInterval = 1
     private static let logTailLineCount = 20
+    /// 启动流水线（不含下载）的硬上限：超过即判定 `startTimeout`
+    private static let pipelineTimeout: Duration = .seconds(20)
+    /// `mihomo -t` 自身的上限：卡住就杀，不能无限等
+    private static let configValidationTimeout: TimeInterval = 10
 
     /// 内核 / geodata 的按需下载（ADR-0012）；全局唯一，TUN 安装与订阅校验共用同一并发锁
     @ObservationIgnored let provisioner = KernelProvisioner.shared
@@ -100,31 +105,81 @@ final class KernelService {
         }
     }
 
-    /// 一次完整的启动尝试：确保内核 → 孤儿回收 → 端口确认 → 配置生成校验 → 拉起 → 等就绪。
+    /// 一次完整的启动尝试：确保内核 → 确保 geodata → 启动流水线（带 20s 看门狗）。
     private func performStart() async throws {
         // 包内不再带二进制（ADR-0012）：先确保内核已下载并通过校验，UI 在此期间显示下载进度
         setPhase(.starting)
+
+        Self.logger.notice("启动步骤 1/2：ensureKernel begin")
         let binaryURL = try await provisioner.ensureKernel()
-
-        // 强杀兜底：`SIGKILL` / 系统强杀时 `AppTerminationGuard` 没机会跑，旧内核会被
-        // launchd 收留并继续占着 mixed-port。判据是「本产品的任意构建」（见
-        // `KernelProcessIdentity`），DerivedData 里跑过的版本也会被收掉。
-        // 正常退出 / SIGTERM 路径不经过这里（那条路已由 `AppTerminationGuard` 处理）。
-        await OrphanKernelReaper.reapOrphans()
-
-        // 清完孤儿仍被占 → 是别的程序占着（或孤儿杀不掉）：报 portInUse 并带上占用者，不硬起
-        let mixedPort = settings.mixedPort
-        try await ensurePortAvailable(mixedPort)
-
-        let ports = try PortAllocator.allocateDistinct(2)
+        Self.logger.notice("启动步骤 1/2：ensureKernel end")
+        try Task.checkCancellation()
 
         // 配置来源：CLASH_PROFILE（DEBUG）/ profiles 下唯一一份，都没有则用内置空配置
         let profileURL = ProfileLocator.locate()
         hasProfile = profileURL != nil
         // `GEOIP,` / `GEOSITE,` 规则需要 geodata；包内不再附带，缺失时先下载（ADR-0012）
         if TunGeodataProbe.profileNeedsGeodata(profileURL) {
+            Self.logger.notice("启动步骤 2/2：ensureGeodata begin")
             try await provisioner.ensureGeodata()
+            Self.logger.notice("启动步骤 2/2：ensureGeodata end")
+            try Task.checkCancellation()
         }
+
+        try await runPipelineWithDeadline(binaryURL: binaryURL, profileURL: profileURL)
+    }
+
+    /// 启动流水线：孤儿回收 → 端口确认 → 配置生成校验 → 拉起 → 等就绪。
+    ///
+    /// 整段有 20 秒看门狗（`pipelineTimeout`）：任何一步永久 await 都会被判定 `startTimeout`，
+    /// 而不是让面板永远停在「启动中」。
+    private func runPipelineWithDeadline(binaryURL: URL, profileURL: URL?) async throws {
+        let outcome = PipelineOutcome()
+        let task = Task { @MainActor in
+            do {
+                try await self.performPipeline(binaryURL: binaryURL, profileURL: profileURL)
+                outcome.result = .success(())
+            } catch {
+                outcome.result = .failure(error)
+            }
+        }
+
+        let deadline = ContinuousClock.now + Self.pipelineTimeout
+        while outcome.result == nil, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+
+        guard let result = outcome.result else {
+            Self.logger.error(
+                "启动流水线超过 \(Int(Self.pipelineTimeout.components.seconds)) 秒未到 running，判定超时"
+            )
+            task.cancel()
+            provisioner.cancelInFlight()
+            await runner?.stop()
+            throw KernelError.startTimeout
+        }
+        try result.get()
+    }
+
+    private func performPipeline(binaryURL: URL, profileURL: URL?) async throws {
+        try Task.checkCancellation()
+
+        // 强杀兜底：`SIGKILL` / 系统强杀时 `AppTerminationGuard` 没机会跑，旧内核会被
+        // launchd 收留并继续占着 mixed-port。判据是「本产品的任意构建」（见
+        // `KernelProcessIdentity`），DerivedData 里跑过的版本也会被收掉。
+        // 正常退出 / SIGTERM 路径不经过这里（那条路已由 `AppTerminationGuard` 处理）。
+        Self.logger.notice("流水线步骤 reap begin")
+        await OrphanKernelReaper.reapOrphans()
+        Self.logger.notice("流水线步骤 reap end")
+        try Task.checkCancellation()
+
+        // 清完孤儿仍被占 → 是别的程序占着（或孤儿杀不掉）：报 portInUse 并带上占用者，不硬起
+        let mixedPort = settings.mixedPort
+        try await ensurePortAvailable(mixedPort)
+        try Task.checkCancellation()
+
+        let ports = try PortAllocator.allocateDistinct(2)
+
         let injected = RuntimeConfigBuilder.Injected(
             mixedPort: mixedPort,
             allowLAN: settings.allowLAN,
@@ -135,12 +190,18 @@ final class KernelService {
         )
         let runtimeURL = try RuntimeConfigBuilder.build(from: profileURL, injected: injected)
         Self.logger.notice("使用配置 profile=\(ProfileLocator.displayName(for: profileURL), privacy: .public)")
+        try Task.checkCancellation()
 
         // 校验通过才进 starting（core-process §4）
+        Self.logger.notice("流水线步骤 -t begin")
         try await validateConfiguration(binaryURL: binaryURL, configPath: runtimeURL)
+        Self.logger.notice("流水线步骤 -t end")
+        try Task.checkCancellation()
 
         let runner = runner ?? makeRunner(binaryURL: binaryURL)
+        Self.logger.notice("流水线步骤 spawn begin")
         let pid = try await runner.start(configPath: runtimeURL)
+        Self.logger.notice("流水线步骤 spawn end pid=\(pid)")
 
         port = injected.controllerPort
         secret = injected.secret
@@ -153,7 +214,10 @@ final class KernelService {
 
         Self.logger.notice("内核进程已拉起 pid=\(pid) controller=127.0.0.1:\(injected.controllerPort)")
 
+        Self.logger.notice("流水线步骤 ready begin")
         kernelVersion = try await waitUntilReady(client: client, runner: runner, mixedPort: injected.mixedPort)
+        try Task.checkCancellation()
+        Self.logger.notice("流水线步骤 ready end")
         activeMixedPort = injected.mixedPort
         activeLogLevel = injected.logLevel
         activeAllowLAN = injected.allowLAN
@@ -333,6 +397,7 @@ final class KernelService {
     private func waitUntilReady(client: ClashAPIClient, runner: KernelRunner, mixedPort: Int) async throws -> String {
         let deadline = ContinuousClock.now + Self.readinessTimeout
         while ContinuousClock.now < deadline {
+            try Task.checkCancellation()
             if !runner.isRunning {
                 throw await classifyStartupFailure(exitCode: runner.lastExitCode ?? -1, mixedPort: mixedPort)
             }
@@ -353,7 +418,8 @@ final class KernelService {
 
     private func validateConfiguration(binaryURL: URL, configPath: URL) async throws {
         let directory = AppPaths.kernelDirectory
-        let outcome = await Task.detached(priority: .userInitiated) { () -> ValidationOutcome in
+        let timeout = Self.configValidationTimeout
+        let outcome = await Task.detached(priority: .userInitiated) { () async -> ValidationOutcome in
             let process = Process()
             process.executableURL = binaryURL
             process.arguments = ["-t", "-d", directory.path, "-f", configPath.path]
@@ -368,6 +434,19 @@ final class KernelService {
                 return ValidationOutcome(status: -1, output: error.localizedDescription)
             }
 
+            // `-t` 正常几十毫秒；卡住（例如同一工作目录的 cache.db 被另一个内核锁住）必须杀掉
+            let deadline = Date().addingTimeInterval(timeout)
+            while process.isRunning, Date() < deadline {
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            if process.isRunning {
+                process.terminate()
+                try? await Task.sleep(for: .milliseconds(500))
+                if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+                process.waitUntilExit()
+                return ValidationOutcome(status: -2, output: "mihomo -t 超时（\(Int(timeout)) 秒）")
+            }
+
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
             return ValidationOutcome(
@@ -377,6 +456,12 @@ final class KernelService {
         }.value
 
         guard outcome.status != 0 else { return }
+
+        // 超时单独归类：不要把「-t 卡住」说成配置错误
+        if outcome.status == -2 {
+            Self.logger.error("mihomo -t 超时，已终止校验进程")
+            throw KernelError.startTimeout
+        }
 
         let tail = Self.tail(ofText: outcome.output, lines: Self.logTailLineCount, redacting: secret)
         Self.logger.error("mihomo -t 失败 exit=\(outcome.status)\n\(tail, privacy: .public)")
@@ -462,4 +547,10 @@ final class KernelService {
         lastError = error
     }
     #endif
+}
+
+/// 启动流水线的一次性结果盒：`start()` 用轮询看门狗等它，避免 "await 一个永不结束的 Task"。
+@MainActor
+private final class PipelineOutcome {
+    var result: Result<Void, Error>?
 }

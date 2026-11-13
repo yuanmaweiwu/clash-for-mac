@@ -47,3 +47,11 @@ TUN 的特权组件安装脚本不再从 bundle 拷贝内核：改为从上述�
 - 内核升级不再需要重发 App，但 `VERSION` / `SHA256` 仍需随版本提交
 - 不随包分发 mihomo / geodata，因此不承担 GPL-3.0 的分发义务；应用内仍提供许可全文与源码链接（`THIRD-PARTY-NOTICES.md`）
 - 内核进程路径变为 `~/Library/Application Support/Clash/kernel/mihomo`：孤儿回收与端口占用判据同步更新
+
+## 启动超时与阶段可见性（P0 回归补充）
+
+- 下载段（内核 / geodata）有独立上限：等锁 30 秒（超时抛 `busy`），单源 10 秒空闲超时，内核单源总时限 5 分钟、geodata 2 分钟；取消时同时取消 URLSession 任务，保证 continuation 一定 resume
+- 下载完成后的启动流水线（孤儿回收 → 端口 → 配置 → `mihomo -t` → spawn → 就绪）有 **20 秒看门狗**：超时即停子任务、停内核、进 `failed(.startTimeout)`，不允许永久停在 `starting`
+- `mihomo -t` 自身 10 秒上限：卡住就 `SIGTERM` → `SIGKILL`，并按 `startTimeout` 归类
+- 面板状态条在 `starting` 时显示副文案：`正在下载内核组件… NN%` / `正在校验内核…`；下载完成后的纯启动仍显示「启动中」
+- 内核已存在时 `ensureKernel` 直接返回，不发任何网络请求

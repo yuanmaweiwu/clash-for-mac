@@ -4,6 +4,8 @@ import SwiftUI
 @MainActor
 struct StatusStripView: View {
     let status: DemoStatus
+    /// 次要阶段文案（下载 / 校验）：与状态标题并排显示，`nil` 时不占位
+    var detail: String? = nil
     /// 是否展示实时速率：内核 running 且 `/traffic` WS 在线；否则速率位显示「—」
     let showsRates: Bool
     let downText: String
@@ -16,6 +18,15 @@ struct StatusStripView: View {
             Text(status.title)
                 .font(Typography.status)
                 .foregroundStyle(Theme.textPrimary)
+                .layoutPriority(1)
+
+            if let detail {
+                Text(detail)
+                    .font(Typography.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
 
             Spacer(minLength: Space.m)
 
@@ -37,8 +48,8 @@ struct StatusStripView: View {
         .accessibilityLabel("状态")
         .accessibilityValue(
             showsRates && status.hasLiveRates
-                ? "\(status.title)，上传 \(upText)，下载 \(downText)"
-                : status.title
+                ? "\(status.title)，\(detail ?? "")，上传 \(upText)，下载 \(downText)"
+                : ("\(status.title)" + (detail.map { "，\($0)" } ?? ""))
         )
     }
 }

@@ -21,6 +21,8 @@ enum KernelProvisionError: Error, Equatable, Sendable {
     case decompressFailed(String)
     /// 自动模式下所有源都不可达（有一个成功就不会走到这里）
     case allSourcesUnreachable
+    /// 另一个下载任务迟迟不结束（等锁超时）
+    case busy
     /// 等待期间任务被取消
     case cancelled
 
@@ -41,6 +43,8 @@ enum KernelProvisionError: Error, Equatable, Sendable {
             "内核解压失败，请重试（或更换下载源）"
         case .allSourcesUnreachable:
             "所有下载源均不可达，可在设置里换镜像后重试"
+        case .busy:
+            "另一个内核下载任务尚未结束，请稍后重试"
         case .cancelled:
             "内核下载已取消"
         }
@@ -57,6 +61,7 @@ enum KernelProvisionError: Error, Equatable, Sendable {
         case .disk(let detail): "disk（\(detail)）"
         case .decompressFailed(let detail): "decompressFailed（\(detail)）"
         case .allSourcesUnreachable: "allSourcesUnreachable（所有下载源失败）"
+        case .busy: "busy（等待其他下载任务超时）"
         case .cancelled: "cancelled（任务取消）"
         }
     }
@@ -122,6 +127,9 @@ final class KernelProvisioner {
         }
     }
 
+    /// 单次下载的总时限：内核 5 分钟、geodata 2 分钟
+    private static let lockWaitTimeout: Duration = .seconds(30)
+
     private static let logger = Logger(subsystem: "com.clash.app", category: "provisioner")
 
     private(set) var phase: Phase = .idle
@@ -135,14 +143,17 @@ final class KernelProvisioner {
 
     /// 确保内核可执行，返回二进制 URL。
     ///
-    /// 已有可执行文件直接返回（不重复下载）；下载失败抛 `KernelProvisionError`。
+    /// 已有可执行文件直接返回（不重复下载、不发任何网络请求）；下载失败抛 `KernelProvisionError`。
     @discardableResult
     func ensureKernel() async throws -> URL {
         if Self.hasKernel() {
             phase = .ready
+            Self.logger.notice("内核已存在，跳过下载 path=\(AppPaths.kernelBinaryURL.path, privacy: .public)")
             return AppPaths.kernelBinaryURL
         }
 
+        let begin = ContinuousClock.now
+        Self.logger.notice("ensureKernel begin（缺少内核）")
         try await runExclusive {
             if Self.hasKernel() {
                 self.phase = .ready
@@ -150,6 +161,7 @@ final class KernelProvisioner {
             }
             try await self.downloadKernel()
         }
+        Self.logger.notice("ensureKernel end elapsed=\(ContinuousClock.now - begin)")
 
         guard Self.hasKernel() else {
             throw KernelProvisionError.disk("内核落地后不可执行：\(AppPaths.kernelBinaryURL.path)")
@@ -165,8 +177,12 @@ final class KernelProvisioner {
         let fileManager = FileManager.default
         let needsGeoIP = !fileManager.fileExists(atPath: AppPaths.geoIPDatabaseURL.path)
         let needsGeoSite = !fileManager.fileExists(atPath: AppPaths.geoSiteDatabaseURL.path)
-        guard needsGeoIP || needsGeoSite else { return }
+        guard needsGeoIP || needsGeoSite else {
+            Self.logger.notice("geodata 已存在，跳过下载")
+            return
+        }
 
+        Self.logger.notice("ensureGeodata begin geoip=\(needsGeoIP) geosite=\(needsGeoSite)")
         try await runExclusive {
             let fileManager = FileManager.default
             if !fileManager.fileExists(atPath: AppPaths.geoIPDatabaseURL.path) {
@@ -185,6 +201,14 @@ final class KernelProvisioner {
                 }
             }
         }
+        Self.logger.notice("ensureGeodata end")
+    }
+
+    /// 启动流程超时 / 取消时调用：取消正在跑的下载，避免它长期占着锁
+    func cancelInFlight() {
+        guard let activeTask else { return }
+        Self.logger.notice("取消进行中的内核下载任务")
+        activeTask.cancel()
     }
 
     /// 自检 / 排障：把状态复位成 idle（不清文件）
@@ -195,17 +219,33 @@ final class KernelProvisioner {
 
     // MARK: - 串行化
 
-    /// 同一时刻只跑一个下载任务；后到者先等前一个结束，再重新做自己的存在性检查
+    /// 同一时刻只跑一个下载任务。
+    ///
+    /// 后到者**轮询等待**（不用 `await task.value` 无限等）：等锁最多 30 秒，
+    /// 超时直接抛 `.busy`。这样即使前一个任务卡死 / 被取消，也不会有调用方永久挂起。
     private func runExclusive(_ operation: @escaping @MainActor () async throws -> Void) async throws {
-        while let running = activeTask {
-            _ = try? await running.value
+        let deadline = ContinuousClock.now + Self.lockWaitTimeout
+        while activeTask != nil {
+            if ContinuousClock.now >= deadline {
+                Self.logger.error("等待其他下载任务超过 \(Int(Self.lockWaitTimeout.components.seconds)) 秒，放弃")
+                throw fail(.busy)
+            }
+            if Task.isCancelled { throw KernelProvisionError.cancelled }
+            try? await Task.sleep(for: .milliseconds(50))
         }
+
         let task = Task { @MainActor in
             try await operation()
         }
         activeTask = task
         defer { activeTask = nil }
-        try await task.value
+        do {
+            try await task.value
+        } catch {
+            // 任务失败 / 取消也必须清锁；`defer` 保证，这里只补日志
+            Self.logger.notice("下载任务结束（失败或取消）：\(String(describing: error), privacy: .public)")
+            throw error
+        }
     }
 
     // MARK: - 内核
@@ -248,7 +288,7 @@ final class KernelProvisioner {
             phase = .downloading(received: 0, total: nil)
 
             do {
-                try await Self.download(url: url, to: gzURL) { [weak self] received, total in
+                try await Self.download(url: url, to: gzURL, resourceTimeout: 300) { [weak self] received, total in
                     guard let self else { return }
                     Task { @MainActor in
                         self.phase = .downloading(received: received, total: total > 0 ? total : nil)
@@ -320,7 +360,7 @@ final class KernelProvisioner {
             // geodata 文件不大（metadb 约 8MB）：沿用同一个 phase，UI 不必区分
             phase = .downloading(received: 0, total: nil)
             do {
-                try await Self.download(url: url, to: tmpURL) { [weak self] received, total in
+                try await Self.download(url: url, to: tmpURL, resourceTimeout: 120) { [weak self] received, total in
                     guard let self else { return }
                     Task { @MainActor in
                         self.phase = .downloading(received: received, total: total > 0 ? total : nil)
@@ -438,24 +478,31 @@ final class KernelProvisioner {
     private static func download(
         url: URL,
         to destination: URL,
+        resourceTimeout: TimeInterval,
         onProgress: @escaping @Sendable (Int64, Int64) -> Void
     ) async throws {
         let delegate = KernelDownloadDelegate(destination: destination, onProgress: onProgress)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = KernelDownloadMirrors.attemptTimeout
-        configuration.timeoutIntervalForResource = 600
+        configuration.timeoutIntervalForResource = resourceTimeout
         let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
 
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            delegate.attach(continuation)
-            let request = URLRequest(
-                url: url,
-                cachePolicy: .reloadIgnoringLocalCacheData,
-                timeoutInterval: KernelDownloadMirrors.attemptTimeout
-            )
-            let task = session.downloadTask(with: request)
-            task.resume()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                delegate.attach(continuation)
+                let request = URLRequest(
+                    url: url,
+                    cachePolicy: .reloadIgnoringLocalCacheData,
+                    timeoutInterval: KernelDownloadMirrors.attemptTimeout
+                )
+                let task = session.downloadTask(with: request)
+                delegate.attach(task: task)
+                task.resume()
+            }
+        } onCancel: {
+            // 启动流程超时 / 取消：必须把 URLSession 任务也取消，否则 continuation 永不 resume
+            delegate.cancel()
         }
     }
 
@@ -537,6 +584,7 @@ private final class KernelDownloadDelegate: NSObject, URLSessionDownloadDelegate
     private let lock = NSLock()
     private var continuation: CheckedContinuation<Void, Error>?
     private var failure: Error?
+    private var task: URLSessionTask?
     private var lastProgressAt = Date.distantPast
 
     init(destination: URL, onProgress: @escaping @Sendable (Int64, Int64) -> Void) {
@@ -548,6 +596,20 @@ private final class KernelDownloadDelegate: NSObject, URLSessionDownloadDelegate
         lock.lock()
         self.continuation = continuation
         lock.unlock()
+    }
+
+    func attach(task: URLSessionTask) {
+        lock.lock()
+        self.task = task
+        lock.unlock()
+    }
+
+    /// 取消 URLSession 任务 → `didCompleteWithError` 会把 continuation resume 掉
+    func cancel() {
+        lock.lock()
+        let task = self.task
+        lock.unlock()
+        task?.cancel()
     }
 
     func urlSession(
