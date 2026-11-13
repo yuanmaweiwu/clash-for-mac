@@ -50,6 +50,29 @@ MenuBarExtra {
 - **禁止**：彩色渐变背景、大色块标题栏、阴影叠三层、半透明叠半透明（会糊）
 - 深浅色：只写语义色，不写 `Color.black.opacity(...)` 这种硬编码；需要固定黑/白时用 `Color(nsColor: .windowBackgroundColor)`
 
+## 3.5 语义色必须能跨线程解析（实测崩过）
+
+用 `NSColor(name:dynamicProvider:)` 做浅/深色 Token 时，**provider 闭包必须是 nonisolated**：
+SwiftUI 会在 DisplayLink 后台线程解析动态色，若闭包继承了 `@MainActor`（例如直接写在一个 `@MainActor enum` 的静态属性里），会以
+`dispatch_assert_queue_fail` / `EXC_BREAKPOINT` 崩溃，且 `swift build` 完全通过、启动几秒后才炸。
+
+正确写法：
+
+```swift
+// 自由函数，nonisolated —— 不要放进 @MainActor 类型
+private func dynamicColor(light: NSColor, dark: NSColor) -> NSColor {
+    NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+    }
+}
+
+@MainActor enum Theme {
+    static let card = Color(nsColor: dynamicColor(light: .white, dark: .black))
+}
+```
+
+自检：`Theme` 里的 `static let` 只允许调用 nonisolated 工厂函数；出现 `@MainActor` 上下文的 provider 闭包即视为缺陷。
+
 ## 4. 动效
 
 - 只用两类：磁贴/开关（短、快，~150ms spring）、列表与面板内容切换（~200ms easeOut）

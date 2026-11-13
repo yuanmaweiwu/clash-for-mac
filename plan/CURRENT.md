@@ -23,7 +23,7 @@
 
 ## 进行中
 
-- [ ] 静态原型：`Prototype/`（SPM 可执行包，假数据，designer 实现中）→ 用户肉眼过视觉
+- [ ] 可交互原型：`Prototype/`（SPM 包 + `MenuBarExtra` 真浮层，假数据，designer 实现中）→ 用户亲手试交互
 - [ ] UI 规范待用户过目（`docs/02-UI-SPEC.md` 已自查并消解与技能的口径冲突）
 
 ## 下一步（按优先级）
@@ -40,7 +40,7 @@
 - 架构要点：**helper（root）是内核与系统写操作的唯一持有者**；App 只通过 XPC + mihomo HTTP/WS 通信
 - 配置原则：用户 YAML 永不改写，注入只进 `runtime/`
 - 构建命令已写入 `.agents/skills/swiftui-app/SKILL.md` §6（工程创建后需实测修正）
-- 仓库目前仍无 Swift 代码
+- 唯一 Swift 代码在 `Prototype/`（可交互原型，未接内核；正式工程 v0.1 再建）
 
 ## 不要做
 
