@@ -50,6 +50,7 @@ enum KernelSettingsHarness {
         case "login": return await runLoginItem()
         case "panel-pages": return await runPanelPages()
         case "settings-port-restart": return await runSettingsPortRestart()
+        case "kernel-provision": return await runKernelProvision()
         default:
             print("FAIL unknown-mode \(mode)")
             return 1
@@ -151,6 +152,51 @@ enum KernelSettingsHarness {
         )
 
         try? FileManager.default.removeItem(at: root)
+        return failures
+    }
+
+    // MARK: - 内核按需下载（ADR-0012）
+
+    /// `kernel-provision`：走真实的 `KernelService.start()`（缺内核时会下载 + 校验 + 落盘），
+    /// 校验 `/proxies` 可用、下载后相位为 `ready`、失败时不留临时文件。
+    private static func runKernelProvision() async -> Int {
+        var failures = 0
+        let settings = SettingsStore()
+        let kernel = KernelService(settings: settings)
+
+        let existed = FileManager.default.isExecutableFile(atPath: AppPaths.kernelBinaryURL.path)
+        print("NOTE kernel-before=\(existed ? "present" : "missing")")
+
+        await kernel.start()
+        print("NOTE provision-phase=\(kernel.provisioningPhase)")
+        print("NOTE kernel-error=\(kernel.lastError?.userMessage ?? "-")")
+        failures += report(
+            "kernel-running",
+            kernel.phase == .running,
+            "phase=\(kernel.phase) err=\(kernel.lastError?.userMessage ?? "-")"
+        )
+
+        if kernel.phase == .running, let port = kernel.port, let secret = kernel.secret {
+            let client = ClashAPIClient(port: port, secret: secret)
+            do {
+                let proxies = try await client.proxies()
+                failures += report("proxies-http-200", !proxies.isEmpty, "count=\(proxies.count)")
+            } catch {
+                failures += report("proxies-http-200", false, "\(error)")
+            }
+        }
+
+        await kernel.stop()
+        if case .ready = kernel.provisioningPhase {
+            failures += report("provision-ready", true)
+        } else {
+            failures += report("provision-ready", false, "phase=\(kernel.provisioningPhase)")
+        }
+
+        let leftovers = ((try? FileManager.default.contentsOfDirectory(atPath: AppPaths.kernelDirectory.path)) ?? [])
+            .filter { $0.hasPrefix(".") }
+        failures += report("no-partial-files", leftovers.isEmpty, "leftovers=\(leftovers)")
+        print("NOTE kernel-final=\(FileManager.default.isExecutableFile(atPath: AppPaths.kernelBinaryURL.path) ? "present" : "missing")")
         return failures
     }
 

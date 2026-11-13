@@ -32,11 +32,27 @@ enum AppPaths {
         profilesDirectory.appending(path: "index.json")
     }
 
-    /// `kernel/`：内核共享工作目录（`-d`），geoip.metadb、cache.db 落在这里
+    /// `kernel/`：内核共享工作目录（`-d`），同时存放运行时下载的 mihomo 与 geodata
+    /// （ADR-0012：内核不随包分发，首次需要时下载到这里）
     static let kernelDirectory = ensure(
         supportDirectory.appending(path: "kernel", directoryHint: .isDirectory),
         name: "kernel"
     )
+
+    /// 运行时下载的内核二进制（本地内核直启 / TUN 安装脚本的来源）
+    static var kernelBinaryURL: URL {
+        kernelDirectory.appending(path: "mihomo")
+    }
+
+    /// GeoIP 数据库（`GEOIP,` 规则必需）
+    static var geoIPDatabaseURL: URL {
+        kernelDirectory.appending(path: "geoip.metadb")
+    }
+
+    /// GeoSite 数据库（`GEOSITE,` 规则需要，下载失败只告警）
+    static var geoSiteDatabaseURL: URL {
+        kernelDirectory.appending(path: "geosite.dat")
+    }
 
     /// `runtime/`：每次启动重建的最终配置
     static let runtimeDirectory = ensure(

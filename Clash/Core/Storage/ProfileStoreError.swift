@@ -20,6 +20,8 @@ enum ProfileStoreError: Error, Equatable, Sendable {
     case network
     /// 包内没有可执行的 mihomo
     case binaryMissing
+    /// 内核尚未下载完成或下载失败（ADR-0012）
+    case kernelUnavailable(detail: String)
     /// `mihomo -t` 不通过；`detail` 只进日志
     case configInvalid(detail: String)
     /// 重命名为空
@@ -45,6 +47,8 @@ enum ProfileStoreError: Error, Equatable, Sendable {
             "网络请求失败，请检查网络后重试"
         case .binaryMissing:
             "内核文件缺失，请重新安装应用"
+        case .kernelUnavailable(let detail):
+            "内核未就绪：\(detail)"
         case .configInvalid:
             "配置无效，无法使用"
         case .emptyName:

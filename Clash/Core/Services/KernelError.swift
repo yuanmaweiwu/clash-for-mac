@@ -21,6 +21,8 @@ enum KernelError: Error, Equatable, Sendable {
     case crashed(code: Int32)
     /// 首次启动需要联网下载 geoip.metadb / geosite
     case geodataUnavailable
+    /// 内核 / geodata 下载失败（ADR-0012）：网络、校验、磁盘
+    case provisioning(KernelProvisionError)
     /// 启动后在超时内 `/version` 未就绪
     case startTimeout
 
@@ -28,7 +30,7 @@ enum KernelError: Error, Equatable, Sendable {
     var userMessage: String {
         switch self {
         case .binaryMissing:
-            "内核文件缺失，请重新安装应用"
+            "内核文件缺失或不可执行，请重试下载"
         case .binaryRejected:
             "内核签名校验未通过，请重新安装应用"
         case .configInvalid:
@@ -51,7 +53,9 @@ enum KernelError: Error, Equatable, Sendable {
         case .crashed(let code):
             "内核异常退出（退出码 \(code)），点此查看日志"
         case .geodataUnavailable:
-            "首次启动需要联网准备地理数据，请检查网络后重试"
+            "缺少地理数据（geoip.metadb），请检查网络后重试"
+        case .provisioning(let error):
+            error.userMessage
         case .startTimeout:
             "内核启动超时，请重试或查看日志"
         }
@@ -69,6 +73,7 @@ enum KernelError: Error, Equatable, Sendable {
         case .permissionDenied: "permissionDenied（授权被拒）"
         case .crashed(let code): "crashed（exit code \(code)）"
         case .geodataUnavailable: "geodataUnavailable（geoip.metadb 缺失且无法下载）"
+        case .provisioning(let error): "provisioning（\(error.logDescription)）"
         case .startTimeout: "startTimeout（就绪探测超时）"
         }
     }

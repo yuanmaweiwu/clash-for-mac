@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
-# 拉取上游 mihomo 最新 release 的 darwin/arm64 二进制，落到 Resources/Kernel/
-# 同时拉 geodata（geoip.metadb / geosite.dat）：TUN 与 GEOIP 规则的硬依赖，
-# helper 运行目录里没有它，内核启动时会去 GitHub 下载（国内常超时 90s）。
+# 预置/刷新内核与 geodata（开发便利；正常用户首次连接时 App 会自动下载）
+#
+# ADR-0012 起内核不再随包分发：
+# - 二进制与 geodata 落到用户目录 ~/Library/Application Support/Clash/kernel/
+# - 仓库只保留 Resources/Kernel/VERSION + SHA256（版本与校验依据，仍由本脚本更新）
+#
 # 用法：Scripts/fetch-kernel.sh [--dry-run] [--skip-geodata] [--version vX.Y.Z]
 #
-# 版本策略：取 latest（用户已确认）。可复现性由 Resources/Kernel/VERSION + SHA256 保证。
+# 版本策略：取 latest（用户已确认）。可复现性由 VERSION + SHA256 保证。
 # 架构策略：仅 arm64（Apple Silicon），不支持 x86_64（用户已确认）。
 set -euo pipefail
 
 REPO="MetaCubeX/mihomo"
 ARCH="arm64"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEST="$ROOT/Resources/Kernel"
+DEST="$HOME/Library/Application Support/Clash/kernel"
+META="$ROOT/Resources/Kernel"
 DRY_RUN=0
 SKIP_GEODATA=0
 PINNED_VERSION=""
@@ -50,6 +54,7 @@ print(assets[name])
 asset_name="${asset_url##*/}"
 echo "内核版本: $tag"
 echo "资产:     $asset_name"
+echo "目标目录: $DEST"
 
 if [[ $DRY_RUN -eq 1 ]]; then
   echo "(dry-run，不下载)"
@@ -63,10 +68,10 @@ curl -fsSL "$asset_url" -o "$tmp/$asset_name"
 gunzip -f "$tmp/$asset_name"
 bin="$tmp/${asset_name%.gz}"
 
-mkdir -p "$DEST"
+mkdir -p "$DEST" "$META"
 install -m 0755 "$bin" "$DEST/mihomo"
-printf '%s\n' "$tag" > "$DEST/VERSION"
-( cd "$DEST" && shasum -a 256 mihomo > SHA256 )
+printf '%s\n' "$tag" > "$META/VERSION"
+( cd "$DEST" && shasum -a 256 mihomo > "$META/SHA256" )
 
 archs="$(lipo -archs "$DEST/mihomo")"
 if [[ "$archs" != "arm64" ]]; then
@@ -75,18 +80,18 @@ if [[ "$archs" != "arm64" ]]; then
 fi
 
 echo "架构: $archs"
-echo "sha256: $(cut -d' ' -f1 "$DEST/SHA256")"
-echo "已写入: $DEST/mihomo（二进制不入库，仅 VERSION / SHA256 入库）"
+echo "sha256: $(cut -d' ' -f1 "$META/SHA256")"
+echo "已写入: $DEST/mihomo（二进制不入库；VERSION / SHA256 在 $META）"
 
-# geodata：缺失时 TUN 起不来（内核会尝试在线下载 MMDB，国内基本超时）
+# geodata：缺失时 TUN / GEOIP 规则起不来（内核会尝试在线下载，国内基本超时）
 if [[ $SKIP_GEODATA -eq 0 ]]; then
   GEO_BASE="https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest"
   for name in geoip.metadb geosite.dat; do
     if curl -fsSL --max-time 180 "$GEO_BASE/$name" -o "$DEST/$name"; then
       echo "已写入: $DEST/$name"
     else
-      echo "warning: 下载 $name 失败；TUN / GEOIP 规则需要它，可把已有文件手工放到 $DEST/" >&2
+      echo "warning: 下载 $name 失败；首次连接时 App 会自动重试" >&2
     fi
   done
 fi
-echo "发布前同步：mihomo 版本、GPL-3.0 LICENSE 与源码地址。"
+echo "发布前同步：mihomo 版本、GPL-3.0 LICENSE 与应用内源码链接。"

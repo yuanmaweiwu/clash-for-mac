@@ -50,6 +50,7 @@ struct SettingsPanelView: View {
                 VStack(alignment: .leading, spacing: Space.xxl) {
                     proxySection
                     subscriptionSection
+                    downloadSection
                     componentSection
 
                     if let error = settings.lastError {
@@ -236,7 +237,58 @@ struct SettingsPanelView: View {
         hours == 0 ? "手动" : "\(hours) 小时"
     }
 
-    // MARK: - 段三：组件与维护
+    // MARK: - 段三：下载（内核 / geodata，ADR-0012）
+
+    private var downloadSection: some View {
+        section("下载") {
+            row("内核下载源") {
+                Menu {
+                    ForEach(KernelDownloadMode.allCases) { mode in
+                        Button(mode.title) { settings.kernelDownloadMode = mode }
+                    }
+                } label: {
+                    menuLabel(settings.kernelDownloadMode.title)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .accessibilityLabel(Text("内核下载源"))
+            }
+
+            if settings.kernelDownloadMode == .custom {
+                TextField("https://gh-proxy.com/", text: Binding(
+                    get: { settings.customMirrorPrefix },
+                    set: { settings.customMirrorPrefix = $0 }
+                ))
+                .textFieldStyle(.roundedBorder)
+                .controlSize(.small)
+                .font(.system(size: 11))
+                .accessibilityLabel(Text("自定义下载镜像前缀"))
+                .accessibilityHint(Text("镜像前缀加原始 GitHub 地址，原样拼接"))
+            }
+
+            Text(downloadHint)
+                .font(Typography.caption)
+                .foregroundStyle(Theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.vertical, Space.xs)
+        }
+    }
+
+    /// 镜像说明：必须写明「预置第三方镜像安全的前提是哈希校验」
+    private var downloadHint: String {
+        switch settings.kernelDownloadMode {
+        case .automatic:
+            "依次尝试：直连 → gh-proxy.com → ghproxy.net（每个约 10 秒）。"
+                + "镜像只转发内容，内核仍需通过 SHA256 校验，无法被替换。"
+        case .direct:
+            "只走 GitHub 原始地址；不可达时请改用自动或自定义镜像。"
+        case .custom:
+            "前缀 + 原始 GitHub 地址，原样拼接；内核仍需通过 SHA256 校验。"
+        }
+    }
+
+    // MARK: - 段四：组件与维护
 
     private var componentSection: some View {
         section("组件与维护") {

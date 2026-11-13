@@ -17,7 +17,15 @@ enum ProfileValidator {
         runtimeDirectory: URL = AppPaths.runtimeDirectory,
         workDirectory: URL = AppPaths.kernelDirectory
     ) async throws {
-        let binaryURL = try bundledKernelURL()
+        // 首次导入早于「点连接」：校验同样需要内核，缺就下载一次（ADR-0012）
+        let binaryURL: URL
+        do {
+            binaryURL = try await KernelProvisioner.shared.ensureKernel()
+        } catch let error as KernelProvisionError {
+            throw ProfileStoreError.kernelUnavailable(detail: error.userMessage)
+        } catch {
+            throw ProfileStoreError.kernelUnavailable(detail: error.localizedDescription)
+        }
 
         let ports: [Int]
         do {
@@ -51,18 +59,6 @@ enum ProfileValidator {
     }
 
     // MARK: - 二进制与进程
-
-    /// 包内 `Contents/Resources/Kernel/mihomo`（与 `KernelService` 同一路径规则）
-    private static func bundledKernelURL() throws -> URL {
-        for subdirectory in ["Resources/Kernel", "Kernel"] {
-            if let url = Bundle.main.url(forResource: "mihomo", withExtension: nil, subdirectory: subdirectory),
-               FileManager.default.isExecutableFile(atPath: url.path) {
-                return url
-            }
-        }
-        logger.error("包内找不到可执行的 mihomo（bundle=\(Bundle.main.bundlePath, privacy: .public)）")
-        throw ProfileStoreError.binaryMissing
-    }
 
     /// `-t` 只看退出码（0 / 非 0 可靠），不解析 stderr 文本
     private static func test(binaryURL: URL, configPath: URL, workDirectory: URL) async -> Int32 {

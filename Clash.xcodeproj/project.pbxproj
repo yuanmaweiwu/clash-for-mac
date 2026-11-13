@@ -106,7 +106,7 @@
 				1A2B3C4D5E6F7A8B9C0D0006 /* Sources */,
 				1A2B3C4D5E6F7A8B9C0D0007 /* Frameworks */,
 				1A2B3C4D5E6F7A8B9C0D0008 /* Resources */,
-				1A2B3C4D5E6F7A8B9C0D0009 /* Copy kernel */,
+				1A2B3C4D5E6F7A8B9C0D0009 /* Copy kernel metadata */,
 				1A2B3C4D5E6F7A8B9C0D003B /* Copy helper */,
 			);
 			buildRules = (
@@ -202,7 +202,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		1A2B3C4D5E6F7A8B9C0D0009 /* Copy kernel */ = {
+		1A2B3C4D5E6F7A8B9C0D0009 /* Copy kernel metadata */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
@@ -212,14 +212,14 @@
 			);
 			inputPaths = (
 			);
-			name = "Copy kernel";
+			name = "Copy kernel metadata";
 			outputFileListPaths = (
 			);
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -eu\n\nSRC=\"$SRCROOT/Resources/Kernel/mihomo\"\nDEST_DIR=\"$BUILT_PRODUCTS_DIR/$CONTENTS_FOLDER_PATH/Resources/Kernel\"\n\nif [ ! -f \"$SRC\" ]; then\n  echo \"warning: 内核二进制缺失（$SRC），跳过拷贝；先运行 Scripts/fetch-kernel.sh\"\n  exit 0\nfi\n\nmkdir -p \"$DEST_DIR\"\nditto \"$SRC\" \"$DEST_DIR/mihomo\"\nchmod 0755 \"$DEST_DIR/mihomo\"\nif [ -f \"$SRCROOT/Resources/Kernel/VERSION\" ]; then\n  ditto \"$SRCROOT/Resources/Kernel/VERSION\" \"$DEST_DIR/VERSION\"\nfi\nfor name in geoip.metadb geosite.dat; do\n  if [ -f \"$SRCROOT/Resources/Kernel/$name\" ]; then\n    ditto \"$SRCROOT/Resources/Kernel/$name\" \"$DEST_DIR/$name\"\n  fi\ndone\necho \"Copied kernel: $DEST_DIR/mihomo\"\n";
+			shellScript = "set -eu\n\n# ADR-0012：内核与 geodata 改为运行时下载，包内只保留版本与校验依据\nSRC_DIR=\"$SRCROOT/Resources/Kernel\"\nDEST_DIR=\"$BUILT_PRODUCTS_DIR/$CONTENTS_FOLDER_PATH/Resources/Kernel\"\n\n# 清掉旧构建可能残留的二进制 / geodata，保证包内只剩元数据\nrm -rf \"$DEST_DIR\"\nmkdir -p \"$DEST_DIR\"\nfor name in VERSION SHA256; do\n  if [ ! -f \"$SRC_DIR/$name\" ]; then\n    echo \"error: 缺少 $SRC_DIR/$name\"\n    exit 1\n  fi\n  ditto \"$SRC_DIR/$name\" \"$DEST_DIR/$name\"\ndone\necho \"Copied kernel metadata: $DEST_DIR\"\n";
 		};
 		1A2B3C4D5E6F7A8B9C0D003B /* Copy helper */ = {
 			isa = PBXShellScriptBuildPhase;

@@ -249,6 +249,16 @@ final class TunService {
     private func installThenEnable() async {
         defer { installFlowActive = false }
 
+        // 包内不再带内核（ADR-0012）：安装脚本要从用户目录拷入，所以先把内核（与订阅需要的
+        // geodata）准备好；失败就不弹密码框，直接给明确原因
+        do {
+            try await kernel.ensureKernelAvailable()
+            try await kernel.ensureGeodataIfNeeded()
+        } catch {
+            fail(.startup(Self.describe(error)))
+            return
+        }
+
         phase = .awaitingAuthorization
         let outcome = await awaitInstallOutcome()
 
@@ -327,6 +337,15 @@ final class TunService {
         failureMessage = nil
         restoreWarning = nil
         phase = .starting
+
+        // 0. 内核可能已被「完全清理」删掉：启用前同样确保存在（ADR-0012）
+        do {
+            try await kernel.ensureKernelAvailable()
+            try await kernel.ensureGeodataIfNeeded()
+        } catch {
+            fail(.startup(Self.describe(error)))
+            return
+        }
 
         // 1. 协议版本 + 运行时自检（缺内核 / 目录不完整时直接给准确原因，不去 spawn 再失败）
         let snapshot: HelperRuntimeSnapshot
@@ -574,6 +593,7 @@ final class TunService {
     private static func describe(_ error: Error) -> String {
         if let helper = error as? HelperClientError { return helper.userMessage }
         if let kernel = error as? KernelError { return kernel.userMessage }
+        if let provision = error as? KernelProvisionError { return provision.userMessage }
         return error.localizedDescription
     }
 }

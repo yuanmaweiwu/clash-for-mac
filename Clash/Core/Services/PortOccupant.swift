@@ -7,8 +7,8 @@ import OSLog
 /// 只承载诊断信息，不持有任何句柄；`Sendable` 以便从 `lsof` 的后台任务里带回来。
 struct PortOccupant: Equatable, Sendable {
     enum Kind: Equatable, Sendable {
-        /// 本产品的任意构建：`…/Clash.app/Contents/Resources/Kernel/mihomo`
-        /// （DerivedData、`/Applications`、手工拷贝的副本都算）
+        /// 本产品内核：`~/Library/Application Support/Clash/kernel/mihomo`
+        /// （ADR-0012 起二进制在用户目录，所有构建共用同一份）
         case productKernel
         /// helper 的 root 内核（只在 TUN 模式下存在）：**只检测、绝不杀**
         case tunKernel
@@ -34,14 +34,12 @@ struct PortOccupant: Equatable, Sendable {
 /// 且 `Clash Verge.app` 的路径里同样含 "Clash"，按模糊匹配会误杀别人的内核。
 enum KernelProcessIdentity {
 
-    /// 本产品内核在任意构建产物里的路径后缀。
+    /// 本产品内核的路径后缀。
     ///
-    /// 判据是**路径段精确匹配**（后缀以 `/Clash.app/` 开头）：
-    /// - 命中：`…/DerivedData/Clash-xxx/Build/Products/Debug/Clash.app/Contents/Resources/Kernel/mihomo`、
-    ///   `/Applications/Clash.app/Contents/Resources/Kernel/mihomo`、任意目录下的副本
-    /// - 不命中：`/Applications/Clash Verge.app/Contents/…`（bundle 名是 `Clash Verge.app`）、
-    ///   `/Applications/MyClash.app/…`（`Clash.app` 前面没有 `/`）
-    static let productPathSuffix = "/Clash.app/Contents/Resources/Kernel/mihomo"
+    /// 判据是**路径段精确匹配**：`~/Library/Application Support/Clash/kernel/mihomo`
+    /// （ADR-0012：内核下载到用户目录，不再位于 `.app` 内）。
+    /// - 不命中：`/Applications/Clash Verge.app/…`、用户自己的 mihomo 副本
+    static let productPathSuffix = "/Library/Application Support/Clash/kernel/mihomo"
 
     /// helper 的 root 内核（TUN）：不在 App 里，杀不掉也不该杀，仅用于给出明确错误
     static let helperPath = "/Library/PrivilegedHelperTools/mihomo"

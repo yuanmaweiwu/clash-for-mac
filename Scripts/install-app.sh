@@ -16,11 +16,6 @@ done
 
 cd "$ROOT"
 
-if [[ ! -f Resources/Kernel/mihomo ]]; then
-  echo "缺少内核，请先运行 Scripts/fetch-kernel.sh" >&2
-  exit 1
-fi
-
 echo "==> 构建（$CONFIG）"
 xcodebuild -project Clash.xcodeproj -scheme Clash -configuration "$CONFIG" build | tail -3
 

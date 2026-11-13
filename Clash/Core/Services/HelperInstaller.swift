@@ -5,8 +5,8 @@ import OSLog
 enum HelperInstallError: Error, Equatable, Sendable {
     /// 包内没有 helper 产物（构建漏了 Copy 阶段）
     case helperMissingInBundle
-    /// 包内没有内核二进制（构建前没跑 `Scripts/fetch-kernel.sh`）
-    case kernelMissingInBundle
+    /// 用户目录里还没有内核（ADR-0012：运行时下载，安装前必须先准备好）
+    case kernelNotDownloaded
     /// 用户在密码框点了取消（osascript 返回 -128）
     case userCancelled
     /// 脚本本身失败：`detail` 取 stderr 末行
@@ -21,8 +21,8 @@ enum HelperInstallError: Error, Equatable, Sendable {
         switch self {
         case .helperMissingInBundle:
             "安装包不完整（缺少特权组件），请重新构建应用"
-        case .kernelMissingInBundle:
-            "安装包不完整（缺少内核），请重新构建应用"
+        case .kernelNotDownloaded:
+            "内核尚未下载完成，请先点「连接」完成下载后重试"
         case .userCancelled:
             "已取消管理员授权，TUN 需要该组件才能开启"
         case .installFailed(let detail):
@@ -37,7 +37,7 @@ enum HelperInstallError: Error, Equatable, Sendable {
     var logDescription: String {
         switch self {
         case .helperMissingInBundle: "helperMissingInBundle（App 包内缺 com.clash.helper）"
-        case .kernelMissingInBundle: "kernelMissingInBundle（App 包内缺 mihomo）"
+        case .kernelNotDownloaded: "kernelNotDownloaded（用户目录缺 mihomo）"
         case .userCancelled: "userCancelled（用户取消授权 -128）"
         case .installFailed(let detail): "installFailed（\(detail)）"
         case .daemonNotRunning: "daemonNotRunning（launchctl print 失败）"
@@ -50,7 +50,8 @@ enum HelperInstallError: Error, Equatable, Sendable {
 ///
 /// 一次 `osascript … with administrator privileges` 弹系统密码框，脚本以 root 完成
 /// 拷贝 → 写 plist → `launchctl bootstrap`。**脚本内容固定、路径固定、逐条 `&&`**，
-/// App 只决定「装的是自己包里的哪份二进制」，不给任何自由参数。
+/// 内核与 geodata 从用户已下载的 `~/Library/Application Support/Clash/kernel/` 拷入
+/// （ADR-0012），不给任何自由参数。
 enum HelperInstaller {
 
     private static let logger = Logger(subsystem: "com.clash.app", category: "helper")
@@ -78,8 +79,14 @@ enum HelperInstaller {
         Bundle.main.bundleURL.appending(path: HelperLayout.bundledHelperRelativePath)
     }
 
-    static var bundledKernelURL: URL {
-        Bundle.main.bundleURL.appending(path: HelperLayout.bundledKernelRelativePath)
+    /// 内核来源改为用户目录（ADR-0012）：包内不再带二进制
+    static var kernelSourceURL: URL {
+        AppPaths.kernelBinaryURL
+    }
+
+    /// geodata 与内核同目录，安装时一起拷进 helper 运行目录
+    static var geodataSourceDirectory: URL {
+        AppPaths.kernelDirectory
     }
 
     // MARK: - 安装
@@ -94,9 +101,9 @@ enum HelperInstaller {
             logger.error("包内缺少 helper：\(bundledHelperURL.path, privacy: .public)")
             throw HelperInstallError.helperMissingInBundle
         }
-        guard fileManager.isExecutableFile(atPath: bundledKernelURL.path) else {
-            logger.error("包内缺少内核：\(bundledKernelURL.path, privacy: .public)")
-            throw HelperInstallError.kernelMissingInBundle
+        guard fileManager.isExecutableFile(atPath: kernelSourceURL.path) else {
+            logger.error("用户目录缺少内核：\(kernelSourceURL.path, privacy: .public)")
+            throw HelperInstallError.kernelNotDownloaded
         }
 
         let output = try await runElevated(script: installScript(), action: "安装")
@@ -133,11 +140,13 @@ enum HelperInstaller {
 
     // MARK: - 脚本（固定内容，供审阅 / 自检）
 
-    /// 安装脚本全文。路径来自 `HelperLayout`，`<bundle>` 取当前 App 的实际位置。
+    /// 安装脚本全文。helper 路径来自 `HelperLayout`；内核与 geodata 来自用户目录
+    /// （ADR-0012，路径在生成时写死，脚本仍不接受参数）。
     /// - Parameter bundleURL: 只为自检 / 审阅可注入，正常运行不传。
     static func installScript(bundleURL: URL = Bundle.main.bundleURL) -> String {
         let helperSource = bundleURL.appending(path: HelperLayout.bundledHelperRelativePath).path
-        let kernelSource = bundleURL.appending(path: HelperLayout.bundledKernelRelativePath).path
+        let kernelSource = kernelSourceURL.path
+        let kernelSourceDirectory = geodataSourceDirectory.path
 
         return """
         #!/bin/sh
@@ -147,7 +156,7 @@ enum HelperInstaller {
 
         HELPER_SRC=\(shellQuoted(helperSource))
         KERNEL_SRC=\(shellQuoted(kernelSource))
-        KERNEL_SRC_DIR=\(shellQuoted(bundleURL.appending(path: "Contents/Resources/Kernel").path))
+        KERNEL_SRC_DIR=\(shellQuoted(kernelSourceDirectory))
         HELPER_DST=\(shellQuoted(HelperLayout.helperToolPath))
         KERNEL_DST=\(shellQuoted(HelperLayout.kernelToolPath))
         SUPPORT_DIR=\(shellQuoted(HelperLayout.supportDirectory))

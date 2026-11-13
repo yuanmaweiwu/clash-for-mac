@@ -39,7 +39,6 @@ enum HelperLayout {
     // MARK: App 包内相对路径（安装脚本从这里拷）
 
     static let bundledHelperRelativePath = "Contents/Library/PrivilegedHelperTools/com.clash.helper"
-    static let bundledKernelRelativePath = "Contents/Resources/Kernel/mihomo"
 
     /// 客户端可执行路径白名单后缀：ad-hoc 签名没有 team id，只能先比路径（弱校验，见 `adr/0008`）
     static let allowedClientPathSuffix = "/Clash.app/Contents/MacOS/Clash"

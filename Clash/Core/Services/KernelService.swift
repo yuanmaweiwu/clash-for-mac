@@ -40,6 +40,8 @@ final class KernelService {
     private static let readinessRequestTimeout: TimeInterval = 1
     private static let logTailLineCount = 20
 
+    /// 内核 / geodata 的按需下载（ADR-0012）；全局唯一，TUN 安装与订阅校验共用同一并发锁
+    @ObservationIgnored let provisioner = KernelProvisioner.shared
     @ObservationIgnored private var runner: KernelRunner?
     @ObservationIgnored private var client: ClashAPIClient?
     @ObservationIgnored private var userInitiatedStop = false
@@ -98,9 +100,11 @@ final class KernelService {
         }
     }
 
-    /// 一次完整的启动尝试：孤儿回收 → 端口确认 → 配置生成校验 → 拉起 → 等就绪。
+    /// 一次完整的启动尝试：确保内核 → 孤儿回收 → 端口确认 → 配置生成校验 → 拉起 → 等就绪。
     private func performStart() async throws {
-        let binaryURL = try Self.bundledKernelURL()
+        // 包内不再带二进制（ADR-0012）：先确保内核已下载并通过校验，UI 在此期间显示下载进度
+        setPhase(.starting)
+        let binaryURL = try await provisioner.ensureKernel()
 
         // 强杀兜底：`SIGKILL` / 系统强杀时 `AppTerminationGuard` 没机会跑，旧内核会被
         // launchd 收留并继续占着 mixed-port。判据是「本产品的任意构建」（见
@@ -117,6 +121,10 @@ final class KernelService {
         // 配置来源：CLASH_PROFILE（DEBUG）/ profiles 下唯一一份，都没有则用内置空配置
         let profileURL = ProfileLocator.locate()
         hasProfile = profileURL != nil
+        // `GEOIP,` / `GEOSITE,` 规则需要 geodata；包内不再附带，缺失时先下载（ADR-0012）
+        if TunGeodataProbe.profileNeedsGeodata(profileURL) {
+            try await provisioner.ensureGeodata()
+        }
         let injected = RuntimeConfigBuilder.Injected(
             mixedPort: mixedPort,
             allowLAN: settings.allowLAN,
@@ -132,7 +140,6 @@ final class KernelService {
         try await validateConfiguration(binaryURL: binaryURL, configPath: runtimeURL)
 
         let runner = runner ?? makeRunner(binaryURL: binaryURL)
-        setPhase(.starting)
         let pid = try await runner.start(configPath: runtimeURL)
 
         port = injected.controllerPort
@@ -219,6 +226,20 @@ final class KernelService {
 
     // MARK: - 外部内核（TUN / helper）
 
+    /// 内核下载 / 校验进度（面板据此显示「正在下载内核…」与重试，ADR-0012）
+    var provisioningPhase: KernelProvisioner.Phase { provisioner.phase }
+
+    /// TUN 安装 / 启动前确保内核已就位（缺则下载）；失败抛 `KernelProvisionError`
+    func ensureKernelAvailable() async throws {
+        _ = try await provisioner.ensureKernel()
+    }
+
+    /// 订阅里有 `GEOIP,` / `GEOSITE,` 规则时确保 geodata 已下载
+    func ensureGeodataIfNeeded() async throws {
+        guard TunGeodataProbe.profileNeedsGeodata(ProfileLocator.locate()) else { return }
+        try await provisioner.ensureGeodata()
+    }
+
     /// helper 已启动 root 内核且 `/version` 就绪：App 接管 API 端点。
     ///
     /// 所有读 API 的服务（策略组 / 流量 / 连接 / 日志）都从 `port` + `secret` 推导客户端，
@@ -264,7 +285,14 @@ final class KernelService {
     // MARK: - 失败与崩溃
 
     private func failStart(with error: Error) async {
-        let kernelError = (error as? KernelError) ?? .configInvalid(detail: String(describing: error))
+        let kernelError: KernelError
+        if let known = error as? KernelError {
+            kernelError = known
+        } else if let provision = error as? KernelProvisionError {
+            kernelError = .provisioning(provision)
+        } else {
+            kernelError = .configInvalid(detail: String(describing: error))
+        }
 
         if let runner, runner.isRunning {
             await runner.stop()
@@ -360,19 +388,6 @@ final class KernelService {
     }
 
     // MARK: - 二进制定位
-
-    /// 包内 `Contents/Resources/Kernel/mihomo`；源码目录 `Resources/Kernel/mihomo` 打包后不存在，不做回退
-    private static func bundledKernelURL() throws -> URL {
-        let candidates = ["Resources/Kernel", "Kernel"]
-        for subdirectory in candidates {
-            if let url = Bundle.main.url(forResource: "mihomo", withExtension: nil, subdirectory: subdirectory),
-               FileManager.default.isExecutableFile(atPath: url.path) {
-                return url
-            }
-        }
-        logger.error("包内找不到可执行的 mihomo（bundle=\(Bundle.main.bundlePath, privacy: .public)）")
-        throw KernelError.binaryMissing
-    }
 
     private func makeRunner(binaryURL: URL) -> KernelRunner {
         let runner = LocalKernelRunner(binaryURL: binaryURL)

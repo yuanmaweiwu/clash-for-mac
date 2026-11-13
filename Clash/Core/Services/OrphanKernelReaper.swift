@@ -10,10 +10,9 @@ import OSLog
 /// `AppTerminationGuard` 处理，不要在别处调用。
 ///
 /// 匹配方式：`proc_pidpath` 取进程可执行路径，按 `KernelProcessIdentity` 的**路径段精确
-/// 匹配**判据：路径以 `/Clash.app/Contents/Resources/Kernel/mihomo` 结尾即视为本产品内核，
-/// 因此 DerivedData、`/Applications` 与任意目录下的副本都会被回收（换构建跑一版后旧内核
-/// 占着 7890 就是这个场景）。**绝不按进程名匹配**：ClashX / Clash Verge 自带的内核同名但
-/// 路径不同，按名字杀会误伤。
+/// 匹配**判据：路径以 `/Library/Application Support/Clash/kernel/mihomo` 结尾即视为本产品内核
+/// （ADR-0012 起二进制在用户目录，所有构建共用同一份）。**绝不按进程名匹配**：ClashX /
+/// Clash Verge 自带的内核同名但路径不同，按名字杀会误伤。
 enum OrphanKernelReaper {
 
     private static let logger = Logger(subsystem: "com.clash.app", category: "kernel")

@@ -37,7 +37,7 @@ enum TunGeodataProbe {
         let missing = missing(profileURL: profileURL)
         guard !missing.isEmpty else { return nil }
         return "内核缺少 \(missing.joined(separator: "、"))（运行目录 \(HelperLayout.supportDirectory)），"
-            + "启动时会尝试在线下载并超时；请把文件放进该目录，或重新授权安装组件"
+            + "启动时会尝试在线下载并超时；请在设置里「重新安装…」管理员组件，把已下载的地理数据拷入该目录"
     }
 
     // MARK: - 文件

@@ -55,12 +55,17 @@ final class SettingsStore {
         var autoUpdateHours: Int = 0
         var logLevel: LogLevelSetting = .info
         var launchAtLogin: Bool = false
+        /// 内核 / geodata 下载源策略（ADR-0012）
+        var kernelDownloadMode: KernelDownloadMode = .automatic
+        /// 仅 `.custom` 使用：前缀 + 原始 GitHub URL 原样拼接
+        var customMirrorPrefix: String = ""
 
         init() {}
 
         private enum CodingKeys: String, CodingKey {
             case mixedPort, allowLAN, keepKernelOnProxyOff, subscriptionUserAgent
             case autoUpdateHours, logLevel, launchAtLogin
+            case kernelDownloadMode, customMirrorPrefix
         }
 
         init(from decoder: Decoder) throws {
@@ -76,6 +81,12 @@ final class SettingsStore {
                 ?? defaults.autoUpdateHours
             logLevel = try container.decodeIfPresent(LogLevelSetting.self, forKey: .logLevel) ?? defaults.logLevel
             launchAtLogin = try container.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? defaults.launchAtLogin
+            kernelDownloadMode = try container.decodeIfPresent(
+                KernelDownloadMode.self,
+                forKey: .kernelDownloadMode
+            ) ?? defaults.kernelDownloadMode
+            customMirrorPrefix = try container.decodeIfPresent(String.self, forKey: .customMirrorPrefix)
+                ?? defaults.customMirrorPrefix
         }
     }
 
@@ -88,6 +99,8 @@ final class SettingsStore {
     var autoUpdateHours: Int { didSet { persistIfReady() } }
     var logLevel: LogLevelSetting { didSet { persistIfReady() } }
     var launchAtLogin: Bool { didSet { persistIfReady() } }
+    var kernelDownloadMode: KernelDownloadMode { didSet { persistIfReady() } }
+    var customMirrorPrefix: String { didSet { persistIfReady() } }
 
     /// 最近一次写盘失败的原因（UI 提示用；写成功后清空）
     private(set) var lastError: String?
@@ -115,6 +128,8 @@ final class SettingsStore {
         self.autoUpdateHours = defaults.autoUpdateHours
         self.logLevel = defaults.logLevel
         self.launchAtLogin = defaults.launchAtLogin
+        self.kernelDownloadMode = defaults.kernelDownloadMode
+        self.customMirrorPrefix = defaults.customMirrorPrefix
 
         load()
         isReady = true
@@ -138,6 +153,8 @@ final class SettingsStore {
         snapshot.autoUpdateHours = autoUpdateHours
         snapshot.logLevel = logLevel
         snapshot.launchAtLogin = launchAtLogin
+        snapshot.kernelDownloadMode = kernelDownloadMode
+        snapshot.customMirrorPrefix = customMirrorPrefix
         return snapshot
     }
 
@@ -175,6 +192,8 @@ final class SettingsStore {
             : defaults.autoUpdateHours
         logLevel = decoded.logLevel
         launchAtLogin = decoded.launchAtLogin
+        kernelDownloadMode = decoded.kernelDownloadMode
+        customMirrorPrefix = decoded.customMirrorPrefix.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// 损坏兜底：留证据（`settings.corrupt-*.json`）→ 回默认值 → 重写干净文件
