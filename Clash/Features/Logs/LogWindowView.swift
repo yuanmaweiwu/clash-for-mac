@@ -9,6 +9,8 @@ import SwiftUI
 @MainActor
 struct LogWindowView: View {
     let store: LogStore
+    /// TUN 模式下内核由 root helper 持有，stdout 日志落在 root 目录（App 读不到）
+    var isTunMode: Bool = false
 
     /// 自动跟随到底部；用户手动上滚后暂停，滚回距底 40pt 内自动恢复
     @State private var followsTail = true
@@ -27,6 +29,9 @@ struct LogWindowView: View {
             }
             if let failureNotice {
                 noticeRow(failureNotice, isError: true)
+            }
+            if isTunMode {
+                noticeRow("TUN 模式下内核日志在 /Library/Application Support/ClashHelper/kernel.log（需管理员权限查看）")
             }
 
             content

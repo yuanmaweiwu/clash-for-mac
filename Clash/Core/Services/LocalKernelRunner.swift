@@ -14,7 +14,11 @@ final class LocalKernelRunner: KernelRunner {
 
     private let binaryURL: URL
     private let kernelDirectory: URL
-    let logFileURL: URL
+    /// 真实日志路径（本地实现总能读；协议侧声明为可选是为了 TUN / helper 实现）
+    private let logURL: URL
+
+    /// 协议要求的可选形态；本地实现恒有值
+    var logFileURL: URL? { logURL }
 
     private var process: Process?
     private var logHandle: FileHandle?
@@ -25,7 +29,7 @@ final class LocalKernelRunner: KernelRunner {
     init(binaryURL: URL, kernelDirectory: URL = AppPaths.kernelDirectory, logFileURL: URL = AppPaths.logFileURL()) {
         self.binaryURL = binaryURL
         self.kernelDirectory = kernelDirectory
-        self.logFileURL = logFileURL
+        self.logURL = logFileURL
     }
 
     var isRunning: Bool {
@@ -33,7 +37,7 @@ final class LocalKernelRunner: KernelRunner {
     }
 
     @discardableResult
-    func start(configPath: URL) throws -> Int32 {
+    func start(configPath: URL) async throws -> Int32 {
         if let process, process.isRunning {
             return process.processIdentifier
         }
@@ -64,7 +68,7 @@ final class LocalKernelRunner: KernelRunner {
         self.process = process
         self.logHandle = handle
         self.lastExitCode = nil
-        Self.logger.notice("启动 mihomo pid=\(process.processIdentifier) log=\(self.logFileURL.lastPathComponent, privacy: .public)")
+        Self.logger.notice("启动 mihomo pid=\(process.processIdentifier) log=\(self.logURL.lastPathComponent, privacy: .public)")
         return process.processIdentifier
     }
 
@@ -120,7 +124,7 @@ final class LocalKernelRunner: KernelRunner {
     }
 
     private func openLogHandle() throws -> FileHandle {
-        let url = logFileURL
+        let url = logURL
         if !FileManager.default.fileExists(atPath: url.path) {
             FileManager.default.createFile(atPath: url.path, contents: nil)
         }

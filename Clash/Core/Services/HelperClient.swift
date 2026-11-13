@@ -24,7 +24,7 @@ enum HelperClientError: Error, Equatable, Sendable {
 
 /// App 侧 helper 客户端（`docs/01-ARCHITECTURE.md` §8：薄封装 + XPC 回调转 async）。
 ///
-/// 只暴露与 `KernelHelperProtocol` 一一对应的四个方法；不拼命令、不传路径。
+/// 只暴露与 `KernelHelperProtocol` 一一对应的方法；不拼命令、不传路径。
 /// 连接建立失败 / 被 invalidate 一律映射成 `helperNotInstalled`，由上层给安装引导。
 @MainActor
 final class HelperClient {
@@ -59,10 +59,30 @@ final class HelperClient {
         }
     }
 
+    /// 送运行配置正文（v2）：helper 校验后原子写 `runtime.yaml`，**不启动内核**。
+    ///
+    /// 正文超过 `HelperMaxRuntimeConfigBytes` 在本地就拒绝，不占用一次 XPC 往返
+    /// （helper 侧同样会拒，双保险）。
+    func applyRuntimeConfig(_ bytes: Data) async throws {
+        guard !bytes.isEmpty else {
+            throw HelperClientError.helperRejected(reason: "运行配置为空，无法写入")
+        }
+        guard bytes.count <= HelperMaxRuntimeConfigBytes else {
+            throw HelperClientError.helperRejected(reason: "运行配置过大，已取消写入")
+        }
+
+        let result: (Bool, String?) = try await call { proxy, reply in
+            proxy.applyRuntimeConfig(bytes) { ok, message in reply((ok, message)) }
+        }
+        isConnected = true
+        guard result.0 else {
+            throw HelperClientError.helperRejected(reason: result.1 ?? "运行配置写入失败")
+        }
+    }
+
     /// 启动内核；返回 `pid=<n>`（helper 复用既有实例时也返回同一个）
     @discardableResult
-    func startKernel() async throws -> String? {
-        let result: (Bool, String?) = try await call { proxy, reply in
+    func startKernel() async throws -> String? {        let result: (Bool, String?) = try await call { proxy, reply in
             proxy.startKernel { ok, message in reply((ok, message)) }
         }
         isConnected = true
@@ -152,6 +172,61 @@ final class HelperClient {
                 continuation.resume(returning: value)
             }
         }
+    }
+}
+
+// MARK: - 退出路径（同步）
+
+/// 退出专用的一次性回复盒：`stopKernel` 的 reply 与 errorHandler 都可能到达。
+private final class StopReply: @unchecked Sendable {
+
+    private let lock = NSLock()
+    private var stopped = false
+
+    func set(_ value: Bool) {
+        lock.lock()
+        defer { lock.unlock() }
+        stopped = value
+    }
+
+    var value: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return stopped
+    }
+}
+
+extension HelperClient {
+
+    /// 退出专用：**同步**等 `stopKernel` 回复，超时返回 `false`。
+    ///
+    /// 为什么单独建一条连接：`currentConnection()` 属于主 actor，退出流程要在主线程上阻塞
+    /// 等待，复用那条连接会和「回调投递回主 actor」的转换层互相等待。这里用一次性连接 +
+    /// 信号量，回复走 XPC 私有队列，不经过主线程。
+    ///
+    /// 超时**不代表没发出去**：请求已经投递给 helper，helper 会继续 SIGTERM → 3s → SIGKILL；
+    /// 这里只是不再等确认（退出预算总共 3s，`AppTerminationGuard` 有硬超时）。
+    nonisolated static func stopKernelSynchronously(timeout: TimeInterval = 1.5) -> Bool {
+        let connection = NSXPCConnection(machServiceName: HelperLayout.machServiceName, options: [])
+        connection.remoteObjectInterface = NSXPCInterface(with: KernelHelperProtocol.self)
+        connection.resume()
+        defer { connection.invalidate() }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        let answer = StopReply()
+
+        guard let proxy = connection.remoteObjectProxyWithErrorHandler({ _ in
+            semaphore.signal()
+        }) as? KernelHelperProtocol else {
+            return false
+        }
+
+        proxy.stopKernel { stopped in
+            answer.set(stopped)
+            semaphore.signal()
+        }
+
+        return semaphore.wait(timeout: .now() + timeout) == .success && answer.value
     }
 }
 

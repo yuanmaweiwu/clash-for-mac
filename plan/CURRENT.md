@@ -47,12 +47,17 @@
 - [ ] 流量 WS（速率与曲线仍是 `—`）
 - [ ] 连接列表与日志窗口
 - [x] 设置窗口（端口 / UA / 日志级别 / 开机自启 / 关代理保留内核 / 完全清理），`settings.json` 原子写 + 损坏备份；端口与级别的变更提示重启内核
-- [x] 特权 helper + XPC（`ping` / `startKernel` / `stopKernel` / `kernelState`）+ 安装/卸载脚本（本轮未安装、未接 TUN）
-- [ ] TUN 接入（helper 启动内核 + `runtime.yaml` 的生产者要先定）
+- [x] 特权 helper + XPC（`ping` / `applyRuntimeConfig` / `startKernel` / `stopKernel` / `kernelState`）+ 安装/卸载脚本（未安装）
+- [x] TUN 协议 v2：配置正文经 XPC 送达，helper 校验（Yams 顶层映射）+ 原子写 0600 root:wheel，**不自动启动**
+- [x] `RuntimeConfigBuilder` TUN 段：开 → 整段覆盖 + fake-ip DNS；关 → 只留 `tun.enable=false`
+- [x] `TunService` 状态机（off / needsInstall / awaitingAuthorization / starting / on / stopping / failed）+ 与系统代理互斥
+- [x] TUN 磁贴五态 + 安装说明卡（未执行 `HelperInstaller.install()`，等真机授权）
+- [x] 退出清理：TUN 开着时 `stopKernel` 同步确认（1.5s 上限）+ 启动时回收遗留 root 内核
 
 ## 下一步（按优先级）
 
-1. 真实节点数据：Yams 配置合并 + `profiles/index.json` + 订阅导入（进行中）
+1. TUN 真机安装：执行一次 `HelperInstaller.install()` → 验证 XPC → utun 起来 → 退出/崩溃各一次
+2. 真实节点数据：Yams 配置合并 + `profiles/index.json` + 订阅导入（进行中）
 2. `ProxyService`：`/proxies` 策略组与节点、选择、测速、`PATCH /configs` 模式
 3. helper（管理员授权安装）+ 系统代理快照还原
 4. 流量 WS + 连接列表

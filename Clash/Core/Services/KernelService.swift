@@ -30,6 +30,10 @@ final class KernelService {
     /// 启动 / 停止过程中：UI 应禁用连接磁贴
     private(set) var isTransitioning = false
 
+    /// 内核由 helper（root）持有（TUN 模式）：App 只接管 API 端点，绝不 spawn / kill。
+    /// 为真时 `start()` / `stop()` / `shutdownForTermination()` 全部让位给 `TunService`。
+    private(set) var isExternal = false
+
     private static let logger = Logger(subsystem: "com.clash.app", category: "kernel")
     private static let readinessTimeout: Duration = .seconds(8)
     private static let readinessPollInterval: Duration = .milliseconds(100)
@@ -65,6 +69,8 @@ final class KernelService {
 
     func start() async {
         guard !isTransitioning, phase != .running else { return }
+        // TUN 内核已由 helper 持有：本地再起一个会抢同一个 mixed-port
+        guard !isExternal else { return }
 
         isTransitioning = true
         lastError = nil
@@ -107,7 +113,7 @@ final class KernelService {
 
             let runner = runner ?? makeRunner(binaryURL: binaryURL)
             setPhase(.starting)
-            let pid = try runner.start(configPath: runtimeURL)
+            let pid = try await runner.start(configPath: runtimeURL)
 
             port = injected.controllerPort
             secret = injected.secret
@@ -136,6 +142,8 @@ final class KernelService {
     func stop() async {
         guard !isTransitioning else { return }
         guard phase == .running || phase == .starting else { return }
+        // 外部（TUN）内核只能由 `TunService` 通过 XPC 停：这里发不了信号
+        guard !isExternal else { return }
 
         isTransitioning = true
         userInitiatedStop = true
@@ -157,9 +165,57 @@ final class KernelService {
     /// App 即将退出：只发 SIGTERM，不等待。
     /// 由 `AppTerminationGuard` 在 `applicationWillTerminate` 与信号路径里调用，必须排在
     /// 系统代理还原之后（`core-process` §3）。
+    ///
+    /// TUN 模式下进程不在本 App 里：`AppTerminationGuard` 会先走
+    /// `HelperClient.stopKernelSynchronously`，这里什么都不做。
     func shutdownForTermination() {
+        guard !isExternal else { return }
         userInitiatedStop = true
         runner?.terminateImmediately()
+    }
+
+    // MARK: - 外部内核（TUN / helper）
+
+    /// helper 已启动 root 内核且 `/version` 就绪：App 接管 API 端点。
+    ///
+    /// 所有读 API 的服务（策略组 / 流量 / 连接 / 日志）都从 `port` + `secret` 推导客户端，
+    /// 因此换上端点并进 `running` 后，面板看到的就是 TUN 内核的真实数据，无需各处特判。
+    func adoptExternalKernel(
+        port: Int,
+        secret: String,
+        version: String,
+        mixedPort: Int,
+        logLevel: String,
+        allowLAN: Bool,
+        hasProfile: Bool
+    ) {
+        isExternal = true
+        self.port = port
+        self.secret = secret
+        kernelVersion = version
+        activeMixedPort = mixedPort
+        activeLogLevel = logLevel
+        activeAllowLAN = allowLAN
+        self.hasProfile = hasProfile
+        client = ClashAPIClient(port: port, secret: secret)
+        lastError = nil
+        setPhase(.running)
+        Self.logger.notice("接管 TUN 内核 controller=127.0.0.1:\(port)")
+    }
+
+    /// TUN 已停：丢掉端点并回到 `stopped`（不发信号、不清用户配置状态）
+    func releaseExternalKernel() {
+        guard isExternal else { return }
+        isExternal = false
+        client = nil
+        port = nil
+        secret = nil
+        kernelVersion = nil
+        activeMixedPort = nil
+        activeLogLevel = nil
+        activeAllowLAN = nil
+        setPhase(.stopped)
+        Self.logger.notice("TUN 内核端点已释放")
     }
 
     // MARK: - 失败与崩溃
@@ -314,7 +370,7 @@ final class KernelService {
     }
 
     private func logTailText() -> String {
-        guard let url = runner?.logFileURL else { return "" }
+        guard let runner, let url = runner.logFileURL else { return "" }
         return Self.tail(of: url, lines: Self.logTailLineCount, redacting: secret)
     }
 

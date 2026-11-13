@@ -17,13 +17,11 @@ struct ControlGridView: View {
                 }
             }
             HStack(spacing: Metrics.tileGap) {
-                // v0.1 TUN 不可用（ADR-0007）：点击只解释原因，不做假开关
-                TunTileView {
-                    PlaceholderPanel.show(
-                        title: "TUN",
-                        detail: "TUN 需要管理员组件，v0.2 随系统代理一起接入。"
-                    )
+                // TUN：五态驱动（§4.2）。过渡 / 等待授权期间禁用，避免重复点击
+                TunTileView(state: model.tunState) {
+                    model.toggleTun()
                 }
+                .disabled(model.isTunBusy)
                 SubscriptionTileView(
                     profileName: model.subscriptionTileSubtitle,
                     badgeCount: model.subscriptionBadgeCount

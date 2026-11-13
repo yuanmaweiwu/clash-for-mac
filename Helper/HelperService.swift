@@ -65,13 +65,18 @@ final class HelperService: NSObject, NSXPCListenerDelegate, @unchecked Sendable 
     }
 }
 
-/// 单个连接的导出对象：四个白名单方法，全部转给 `KernelSupervisor`。
+/// 单个连接的导出对象：五个白名单方法，全部转给 `KernelSupervisor` / `RuntimeConfigWriter`。
 ///
-/// 不做参数校验——因为没有参数可校（路径、命令行都不经 XPC）。
+/// 唯一从 XPC 进来的内容是「配置正文」，落盘路径由 helper 自己推导（`HelperLayout`）。
 final class HelperSession: NSObject, KernelHelperProtocol {
 
     func ping(_ reply: @escaping (String) -> Void) {
         reply(String(HelperVersion))
+    }
+
+    func applyRuntimeConfig(_ bytes: Data, reply: @escaping (Bool, String?) -> Void) {
+        let result = RuntimeConfigWriter.apply(bytes)
+        reply(result.ok, result.message)
     }
 
     func startKernel(_ reply: @escaping (Bool, String?) -> Void) {

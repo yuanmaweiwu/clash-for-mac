@@ -26,20 +26,24 @@ struct ClashApp: App {
         LogStoreHarness.runIfRequested()
         SettingsHarness.runIfRequested()
         KernelSettingsHarness.runIfRequested()
+        TunConfigHarness.runIfRequested()
         #endif
         // 设置只建一份：内核注入端口 / 面板开代理 / 设置窗口写偏好都指向同一实例
         let settings = SettingsStore()
         // 服务先于 model / guard 建好：两者共享同一实例，退出清理才看得见真实状态
         let systemProxy = SystemProxyService()
         let kernel = KernelService(settings: settings)
+        // TUN 与面板、退出清理共享同一实例：退出清理必须看得见「TUN 是否开着」
+        let tun = TunService(settings: settings, systemProxy: systemProxy, kernel: kernel)
         _model = State(initialValue: PanelPreviewModel(
             kernel: kernel,
             systemProxy: systemProxy,
-            settings: settings
+            settings: settings,
+            tun: tun
         ))
         _settings = State(initialValue: settings)
-        terminationGuard = AppTerminationGuard(kernel: kernel, systemProxy: systemProxy)
-        Self.logger.info("Clash 启动（v0.2 系统代理）")
+        terminationGuard = AppTerminationGuard(kernel: kernel, systemProxy: systemProxy, tun: tun)
+        Self.logger.info("Clash 启动（v0.2 系统代理 + TUN）")
     }
 
     var body: some Scene {
@@ -57,7 +61,7 @@ struct ClashApp: App {
 
         // 日志窗口：单例（`Window` 重复 openWindow 只聚焦已有窗口），不是二级面板
         Window("日志", id: AppWindow.logsID) {
-            LogWindowView(store: model.logStore)
+            LogWindowView(store: model.logStore, isTunMode: model.isTunOn)
         }
         .defaultSize(width: 760, height: 520)
         .defaultPosition(.center)

@@ -93,6 +93,8 @@ idle ──start──► starting ──ok──► running ──stop──►
 - **用户配置永不改写**：所有注入只写进 `runtime/`，删除即恢复原状
 - 注入字段（最小集合）：`mixed-port`、`socks-port`、`port`、`allow-lan`、`mode`、`log-level`、`external-controller: 127.0.0.1:<随机空闲端口>`、`secret: <每次启动随机>`、`dns.listen: 127.0.0.1:<随机空闲端口>`、`bind-address: 127.0.0.1`、`tun.*`
 - **安全默认值必须覆盖订阅里的值**：实测真实订阅带 `allow-lan: true`、`dns.listen: 0.0.0.0:1053`——照搬等于把代理与 DNS 暴露到局域网。默认一律收紧为 `allow-lan: false` + `127.0.0.1`，用户显式开启才放开
+- **`tun` 段整段替换**（不 merge）：TUN 开 → `enable/stack/auto-route/auto-detect-interface/dns-hijack` 全由 App 决定，`dns` 强制 `enhanced-mode: fake-ip` + `fake-ip-range: 198.18.0.1/16`；TUN 关 → 只写 `tun.enable: false`，不复用订阅里的 tun 配置
+- **TUN 模式下配置正文经 XPC 送 helper**（`adr/0010`）：App 只生成字符串，helper 校验后原子写 root 目录
 - 注入方式：解析原 YAML → 覆盖顶层键 → 输出；**不用字符串拼接**。实测把同名键追加到文件末尾会让 `mihomo -t` 直接失败：`mapping key "mixed-port" already defined at line 1`
 - secret 只存在内存 + 运行配置；App 存于内存，禁止落盘明文到日志
 - 端口冲突：启动前探测，被占用则让用户在设置里改，不静默换端口
@@ -179,7 +181,8 @@ idle ──start──► starting ──ok──► running ──stop──►
 
 - helper 通过**一次性管理员授权**安装为 LaunchDaemon（`adr/0008`）：`osascript … with administrator privileges` 写 `/Library/PrivilegedHelperTools/` + `/Library/LaunchDaemons/` 并 `launchctl bootstrap system`；不用 `SMAppService`（无签名身份无法注册）
 - XPC 连接校验：取 `audit token` 的 pid → 反查可执行路径，必须等于当前 App 的 bundle 路径；ad-hoc 签名无 team id，故不依赖签名校验
-- helper 只暴露白名单操作：`startKernel(mode)`、`stopKernel()`、`setSystemProxy(enabled, port)`、`restoreSystemProxy()`、`installTun()`、`state()`
+- helper 只暴露白名单操作（协议 v2，实际实现）：`ping()`、`applyRuntimeConfig(bytes)`、`startKernel()`、`stopKernel()`、`kernelState()`
+- 唯一从 XPC 进来的内容是「配置正文」，落盘路径由 `HelperLayout` 推导；系统代理写在 App 侧完成（`networksetup` 不需要 root）
 - helper **不提供**任意命令执行接口
 - 日志用 `os.Logger(subsystem: "com.clash.app", category:)`；secret、订阅 URL 中的 token 需脱敏
 

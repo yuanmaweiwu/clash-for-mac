@@ -44,6 +44,7 @@ final class AppTerminationGuard {
 
     private let kernel: KernelService
     private let systemProxy: SystemProxyService
+    private let tun: TunService
 
     /// 信号统一投递到这条串行队列：多个信号排队，第一个清理完就 `exit`，后面的没机会跑
     private let signalQueue = DispatchQueue(label: "com.clash.app.termination", qos: .userInitiated)
@@ -55,9 +56,10 @@ final class AppTerminationGuard {
     private var signalSources: [DispatchSourceSignal] = []
     private var terminateObserver: NSObjectProtocol?
 
-    init(kernel: KernelService, systemProxy: SystemProxyService) {
+    init(kernel: KernelService, systemProxy: SystemProxyService, tun: TunService) {
         self.kernel = kernel
         self.systemProxy = systemProxy
+        self.tun = tun
 
         let shouldInstall = installTerminationGuardOnce.withLock { installed -> Bool in
             guard !installed else { return false }
@@ -148,7 +150,8 @@ final class AppTerminationGuard {
 
     /// 幂等、同步、顺序固定：
     /// 1. 先还原系统代理（按快照并发还原各网络服务，实测 4 个服务 ~0.9s）
-    /// 2. 再给内核发 `SIGTERM`
+    /// 2. TUN 开着就同步 `stopKernel`（root 内核不在本进程里，不发信号就永远在跑）
+    /// 3. 再给本地内核发 `SIGTERM`
     ///
     /// 顺序不能反：内核先死会留下「代理指向死端口」的状态 = 用户断网。
     private func runCleanup() {
@@ -161,6 +164,17 @@ final class AppTerminationGuard {
 
         let began = Date()
         systemProxy.disableSynchronouslyForTermination()
+
+        // helper 是 launchd 常驻，不会随 App 退出；TUN 的内核还在就会一直接管流量，
+        // 而 App 已经消失 → 用户断网且没有 UI 可关。这里同步停一次（1.5s 上限，
+        // 超时也算请求已投递，helper 会继续 SIGTERM → 3s → SIGKILL）。
+        if tun.isHelperKernelRunning {
+            let confirmed = HelperClient.stopKernelSynchronously(timeout: 1.5)
+            terminationLogger.notice(
+                "退出前停止 TUN 内核：\(confirmed ? "已确认" : "未确认（请求已投递）", privacy: .public)"
+            )
+        }
+
         kernel.shutdownForTermination()
 
         let elapsed = String(format: "%.3f", Date().timeIntervalSince(began))

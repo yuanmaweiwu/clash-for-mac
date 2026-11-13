@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		1A2B3C4D5E6F7A8B9C0D0021 /* Yams in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B3C4D5E6F7A8B9C0D0023 /* Yams */; };
+		1A2B3C4D5E6F7A8B9C0D0024 /* Yams in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B3C4D5E6F7A8B9C0D0023 /* Yams */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -69,6 +70,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1A2B3C4D5E6F7A8B9C0D0024 /* Yams in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -140,6 +142,9 @@
 				1A2B3C4D5E6F7A8B9C0D0031 /* Shared */,
 			);
 			name = ClashHelper;
+			packageProductDependencies = (
+				1A2B3C4D5E6F7A8B9C0D0023 /* Yams */,
+			);
 			productName = ClashHelper;
 			productReference = 1A2B3C4D5E6F7A8B9C0D0033 /* com.clash.helper */;
 			productType = "com.apple.product-type.tool";

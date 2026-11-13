@@ -17,8 +17,9 @@ import Observation
 /// - 实时速率与 60 点曲线，来自 `TrafficService`（`/traffic` WS，1Hz）
 /// - 连接列表（条数 / 规则 / 节点 / 关闭），来自 `ConnectionService`（`/connections`，面板打开时 2s 轮询）
 /// - 日志窗口（级别 / 暂停 / 清空 / 导出），来自 `LogStore`（`/logs` WS，窗口打开期间才连）
+/// - TUN（安装引导 / root 内核启停 / 端点接管），来自 `TunService`（helper + XPC）
 ///
-/// **还没接的**：设置窗口、TUN（helper）。
+/// **还没接的**：设置窗口的组件卸载入口。
 @MainActor
 @Observable
 final class PanelPreviewModel {
@@ -37,6 +38,8 @@ final class PanelPreviewModel {
     @ObservationIgnored private let traffic: TrafficService
     /// 真实连接列表（`/connections` 轮询）
     @ObservationIgnored private let connections: ConnectionService
+    /// TUN（helper 安装 / 授权 / root 内核启停）
+    @ObservationIgnored let tun: TunService
     /// 日志窗口的缓冲与 `/logs` WS（窗口打开才连，关窗即停）
     @ObservationIgnored let logStore: LogStore
     /// 应用设置（端口 / UA / 日志级别 / 关代理是否保留内核）
@@ -53,8 +56,8 @@ final class PanelPreviewModel {
     /// 内核当前模式（`GET /configs` 为准）
     var mode: ProxyMode { proxies.mode }
 
-    /// 失败文案：代理操作失败优先，其次内核启动失败
-    var errorMessage: String? { connectionError ?? kernel.lastError?.userMessage }
+    /// 失败文案：TUN / 代理操作失败优先，其次内核启动失败
+    var errorMessage: String? { tun.bannerMessage ?? connectionError ?? kernel.lastError?.userMessage }
 
     /// 是否展示 banner（派生，不再手动置位）
     var showsErrorBanner: Bool { errorMessage != nil }
@@ -128,6 +131,7 @@ final class PanelPreviewModel {
         profileStore: ProfileStore? = nil,
         systemProxy: SystemProxyService = SystemProxyService(),
         settings: SettingsStore? = nil,
+        tun: TunService? = nil,
         autoStartsKernel: Bool = true
     ) {
         // 设置只允许一份实例：内核注入端口 / 模型读端口 / 设置窗口写端口必须是同一个对象
@@ -138,6 +142,11 @@ final class PanelPreviewModel {
         self.kernel = resolvedKernel
         self.profiles = profileStore ?? ProfileStore(settings: resolvedSettings)
         self.systemProxy = systemProxy
+        self.tun = tun ?? TunService(
+            settings: resolvedSettings,
+            systemProxy: systemProxy,
+            kernel: resolvedKernel
+        )
         self.proxies = ProxyService(kernel: resolvedKernel)
         self.traffic = TrafficService(kernel: resolvedKernel)
         self.connections = ConnectionService(kernel: resolvedKernel)
@@ -163,8 +172,8 @@ final class PanelPreviewModel {
     /// 内核版本（`/version` 的 `version` 字段）；未运行时为 nil
     var kernelVersion: String? { kernel.kernelVersion }
 
-    /// 连接磁贴不可再点：内核启停中，或系统代理正在写入
-    var isConnectionBusy: Bool { kernel.isTransitioning || connectionState.isBusy }
+    /// 连接磁贴不可再点：内核启停中、系统代理正在写入、或 TUN 正在过渡
+    var isConnectionBusy: Bool { kernel.isTransitioning || connectionState.isBusy || tun.isBusy }
 
     /// 状态条文案（§3.3）：内核 running + 代理关 = 已就绪，代理开 = 代理中。
     ///
@@ -323,6 +332,21 @@ final class PanelPreviewModel {
         connectionTask = Task { [weak self] in
             guard let self else { return }
 
+            // 与 TUN 互斥：先关 TUN（TUN 的 root 内核与本地内核抢同一个 mixed-port），
+            // 且不在这里让 TUN 顺带重启本地内核——下面按代理解锁的顺序自己起
+            if self.tun.isHelperKernelRunning {
+                await self.tun.disable(restartLocalKernel: false)
+                guard !Task.isCancelled else { return }
+                self.connectionState = .off
+                guard !self.tun.isOn else {
+                    self.failConnection(
+                        .enable,
+                        message: self.tun.failureMessage ?? "TUN 未能关闭，代理没有开启"
+                    )
+                    return
+                }
+            }
+
             if self.kernel.phase != .running {
                 await self.kernel.start()
                 guard !Task.isCancelled else { return }
@@ -422,6 +446,12 @@ final class PanelPreviewModel {
     ///
     /// 端口变了而系统代理还开着的话，代理会指向死端口：先撤代理，起来后按新端口重开。
     func restartKernelForSettings() {
+        // TUN 内核由 helper 持有，本 App 既不能 stop 也不能按新设置重建：
+        // 先关 TUN（它会把本地内核拉回来），用户再决定是否重新开启
+        if tun.isHelperKernelRunning {
+            Task { [weak self] in await self?.tun.disable() }
+            return
+        }
         enqueueKernelOperation { [weak self] in
             guard let self else { return }
             let wasProxied = self.isSystemProxyOn
@@ -454,6 +484,14 @@ final class PanelPreviewModel {
     /// **不删 App 本身**，也不动 `settings.json`（否则窗口里的偏好会突然回默认）。
     /// - Returns: `nil` 表示成功；否则是给用户看的中文失败原因。
     func performFullCleanup() async -> String? {
+        // TUN 开着时先停 root 内核（它不属于本 App，删文件前必须先失去流量接管）
+        if tun.isHelperKernelRunning {
+            await tun.disable(restartLocalKernel: false)
+            if tun.isOn {
+                return "TUN 未能关闭（\(tun.failureMessage ?? "未知原因")），已中止清理"
+            }
+        }
+
         if isSystemProxyOn {
             do {
                 try await systemProxy.disable()
@@ -498,10 +536,20 @@ final class PanelPreviewModel {
         }
     }
 
-    // MARK: - TUN 磁贴
+    // MARK: - TUN 磁贴（helper 安装 / 授权 / root 内核）
     //
-    // v0.1 没有 helper / root 权限（ADR-0007），TUN 不可用，也不做假开关：
-    // 磁贴恒为灰态「需要管理员组件」，点击只解释原因（见 `ControlGridView`）。
+    // 状态机与安装流程都在 `TunService` 里；这里只做转发与「与系统代理互斥」的编排。
+
+    /// 磁贴五态（§4.2）：已关闭 / 需要授权 / 等待授权 / 已开启 / 失败
+    var tunState: TunState { tun.tileState }
+    /// 过渡 / 授权中：磁贴禁用，忽略重复点击
+    var isTunBusy: Bool { tun.isBusy }
+    var isTunOn: Bool { tun.isOn }
+
+    /// 点击 TUN：安装引导 / 启动 / 关闭都由 `TunService` 的状态机决定
+    func toggleTun() {
+        tun.toggle()
+    }
 
     // MARK: - 导航
 
@@ -650,6 +698,12 @@ final class PanelPreviewModel {
             stopKernelForProfileChange()
             return
         }
+        // TUN 内核里跑的是旧正文：关闭 TUN 会按新 active 重建本地内核，
+        // 用户要 TUN 的话再点一次（不能在这里静默重建 root 配置，那需要再走一次授权检查）
+        if tun.isHelperKernelRunning {
+            Task { [weak self] in await self?.tun.disable() }
+            return
+        }
         enqueueKernelOperation { [weak self] in
             guard let self else { return }
             await self.kernel.stop()
@@ -659,6 +713,10 @@ final class PanelPreviewModel {
 
     /// 库空了：先撤系统代理（撤不干净就保留内核，避免代理指向死端口），再停内核
     private func stopKernelForProfileChange() {
+        if tun.isHelperKernelRunning {
+            Task { [weak self] in await self?.tun.disable() }
+            return
+        }
         enqueueKernelOperation { [weak self] in
             guard let self else { return }
             if self.isSystemProxyOn {

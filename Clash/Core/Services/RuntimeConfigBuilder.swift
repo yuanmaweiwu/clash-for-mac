@@ -7,13 +7,21 @@ import Yams
 /// 规则见 `core-process` §4 与 ADR-0005：
 /// - 只用 Yams 解析 / 序列化，禁止字符串拼接（同名键追加会让 `mihomo -t` 直接失败）
 /// - 用户配置永不改写：所有注入只写进 `runtime/`，`profiles/` 保持原样
-/// - `proxies` / `proxy-groups` / `rules` 一律不碰；`tun` 允许存在但强制关闭（v0.2 前无 helper）
+/// - `proxies` / `proxy-groups` / `rules` 一律不碰
+/// - TUN：`Injected.tunEnabled` 为真时**整体替换** `tun` 段并强制 fake-ip DNS；
+///   为假时只留 `tun.enable=false`，完全不复用订阅里的 `tun` 配置
 /// - secret 只落运行配置（0600），不进日志
 enum RuntimeConfigBuilder {
 
     static let defaultMixedPort = 7890
 
-    /// 本次启动要注入的值。端口与 secret 由 `KernelService` 决定并复用给 API 客户端。
+    /// TUN 的转发栈：`gvisor`（用户态，兼容性最好）/ `system`（系统栈，需要内核支持）
+    enum TunStack: String, Sendable {
+        case gvisor
+        case system
+    }
+
+    /// 本次启动要注入的值。端口与 secret 由 `KernelService` / `TunService` 决定并复用给 API 客户端。
     struct Injected: Sendable {
         var mixedPort: Int = RuntimeConfigBuilder.defaultMixedPort
         var allowLAN: Bool = false
@@ -21,6 +29,9 @@ enum RuntimeConfigBuilder {
         var dnsPort: Int
         var secret: String
         var logLevel: String = "info"
+        /// 是否以 TUN 模式运行（`true` 时 helper 以 root 启动内核）
+        var tunEnabled: Bool = false
+        var tunStack: TunStack = .gvisor
     }
 
     // MARK: - 入口
@@ -36,6 +47,15 @@ enum RuntimeConfigBuilder {
         try writeAtomically(yaml, to: AppPaths.runtimeConfigURL)
         return AppPaths.runtimeConfigURL
     }
+
+    /// **只生成正文，不落盘**：TUN 模式下正文经 XPC 交给 helper，由 helper 写到 root 目录。
+    ///
+    /// 与 `build(from:injected:)` 共用同一套解析 / 注入逻辑，避免「App 校验的配置」
+    /// 和「helper 实际运行的配置」出现两份实现。
+    static func yaml(from profileURL: URL?, injected: Injected) throws -> String {
+        try dump(makeRoot(profileURL: profileURL, injected: injected))
+    }
+
 
     /// 用**尚未入库**的配置正文生成一份运行配置，写到指定路径。
     ///
@@ -100,13 +120,10 @@ enum RuntimeConfigBuilder {
 
     /// 无 profile：最小可用配置（与 v0.1 一致）
     private static func minimalRoot(injected: Injected) -> [String: Any] {
-        var root: [String: Any] = [:]
+        // 只给默认值，其余键（enable / listen / fake-ip …）交给 `applyInjection` 统一注入，
+        // 否则 TUN 模式下的 fake-ip 段会被这里覆盖掉
+        var root: [String: Any] = ["dns": ["ipv6": false]]
         applyInjection(to: &root, injected: injected)
-        root["dns"] = [
-            "enable": true,
-            "listen": "127.0.0.1:\(injected.dnsPort)",
-            "ipv6": false
-        ]
         return root
     }
 
@@ -136,15 +153,40 @@ enum RuntimeConfigBuilder {
         root["external-controller"] = "127.0.0.1:\(injected.controllerPort)"
         root["secret"] = injected.secret
 
-        var dns = (root["dns"] as? [String: Any]) ?? [:]
-        dns["listen"] = "127.0.0.1:\(injected.dnsPort)"
-        root["dns"] = dns
+        root["dns"] = dnsSection(injected: injected, existing: root["dns"] as? [String: Any])
+        root["tun"] = tunSection(injected: injected)
+    }
 
-        // v0.1 / v0.2 前期没有 helper：订阅里带 tun 也只保留结构，强制关闭
-        if var tun = root["tun"] as? [String: Any] {
-            tun["enable"] = false
-            root["tun"] = tun
+    /// DNS 段：启用并只监听回环（订阅里常见的 `0.0.0.0` 必须被覆盖，否则等于开放递归解析）。
+    ///
+    /// TUN 模式额外强制 `fake-ip`：`dns-hijack: any:53` 把全部 DNS 查询劫持进来，
+    /// 没有 fake-ip 就只能逐个真解析，连接建立的延迟会明显变差。
+    private static func dnsSection(injected: Injected, existing: [String: Any]?) -> [String: Any] {
+        var dns = existing ?? [:]
+        dns["enable"] = true
+        dns["listen"] = "127.0.0.1:\(injected.dnsPort)"
+        if injected.tunEnabled {
+            dns["enhanced-mode"] = "fake-ip"
+            dns["fake-ip-range"] = "198.18.0.1/16"
         }
+        return dns
+    }
+
+    /// `tun` 段：**整段替换**，不 merge。
+    ///
+    /// - 开：五个键全部由 App 决定（订阅里的 `device` / `stack` / `mtu` 一律丢弃），
+    ///   避免机场配置里的 `stack: system` 或旧的 `device: utun1024` 影响本机
+    /// - 关：只写 `enable: false`，同样整段丢弃订阅内容（「不复用订阅里的 tun 配置」）
+    private static func tunSection(injected: Injected) -> [String: Any] {
+        guard injected.tunEnabled else { return ["enable": false] }
+
+        return [
+            "enable": true,
+            "stack": injected.tunStack.rawValue,
+            "auto-route": true,
+            "auto-detect-interface": true,
+            "dns-hijack": ["any:53"]
+        ]
     }
 
     /// Yams 的映射是 `[AnyHashable: Any]`；统一成 `[String: Any]`，数组逐项处理
