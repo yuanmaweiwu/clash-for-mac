@@ -1,6 +1,6 @@
 # ADR-0004 · TUN 与 privileged helper 纳入 v1
 
-- 状态：已接受
+- 状态：已接受（部分被 `adr/0007`、`adr/0008` 改写：v0.1 不引入 helper；系统代理不需要 root）
 - 日期：2026-11-13
 - 相关：`docs/01-ARCHITECTURE.md` §1 §6 §7
 
@@ -11,7 +11,7 @@ v1 必须支持 TUN。因此从 v0.1 起就引入 root helper（`SMAppService.da
 ## 理由
 
 1. TUN 需要 root 创建 utun、改路由、接管 DNS；绕过不了的硬需求
-2. 系统代理（`networksetup`）同样需要管理员权限
+2. ~~系统代理（`networksetup`）同样需要管理员权限~~ → 实测不需要 root，见 `adr/0008` 补充
 3. 若先做「App 直接 spawn」再改 helper，等于把进程管理写两遍、状态机重写一遍
 4. helper 是分发层面的关键风险（签名、公证、权限弹窗），越早暴露越好，晚发现代价更大
 

@@ -10,8 +10,8 @@ description: "系统代理（networksetup）开关与安全还原的唯一约定
 
 ## 1. 硬边界
 
-- `networksetup` 只能在 **helper（root）** 里执行；App 侧一律经 XPC 请求
-- 禁止 App 直接 `Process` 跑 `networksetup`
+- **实测结论（macOS 15.7，管理员账号）**：App 进程内直接跑 `networksetup` 即可改代理，**不需要 root、不需要 helper**（`-setwebproxy` / `-setwebproxystate` / `-setproxybypassdomains` 均 exit 0）。helper 只为 TUN 而存在（见 `adr/0008`）。
+- 非管理员账号或被 MDM 策略锁定时会失败：必须捕获错误码并给「需要管理员账号」的提示，不要静默。
 - 禁止在未写快照的情况下修改任何代理项
 - 禁止只处理 Wi-Fi：必须遍历全部启用的网络服务（Wi-Fi / 以太网 / Thunderbolt / iPhone USB …）
 
@@ -127,7 +127,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' -x http://127.0.0.1:7890 https://www.g
 | 面板显示已开，浏览器不走代理 | 改的是另一个网络服务；或 SOCKS 未设；或 App 自带代理设置覆盖 |
 | 关代理后仍上不了网 | 快照缺失/损坏；用 `-setwebproxystate off` 全套关闭临时恢复，再排查 |
 | 只有部分 App 受影响 | 该 App 用了独立代理配置或 PAC |
-| 每次都要输密码 | 说明有代码在 App 侧调 `networksetup`，未走 helper |
+| 每次都要输密码 | 说明当前账号不是管理员，或系统策略要求授权；给提示，不要反复重试 |
 
 ## 9. 反模式
 

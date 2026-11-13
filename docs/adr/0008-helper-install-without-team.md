@@ -40,6 +40,20 @@
 | 分发 | 不做 DMG 自动更新签名校验；Sparkle 需要签名，**v1.0 的自动更新取消或改为手动下载** |
 | 安全性 | 比 SMAppService 略弱（无签名链校验），用路径 + audit token 校验兜底 |
 
+## 补充 · 系统代理不需要 root（2026-11-13 实测）
+
+在本机（macOS 15.7，管理员账号）实测：
+
+| 命令 | 结果 |
+|---|---|
+| `networksetup -setwebproxy "Thunderbolt Bridge" 127.0.0.1 18080` | exit 0，`get` 读回 `Enabled: Yes` |
+| `networksetup -setwebproxystate … off` | exit 0，读回 `Enabled: No` |
+| `networksetup -setproxybypassdomains … 127.0.0.1` | exit 0，读回生效 |
+
+结论：**系统代理在 App 进程内直接改即可，helper 不再为它存在**。helper 的唯一职责收窄为 **TUN**（创建 utun、改路由、接管 DNS）。
+
+因此排期变为：v0.2 系统代理（无 helper）→ v0.4 TUN（此时才需要管理员授权安装 helper）。
+
 ## 被否方案
 
 | 方案 | 否决原因 |

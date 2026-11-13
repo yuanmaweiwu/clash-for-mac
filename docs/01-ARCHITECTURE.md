@@ -20,7 +20,7 @@
 **为什么 helper 持有内核，而不是 App 直接 spawn：**
 
 1. TUN 必须 root 启动内核，v1 就有 TUN → 迟早要 helper
-2. 系统代理（`networksetup`）同样需要管理员权限
+2. 系统代理（`networksetup`）：**实测管理员账号在 App 进程内可直接修改，不需要 root**（见 `adr/0008` 补充），因此不必经 helper
 3. 内核生命周期与 App 解耦：App 崩溃时内核可选择继续跑，helper 负责回收
 4. 一处实现两处复用，避免「App 能启、TUN 不能启」的双路径
 
@@ -169,7 +169,7 @@ idle ──start──► starting ──ok──► running ──stop──►
 1. 开启前：快照当前所有网络服务的代理状态（web/secure/socks/auto/bypass）到 `Application Support/systemproxy-snapshot.json`
 2. 设置：`networksetup -setwebproxy <service> 127.0.0.1 <port>` 等；helper 执行
 3. 关闭：按快照逐项还原，成功后才删除快照
-4. 崩溃兜底：helper 启动时若发现残留快照且内核未运行 → 自动还原
+4. 崩溃兜底：App 启动时若发现残留快照且内核未运行 → 自动还原（helper 不参与）
 5. 卸载：设置里「完全清理」显式还原 + 移除 LaunchDaemon
 
 **禁止**：只改 Wi-Fi、改完不写快照、退出时不还原。
