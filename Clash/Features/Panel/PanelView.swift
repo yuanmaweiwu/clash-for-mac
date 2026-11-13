@@ -178,7 +178,6 @@ struct PanelView: View {
                 kernelVersion: model.kernelVersion,
                 onRefresh: { model.refreshProfile() },
                 onOpenConnections: { model.openConnections() },
-                onOpenLogs: { openLogs() },
                 onOpenSettings: { model.openSettingsPage() }
             )
             .padding(.top, Metrics.tileGap)

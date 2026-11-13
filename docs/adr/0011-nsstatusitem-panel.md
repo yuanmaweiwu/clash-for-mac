@@ -15,7 +15,7 @@
 用 `NSStatusItem` + 自建 `NSPanel` 替换 `MenuBarExtra`：
 
 - 左键：开/关面板（同一份 `PanelView`，宽度仍 340，高度按内容）
-- 右键：`NSMenu`——打开面板 / 设置（⌘,） / 日志 / 退出 Clash（⌘Q）
+- 右键：`NSMenu`——**只有 日志 / 退出 Clash（⌘Q）**。不提供「打开面板」（左键即可）与「设置」（面板内页 + ⌘,），菜单越短越不容易误点
 - 面板窗口：`.borderless + .nonactivatingPanel`、`level = .popUpMenu`、透明背景，失焦即关
 - 退出走 `NSApp.terminate` → `applicationWillTerminate` → `AppTerminationGuard`（撤代理 → 停 TUN/内核），禁止 `exit(0)` 绕过
 

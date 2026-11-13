@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 底部行 32pt：左「N 分钟前更新 + 刷新」，右 连接数 / 日志 / 设置（§3.2）。
+/// 底部行 32pt：左「N 分钟前更新 + 刷新」，右 连接数 / 设置（§3.2）。日志在右键菜单。
 @MainActor
 struct FooterView: View {
     let updatedText: String
@@ -11,8 +11,6 @@ struct FooterView: View {
     let onRefresh: () -> Void
     /// 底栏「连接」图标：推入连接列表二级页
     let onOpenConnections: () -> Void
-    /// 底栏「日志」图标：打开独立日志窗口
-    let onOpenLogs: () -> Void
     /// 底栏「设置」图标：推入面板内设置页（不再开独立窗口）
     let onOpenSettings: () -> Void
 
@@ -43,10 +41,6 @@ struct FooterView: View {
                     .foregroundStyle(connectionCount == nil ? Theme.textTertiary : Theme.textSecondary)
                     .padding(.trailing, 4)
                     .accessibilityLabel(connectionCountLabel)
-            }
-
-            IconButtonView(systemName: "text.alignleft", label: "日志", iconSize: 12) {
-                onOpenLogs()
             }
 
             IconButtonView(systemName: "gearshape", label: "设置", iconSize: 12) {

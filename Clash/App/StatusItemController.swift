@@ -3,7 +3,7 @@ import OSLog
 
 /// 状态栏图标 + 右键菜单（`docs/adr/0011`）。
 ///
-/// 左键：开/关面板；右键：`NSMenu`（打开面板 · 关闭系统代理 / 设置… / 日志 / 退出）。
+/// 左键：开/关面板；右键：`NSMenu`（日志 / 退出）。设置走面板内页与 ⌘,。
 /// 图标语义只有一个：**是否正在接管流量**（`docs/02-UI-SPEC.md` §4.1）——
 /// 未运行 = 描边 + 45° 斜线，已就绪 = 描边，代理中 / TUN = 实心，失败 = 实心 + 右下红点。
 @MainActor
@@ -19,8 +19,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let panel: PanelWindowController
     private let statusItem: NSStatusItem
     private let menu: NSMenu
-    /// 菜单第一项：面板收起时「打开面板」，代理开着时「关闭系统代理」
-    private let primaryMenuItem: NSMenuItem
     private let failureDot: NSView
 
     init(model: PanelPreviewModel, panel: PanelWindowController) {
@@ -29,7 +27,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         menu = NSMenu()
-        primaryMenuItem = NSMenuItem(title: "打开面板", action: nil, keyEquivalent: "")
         failureDot = NSView()
 
         super.init()
@@ -180,14 +177,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.autoenablesItems = false
         menu.delegate = self
 
-        primaryMenuItem.target = self
-        primaryMenuItem.action = #selector(handlePrimaryMenuItem)
-        menu.addItem(primaryMenuItem)
-
-        let settingsItem = NSMenuItem(title: "设置…", action: #selector(openSettings), keyEquivalent: ",")
-        settingsItem.target = self
-        menu.addItem(settingsItem)
-
         let logsItem = NSMenuItem(title: "日志", action: #selector(openLogs), keyEquivalent: "")
         logsItem.target = self
         menu.addItem(logsItem)
@@ -199,11 +188,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(quitItem)
     }
 
-    /// 菜单弹出时按当前状态刷新：代理开着时第一项变成「关闭系统代理」
-    func menuWillOpen(_ menu: NSMenu) {
-        primaryMenuItem.title = model.isSystemProxyOn ? "关闭系统代理" : "打开面板"
-    }
-
     private func showMenu() {
         // 右键时面板若还开着：先收起，菜单与面板不叠在一起
         panel.hide()
@@ -213,13 +197,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         statusItem.menu = nil
     }
 
-    @objc private func handlePrimaryMenuItem() {
-        if model.isSystemProxyOn {
-            model.toggleConnection()
-        } else {
-            AppEnvironment.shared.showPanel()
-        }
-    }
+
 
     /// 设置现在是面板内的二级页：叫出面板 + 推入设置页（与 ⌘, 同一入口）
     @objc private func openSettings() {
