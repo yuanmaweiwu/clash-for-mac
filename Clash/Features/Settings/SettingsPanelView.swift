@@ -4,7 +4,7 @@ import SwiftUI
 /// 二级面板：设置（`docs/02-UI-SPEC.md` §4.9）。
 ///
 /// 与「策略组详情」「订阅管理」一样推入：同宽 340、面包屑返回、内容可滚动（隐藏滚动条）、
-/// 无底栏、底部留 12pt。五段：**代理 / 订阅 / 下载 / 组件与维护 / 存储**——行高 32，label 左、
+/// 无底栏、底部留 12pt。六段：**代理 / 订阅 / 下载 / 内核 / 组件与维护 / 存储**——行高 32，label 左、
 /// 控件右，分组靠 16pt 间距与 11pt 小标题区分，**不画横线**。
 ///
 /// 设置改动持久化：下拉 / 开关立即落盘，文本字段 300ms 合并写（`SettingsStore`），
@@ -25,6 +25,11 @@ struct SettingsPanelView: View {
     @State private var showsCleanupConfirmation = false
     @State private var showsUninstallConfirmation = false
     @State private var helper: HelperComponentModel
+    /// 「内核」一节：当前版本 / 检查更新 / 升级（版本只读本地文件，检查才联网）
+    @State private var kernelVersion: String?
+    @State private var kernelCheckState: KernelCheckState = .idle
+    @State private var kernelNotice: String?
+    @State private var kernelNoticeIsError = false
     /// 「存储」一节：目录清单（随组件是否安装变化）+ 各目录体积
     @State private var storageTargets: [StorageTarget] = []
     @State private var storageStates: [StorageTarget.Kind: StorageSizeState] = [:]
@@ -56,6 +61,7 @@ struct SettingsPanelView: View {
                     proxySection
                     subscriptionSection
                     downloadSection
+                    kernelSection
                     componentSection
                     storageSection
 
@@ -72,6 +78,8 @@ struct SettingsPanelView: View {
         .frame(width: contentWidth, height: contentHeight)
         .onAppear {
             syncLoginItemState()
+            model.refreshKernelVersion()
+            kernelVersion = model.kernelInstalledVersion
             refreshStorageUsage()
             Task { await helper.refresh() }
         }
@@ -292,7 +300,155 @@ struct SettingsPanelView: View {
         }
     }
 
-    // MARK: - 段四：组件与维护
+    // MARK: - 段四：内核（版本 / 检查更新 / 升级）
+
+    /// 两种状态：已安装显示版本 + 「检查更新」；未安装显示「未安装」+ 「下载并安装」。
+    ///
+    /// 铁律（避免「先下后判」）：只有用户点按钮才发一次 GitHub API 请求；
+    /// `latest == installed` 时到此为止，**不下载任何资产**（provisioner 里也只暴露了一条 API 路径）。
+    private var kernelSection: some View {
+        section("内核") {
+            row("内核") {
+                HStack(spacing: Space.s) {
+                    Text(kernelVersion ?? "未安装")
+                        .font(Typography.body)
+                        .foregroundStyle(kernelVersion == nil ? Theme.textTertiary : Theme.textSecondary)
+                        .monospacedDigit()
+
+                    if isCheckingKernel {
+                        ProgressView()
+                            .controlSize(.mini)
+                    } else if kernelVersion == nil {
+                        Button("下载并安装") { installKernel() }
+                            .controlSize(.regular)
+                            .disabled(model.isUpdatingKernel)
+                    } else {
+                        Button("检查更新") { checkForUpdates() }
+                            .controlSize(.regular)
+                            .disabled(model.isUpdatingKernel)
+                    }
+                }
+            }
+
+            if let title = kernelUpdateTitle {
+                HStack(spacing: Space.s) {
+                    Text(title)
+                        .font(Typography.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .monospacedDigit()
+
+                    Spacer(minLength: 4)
+
+                    if case .updateAvailable(let tag) = kernelCheckState {
+                        Button("更新到 \(tag)") { startKernelUpdate(tag) }
+                            .controlSize(.small)
+                            .disabled(model.isUpdatingKernel)
+                    }
+                }
+                .frame(height: Metrics.formRowHeight)
+            }
+
+            if let kernelNotice {
+                noticeText(kernelNotice, isError: kernelNoticeIsError)
+                    .padding(.top, Space.xs)
+            }
+
+            Text("更新只替换本机内核（~/Library/Application Support/Clash/kernel）；检查更新只问 GitHub 版本号，不下载内核。")
+                .font(Typography.caption)
+                .foregroundStyle(Theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.vertical, Space.xs)
+        }
+    }
+
+    /// 第二行文案：检查中 / 已是最新 / 有新版本 / 升级中
+    private var kernelUpdateTitle: String? {
+        if model.isUpdatingKernel { return model.kernelUpdateStatus }
+        switch kernelCheckState {
+        case .idle:
+            return nil
+        case .checking:
+            return "正在检查更新…"
+        case .latest(let version):
+            return "已是最新 \(version)"
+        case .updateAvailable(let tag):
+            return "有新版本 \(tag) 可用"
+        }
+    }
+
+    private var isCheckingKernel: Bool {
+        if case .checking = kernelCheckState { return true }
+        return false
+    }
+
+    // MARK: 内核动作
+
+    /// 用户点「检查更新」：一次 API 请求 → 与已安装版本比较 → 有差异才出现「更新到」按钮
+    private func checkForUpdates() {
+        guard !isCheckingKernel, !model.isUpdatingKernel else { return }
+        kernelCheckState = .checking
+        kernelNotice = nil
+        Task {
+            do {
+                let latest = try await model.checkKernelUpdate()
+                model.refreshKernelVersion()
+                kernelVersion = model.kernelInstalledVersion
+                // 相对判断：tag 直接比字符串（mihomo 不用语义版本排序）
+                if model.kernelInstalledVersion == latest {
+                    kernelCheckState = .latest(latest)
+                } else {
+                    kernelCheckState = .updateAvailable(latest)
+                }
+            } catch {
+                kernelCheckState = .idle
+                kernelNoticeIsError = true
+                kernelNotice = (error as? KernelProvisionError)?.userMessage
+                    ?? "检查更新失败：网络不可达，可换下载镜像后重试"
+            }
+        }
+    }
+
+    /// 用户确认「更新到 vX.Y.Z」：才下载资产（停内核 → 换文件 → 起内核）
+    private func startKernelUpdate(_ tag: String) {
+        guard !model.isUpdatingKernel else { return }
+        kernelNotice = nil
+        Task {
+            let error = await model.updateKernel(to: tag)
+            model.refreshKernelVersion()
+            kernelVersion = model.kernelInstalledVersion
+            if let error {
+                kernelNoticeIsError = true
+                kernelNotice = error
+            } else {
+                kernelNoticeIsError = false
+                kernelNotice = "已更新到 \(tag)，内核已重启"
+                kernelCheckState = .latest(tag)
+            }
+        }
+    }
+
+    /// 未安装态：直接走首次下载（本地没内核，不需要先比较版本）
+    private func installKernel() {
+        guard !model.isUpdatingKernel else { return }
+        kernelNotice = nil
+        Task {
+            let error = await model.installKernelIfMissing()
+            model.refreshKernelVersion()
+            kernelVersion = model.kernelInstalledVersion
+            if let error {
+                kernelNoticeIsError = true
+                kernelNotice = error
+            } else {
+                kernelNoticeIsError = false
+                kernelNotice = "内核已安装并启动"
+                kernelCheckState = .idle
+            }
+        }
+    }
+
+    // MARK: - 段五：组件与维护
 
     private var componentSection: some View {
         section("组件与维护") {
@@ -409,7 +565,7 @@ struct SettingsPanelView: View {
         }
     }
 
-    // MARK: - 段五：存储
+    // MARK: - 段六：存储
 
     private var storageSection: some View {
         section("存储") {
@@ -664,6 +820,14 @@ struct SettingsPanelView: View {
             maintenanceNotice = error ?? "已清理。请退出并重新打开 Clash（不会自动退出），以便重建数据目录。"
         }
     }
+}
+
+/// 设置页「内核」一节的检查状态：与升级动作分离，`updateAvailable` 才会出现下载按钮。
+private enum KernelCheckState: Equatable {
+    case idle
+    case checking
+    case latest(String)
+    case updateAvailable(String)
 }
 
 /// UA 选项：与 ADR-0006 的三个预设 + 自定义一一对应（空串 = 默认 `mihomo/<版本>`）。

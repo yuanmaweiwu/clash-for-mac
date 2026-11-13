@@ -195,8 +195,20 @@ final class PanelPreviewModel {
     /// 不确定进度条用；总长度未知时为 nil
     var kernelProvisioningProgress: Double? { kernel.provisioningPhase.progress }
 
-    /// 连接磁贴不可再点：内核启停中、系统代理正在写入、或 TUN 正在过渡
-    var isConnectionBusy: Bool { kernel.isTransitioning || connectionState.isBusy || tun.isBusy }
+    /// 连接磁贴不可再点：内核启停中、系统代理正在写入、TUN 正在过渡，或正在升级内核
+    var isConnectionBusy: Bool {
+        isUpdatingKernel || kernel.isTransitioning || connectionState.isBusy || tun.isBusy
+    }
+
+    /// 正在升级内核（设置页触发）：期间禁用 TUN / 代理开关，面板显示「正在更新内核…」
+    private(set) var isUpdatingKernel = false
+
+    /// 面板状态条副文案：升级中优先于启动阶段
+    var kernelUpdateStatus: String? {
+        guard isUpdatingKernel else { return nil }
+        guard let progress = kernelProvisioningProgress else { return "正在更新内核…" }
+        return "正在更新内核… \(Int(progress * 100))%"
+    }
 
     /// 状态条文案（§3.3）：内核 running + 代理关 = 已就绪，代理开 = 代理中。
     ///
@@ -500,7 +512,81 @@ final class PanelPreviewModel {
     }
 
     /// 重启中（stop → start 或代理由重开）：设置窗口的「立即重启」禁用
-    var isApplyingSettings: Bool { kernel.isTransitioning || connectionState.isBusy }
+    var isApplyingSettings: Bool {
+        isUpdatingKernel || kernel.isTransitioning || connectionState.isBusy
+    }
+
+    // MARK: - 内核版本（设置页）
+
+    /// 已安装版本（本地文件，不联网）；`nil` = 未安装
+    var kernelInstalledVersion: String? { kernel.provisioner.installedVersion }
+
+    /// 进入设置页时刷新一次（只读本地 `kernel/VERSION`）
+    func refreshKernelVersion() {
+        kernel.provisioner.refreshInstalledVersion()
+    }
+
+    /// 「下载并安装」（未安装态）：本地没有内核 → 直接走首次下载，不做版本比较
+    func installKernelIfMissing() async -> String? {
+        guard !isUpdatingKernel else { return "另一个内核任务尚未结束" }
+        isUpdatingKernel = true
+        defer { isUpdatingKernel = false }
+        do {
+            try await kernel.ensureKernelAvailable()
+            if hasConfiguredProfile {
+                await kernel.start()
+            }
+            if kernel.phase == .failed {
+                return kernel.lastError?.userMessage ?? "内核安装后启动失败，请查看日志"
+            }
+            return nil
+        } catch {
+            return (error as? KernelProvisionError)?.userMessage ?? error.localizedDescription
+        }
+    }
+
+    /// 「检查更新」：**只发一次 GitHub API 请求，不下载任何资产**。
+    ///
+    /// 顺序（硬约束，避免「先下后判」）：
+    /// 1. 先刷新本地 `installedVersion`（读 `kernel/VERSION`，内置包回退 bundle）
+    /// 2. 只有用户点了检查才请求 `latestVersion()`；10 分钟内重复点走缓存
+    /// 3. 比较交给 UI：`latest == installed` → 直接显示「已是最新」，不触发下载
+    func checkKernelUpdate() async throws -> String {
+        kernel.provisioner.refreshInstalledVersion()
+        return try await kernel.provisioner.latestVersion()
+    }
+
+    /// 升级内核：停 → 换文件 → 起（进程归 `KernelService`，provisioner 只换文件）。
+    ///
+    /// - Returns: `nil` = 成功；否则是给用户看的一句话。
+    func updateKernel(to tag: String) async -> String? {
+        guard !isUpdatingKernel else { return "另一个内核更新任务尚未结束" }
+        // TUN 的内核是 helper 的 root 副本（/Library/PrivilegedHelperTools/mihomo）：
+        // 更新用户目录那份不会影响它，先让用户关 TUN，别制造「更新了但没生效」
+        if tun.isHelperKernelRunning {
+            return "TUN 接管中：内核由特权组件持有，请先关闭 TUN 再更新内核"
+        }
+
+        isUpdatingKernel = true
+        defer { isUpdatingKernel = false }
+
+        do {
+            // 升级前内核在跑 → 升级后必须起来（保持用户看到的状态，不偷偷停内核）
+            let wasRunning = kernel.phase == .running
+            await kernel.stop()
+            try await kernel.provisioner.update(to: tag)
+            if wasRunning || hasConfiguredProfile {
+                await kernel.start()
+            }
+            if kernel.phase == .failed {
+                return kernel.lastError?.userMessage ?? "内核更新后启动失败，请查看日志"
+            }
+            return nil
+        } catch {
+            let message = (error as? KernelProvisionError)?.userMessage ?? error.localizedDescription
+            return message
+        }
+    }
 
     /// 「立即重启」：按新设置重建 runtime 并重启内核。
     ///
@@ -645,8 +731,8 @@ final class PanelPreviewModel {
 
     /// 磁贴五态（§4.2）：已关闭 / 需要授权 / 等待授权 / 已开启 / 失败
     var tunState: TunState { tun.tileState }
-    /// 过渡 / 授权中：磁贴禁用，忽略重复点击
-    var isTunBusy: Bool { tun.isBusy }
+    /// 过渡 / 授权中 / 升级内核：磁贴禁用，忽略重复点击
+    var isTunBusy: Bool { isUpdatingKernel || tun.isBusy }
     var isTunOn: Bool { tun.isOn }
 
     /// 点击 TUN：安装引导 / 启动 / 关闭都由 `TunService` 的状态机决定

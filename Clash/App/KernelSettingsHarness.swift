@@ -28,7 +28,8 @@ enum KernelSettingsHarness {
             finished = true
         }
 
-        let deadline = Date().addingTimeInterval(180)
+        // 升级模式要真下载 20MB+ 资产，本机 GitHub 直连慢，给足时间
+        let deadline = Date().addingTimeInterval(mode == "kernel-version" ? 900 : 180)
         while !finished && Date() < deadline {
             RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         }
@@ -52,6 +53,7 @@ enum KernelSettingsHarness {
         case "settings-port-restart": return await runSettingsPortRestart()
         case "kernel-provision": return await runKernelProvision()
         case "kernel-triple": return await runKernelTripleStart()
+        case "kernel-version": return await runKernelVersion()
         default:
             print("FAIL unknown-mode \(mode)")
             return 1
@@ -201,12 +203,220 @@ enum KernelSettingsHarness {
             .filter { $0.hasPrefix(".") }
         failures += report("no-partial-files", leftovers.isEmpty, "leftovers=\(leftovers)")
         print("NOTE kernel-final=\(FileManager.default.isExecutableFile(atPath: AppPaths.kernelBinaryURL.path) ? "present" : "missing")")
+        // 内置包验收：从 bundle 拷出内核 + geodata，全程 0 次资产请求 / 0 次 API 请求
+        print("NOTE request-counts api=\(kernel.provisioner.apiRequestCount) asset=\(kernel.provisioner.assetRequestCount)")
         return failures
     }
 
+    // MARK: - 内核版本 / 检查更新 / 升级（设置页「内核」段）
+
+    /// `kernel-version`：验证「先判断再决定下不下载」的硬约束。
+    ///
+    /// 断言顺序（每条都对应验收项）：
+    /// 1. 本地有 `kernel/VERSION` 时，`latestVersion()` 只发 API 请求（asset 计数不变）
+    /// 2. 检查前后内核目录逐文件大小一致（磁盘无新增）
+    /// 3. `latest == installed` 时不出现任何资产请求
+    /// 4. 把 VERSION 改成旧版本 → 再检查仍只发 API（缓存命中，asset 仍为 0）
+    /// 5. 用户确认后才下载：asset 计数 > 0，VERSION 回最新，内核 `-v` 含 tag
+    /// 6. 破坏验证：假资产 → 报「版本不符」，旧内核与 VERSION 都不被覆盖
+    private static func runKernelVersion() async -> Int {
+        var failures = 0
+        let settings = SettingsStore()
+        let provisioner = KernelProvisioner.shared
+        let originalVersion = readInstalledVersion()
+
+        provisioner.refreshInstalledVersion()
+        let installed = provisioner.installedVersion
+        print("NOTE installed=\(installed ?? "nil")")
+        failures += report("installed-version", installed != nil, "installed=\(installed ?? "nil")")
+
+        // 1 + 2：检查更新只打 API
+        let filesBefore = kernelDirectorySnapshot()
+        let asset0 = provisioner.assetRequestCount
+        let api0 = provisioner.apiRequestCount
+        var latest: String?
+        do {
+            latest = try await provisioner.latestVersion()
+        } catch {
+            print("NOTE latest-error=\(error)")
+        }
+        let apiDelta = provisioner.apiRequestCount - api0
+        let assetDelta = provisioner.assetRequestCount - asset0
+        print("NOTE check latest=\(latest ?? "nil") api=+\(apiDelta) asset=+\(assetDelta)")
+        failures += report("check-returns-tag", latest?.hasPrefix("v") == true, "latest=\(latest ?? "nil")")
+        failures += report("check-api-only", assetDelta == 0, "assetDelta=\(assetDelta)")
+        failures += report(
+            "check-no-disk-change",
+            filesBefore == kernelDirectorySnapshot(),
+            "before=\(filesBefore) after=\(kernelDirectorySnapshot())"
+        )
+        guard let tag = latest else { return failures }
+
+        // 3：已是最新 → 下载字节数为 0
+        if installed == tag {
+            failures += report(
+                "already-latest-no-download",
+                provisioner.assetRequestCount == asset0,
+                "assets=\(provisioner.assetRequestCount - asset0)"
+            )
+        }
+
+        // 4：模拟旧版本，只改 VERSION
+        writeInstalledVersion("v1.19.33")
+        provisioner.refreshInstalledVersion()
+        print("NOTE stale installed=\(provisioner.installedVersion ?? "nil")")
+        failures += report("stale-detected", provisioner.installedVersion != tag)
+        let assetBeforeRecheck = provisioner.assetRequestCount
+        _ = try? await provisioner.latestVersion()
+        failures += report(
+            "recheck-still-api-only",
+            provisioner.assetRequestCount == assetBeforeRecheck,
+            "assetDelta=\(provisioner.assetRequestCount - assetBeforeRecheck)"
+        )
+
+        // 5：起内核 → 用户确认升级 → 下载 + 校验 + 重启
+        let kernel = KernelService(settings: settings)
+        let model = PanelPreviewModel(kernel: kernel, settings: settings, autoStartsKernel: false)
+        await kernel.start()
+        failures += report(
+            "kernel-before-update",
+            kernel.phase == .running,
+            "phase=\(kernel.phase) err=\(kernel.lastError?.userMessage ?? "-")"
+        )
+
+        let assetBeforeUpdate = provisioner.assetRequestCount
+        print("NOTE updating to \(tag) …")
+        let updateError = await model.updateKernel(to: tag)
+        print("NOTE update-error=\(updateError ?? "-")")
+        failures += report("update-succeeded", updateError == nil, updateError ?? "")
+        failures += report(
+            "update-downloaded-asset",
+            provisioner.assetRequestCount > assetBeforeUpdate,
+            "assetDelta=\(provisioner.assetRequestCount - assetBeforeUpdate)"
+        )
+        failures += report("update-version-file", readInstalledVersion() == tag, "version=\(readInstalledVersion() ?? "nil")")
+        let versionOutput = await shell(AppPaths.kernelBinaryURL.path, ["-v"])
+        failures += report("update-binary-runs", versionOutput.contains(tag), "v=\(versionOutput.prefix(120))")
+        // 真换字节：与包内 SHA256-arm64 一致（不是「上一条命令读到的旧二进制」）
+        let bundledHash = (try? String(contentsOf: URL(fileURLWithPath: "Resources/Kernel/SHA256-arm64"), encoding: .utf8))?
+            .split(whereSeparator: \.isWhitespace).first.map(String.init)
+        let actualHash = (await shell("/usr/bin/shasum", ["-a", "256", AppPaths.kernelBinaryURL.path]))
+            .split(whereSeparator: \.isWhitespace).first.map(String.init)
+        failures += report(
+            "update-bytes-match-bundled",
+            bundledHash != nil && actualHash == bundledHash,
+            "actual=\(actualHash ?? "nil") expected=\(bundledHash ?? "nil")"
+        )
+
+        failures += report(
+            "update-kernel-running",
+            kernel.phase == .running,
+            "phase=\(kernel.phase) err=\(kernel.lastError?.userMessage ?? "-")"
+        )
+        var proxiesOK = false
+        if kernel.phase == .running, let port = kernel.port, let secret = kernel.secret {
+            proxiesOK = (try? await ClashAPIClient(port: port, secret: secret).proxies()) != nil
+        }
+        failures += report("update-proxies-http-200", proxiesOK)
+
+        // 6：破坏验证 —— 假资产必须被拒，旧内核与 VERSION 保留
+        let sizeBefore = binarySize()
+        writeInstalledVersion("v1.19.33")
+        provisioner.refreshInstalledVersion()
+        var fakeGz: URL?
+        if let gz = makeFakeKernelGz() {
+            fakeGz = gz
+            setenv("CLASH_KERNEL_ASSET_OVERRIDE", gz.path, 1)
+        }
+        let brokenError = await model.updateKernel(to: tag)
+        unsetenv("CLASH_KERNEL_ASSET_OVERRIDE")
+        print("NOTE broken-update-error=\(brokenError ?? "-")")
+        failures += report("broken-update-rejected", brokenError != nil, brokenError ?? "无错误（不应发生）")
+        failures += report("broken-keeps-binary", binarySize() == sizeBefore, "size=\(binarySize()) 期望 \(sizeBefore)")
+        failures += report("broken-keeps-version", readInstalledVersion() == "v1.19.33", "version=\(readInstalledVersion() ?? "nil")")
+        let leftovers = ((try? FileManager.default.contentsOfDirectory(atPath: AppPaths.kernelDirectory.path)) ?? [])
+            .filter { $0.hasPrefix(".") }
+        failures += report("broken-no-partial-files", leftovers.isEmpty, "leftovers=\(leftovers)")
+        if let fakeGz { try? FileManager.default.removeItem(at: fakeGz) }
+
+        // 恢复：VERSION 从上一步成功升级后的「真二进制」读回来，不再重下一次 22MB
+        guard updateError == nil else {
+            if let originalVersion { writeInstalledVersion(originalVersion) }
+            provisioner.refreshInstalledVersion()
+            print("NOTE skip-restore（首次升级失败）")
+            return failures
+        }
+        let restored = await shell(AppPaths.kernelBinaryURL.path, ["-v"])
+        let restoredTag = restored.split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+            .first { $0.hasPrefix("v") }
+        if let restoredTag { writeInstalledVersion(restoredTag) }
+        provisioner.refreshInstalledVersion()
+        failures += report("restore-version", readInstalledVersion() == tag, "version=\(readInstalledVersion() ?? "nil") tag=\(restoredTag ?? "nil")")
+
+        await kernel.stop()
+        if let originalVersion {
+            writeInstalledVersion(originalVersion)
+        }
+        provisioner.refreshInstalledVersion()
+        print("NOTE final installed=\(provisioner.installedVersion ?? "nil") kernel=\(kernel.phase)")
+        print("NOTE request-totals api=\(provisioner.apiRequestCount) asset=\(provisioner.assetRequestCount)")
+        return failures
+    }
+
+    private static func readInstalledVersion() -> String? {
+        guard let text = try? String(contentsOf: AppPaths.kernelVersionURL, encoding: .utf8) else { return nil }
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
+    private static func writeInstalledVersion(_ version: String) {
+        try? Data("\(version)\n".utf8).write(to: AppPaths.kernelVersionURL, options: .atomic)
+    }
+
+    private static func binarySize() -> Int {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: AppPaths.kernelBinaryURL.path)
+        return (attributes?[.size] as? NSNumber)?.intValue ?? 0
+    }
+
+    /// 内核目录逐文件大小：用来证明「检查更新没有落任何文件」
+    private static func kernelDirectorySnapshot() -> String {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: AppPaths.kernelDirectory.path)) ?? []
+        return names.sorted().map { name in
+            let path = AppPaths.kernelDirectory.appending(path: name).path
+            let attributes = try? FileManager.default.attributesOfItem(atPath: path)
+            let size = (attributes?[.size] as? NSNumber)?.intValue ?? 0
+            return "\(name):\(size)"
+        }.joined(separator: ",")
+    }
+
+    /// 造一个「能解压、跑起来输出不是 mihomo」的假资产，用于破坏验证
+    private static func makeFakeKernelGz() -> URL? {
+        let directory = FileManager.default.temporaryDirectory
+        let script = directory.appending(path: "fake-mihomo-\(UUID().uuidString)")
+        guard (try? "#!/bin/sh\necho fake kernel\n".write(to: script, atomically: true, encoding: .utf8)) != nil else {
+            return nil
+        }
+        let gz = directory.appending(path: script.lastPathComponent + ".gz")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/gzip")
+        process.arguments = ["-c", script.path]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        try? FileManager.default.removeItem(at: script)
+        guard process.terminationStatus == 0, (try? data.write(to: gz)) != nil else { return nil }
+        return gz
+    }
+
     /// 每 100ms 打印阶段变化，便于真机定位卡住的位置
-    private static func printStageTransitions(of kernel: KernelService) async {
-        var last = ""
+    private static func printStageTransitions(of kernel: KernelService) async {        var last = ""
         for _ in 0 ..< 1200 {
             var stage = kernel.provisioningPhase.statusText ?? kernel.phase.rawValue
             if kernel.phase == .failed, let error = kernel.lastError, kernel.provisioningPhase.statusText == nil {
