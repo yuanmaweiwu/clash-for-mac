@@ -32,6 +32,8 @@ final class AppEnvironment {
     private var logWindow: LogWindowController?
 
     private init() {
+        // 日志目录只保留最近 7 天（后台执行，不阻塞启动）
+        LogRetention.pruneAtStartup()
         #if DEBUG
         // CLI 自检入口（`CLASH_PROFILE_HARNESS` / `CLASH_PROXY_HARNESS`），正常启动不受影响
         ProfileStoreHarness.runIfRequested()

@@ -32,6 +32,9 @@ final class KernelSupervisor: @unchecked Sendable {
     private static let pollInterval: TimeInterval = 0.05
     /// spawn 后先观察一小会儿，把「立刻退出」变成可读的失败原因，而不是假装成功
     private static let spawnProbeInterval: TimeInterval = 0.25
+    /// `kernel.log` 的截断阈值：与 `HelperLog` 的 2 MB 口径一致，
+    /// 每次启动前超限就清空（内核 stdout 由本进程持有，不需要保留多轮历史）
+    private static let maxLogBytes: UInt64 = 2 * 1024 * 1024
 
     private let queue = DispatchQueue(label: "com.clash.helper.kernel")
     private var process: Process?
@@ -167,6 +170,10 @@ final class KernelSupervisor: @unchecked Sendable {
         try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
 
         let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: path))
+        let size = (try? handle.seekToEnd()) ?? 0
+        if size > Self.maxLogBytes {
+            try handle.truncate(atOffset: 0)
+        }
         try handle.seekToEnd()
         return handle
     }
