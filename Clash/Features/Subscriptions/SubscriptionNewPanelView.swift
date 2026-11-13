@@ -25,11 +25,11 @@ struct SubscriptionNewPanelView: View {
         VStack(alignment: .leading, spacing: 0) {
             breadcrumb
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: Space.l) {
                 TextField("订阅链接（https://…）", text: $urlText)
                     .textFieldStyle(.roundedBorder)
-                    .controlSize(.small)
-                    .font(.system(size: 11))
+                    .controlSize(.regular)
+                    .font(Typography.body)
                     .focused($isURLFocused)
                     .disabled(model.isImportingProfile)
                     .onSubmit { submit() }
@@ -47,9 +47,9 @@ struct SubscriptionNewPanelView: View {
                     .foregroundStyle(Theme.textTertiary)
 
                 actions
-                    .padding(.top, 2)
+                    .padding(.top, Space.xs)
             }
-            .padding(.top, 12)
+            .padding(.top, Metrics.sectionGap)
 
             Spacer(minLength: 0)
         }
@@ -60,18 +60,18 @@ struct SubscriptionNewPanelView: View {
     // MARK: - 面包屑
 
     private var breadcrumb: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: Space.xs) {
             IconButtonView(systemName: "chevron.left", label: "返回", iconSize: 12) {
                 onBack()
             }
 
             Text("添加订阅")
-                .font(Typography.title)
+                .font(Typography.pageTitle)
                 .foregroundStyle(Theme.textPrimary)
 
-            Spacer(minLength: 6)
+            Spacer(minLength: Space.s)
         }
-        .frame(height: Metrics.cardHeaderHeight)
+        .frame(height: Metrics.breadcrumbHeight)
     }
 
     // MARK: - 动作
@@ -87,22 +87,22 @@ struct SubscriptionNewPanelView: View {
                     .font(Typography.caption)
                     .foregroundStyle(Theme.textSecondary)
             }
-            .frame(height: 24)
+            .frame(height: Metrics.hitTarget)
             .accessibilityElement(children: .combine)
         } else {
-            HStack(spacing: 10) {
+            HStack(spacing: Space.l) {
                 Button("导入") { submit() }
                     .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .font(.system(size: 11, weight: .medium))
+                    .controlSize(.regular)
+                    .font(.system(size: 13, weight: .medium))
                     .disabled(trimmed.isEmpty)
 
                 Button("选择 YAML…") { chooseYAMLFile() }
-                    .buttonStyle(.plain)
-                    .font(Typography.caption)
-                    .foregroundStyle(Theme.accent)
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
+                    .font(.system(size: 13))
             }
-            .frame(height: 24)
+            .frame(height: Metrics.hitTarget)
         }
     }
 
