@@ -92,6 +92,10 @@ enum Typography {
     static let caption = Font.system(size: 11, weight: .regular)
     /// 12 / medium + 等宽数字 —— 延迟、行内速率
     static let number = Font.system(size: 12, weight: .medium).monospacedDigit()
+    /// 10 / medium + 等宽数字 —— 订阅磁贴用量（§4.2）
+    static let numberSmall = Font.system(size: 10, weight: .medium).monospacedDigit()
+    /// 9 / regular —— 订阅磁贴到期（§4.2），全面板最小字号，仅一行
+    static let micro = Font.system(size: 9, weight: .regular)
     /// 13 / medium + 等宽数字 —— 状态条速率
     static let numberLarge = Font.system(size: 13, weight: .medium).monospacedDigit()
     /// 12 / medium —— 状态条文案
@@ -129,6 +133,8 @@ enum Metrics {
     static let tileWidth: CGFloat = 153
     static let tileHeight: CGFloat = 64
     static let tileGap: CGFloat = 10
+    /// 订阅磁贴用量条高度（§4.2）：条只做辅助，数字永远同时给出
+    static let tileMeterHeight: CGFloat = 3
     static let segmentHeight: CGFloat = 28
     static let cardHeaderHeight: CGFloat = 32
     static let rowHeight: CGFloat = 32

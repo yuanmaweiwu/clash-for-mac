@@ -223,12 +223,10 @@ final class PanelPreviewModel {
 
     var activeSubscription: ProfileEntry? { profiles.activeProfile }
 
-    var subscriptionTileSubtitle: String? {
-        guard let active = activeSubscription else { return nil }
-        var text = active.name
-        if active.isUpdateFailed { text += " · 更新失败" }
-        if active.isExpired { text += " · 已过期" }
-        return text
+    /// 磁贴四行内容（名称 / 用量 / 到期）与无障碍描述；缺字段即省行（§4.2）
+    var subscriptionTileContent: SubscriptionTileContent {
+        guard let active = activeSubscription else { return .empty }
+        return active.tileContent(badgeCount: subscriptionBadgeCount)
     }
 
     var subscriptionBadgeCount: Int { subscriptions.count }

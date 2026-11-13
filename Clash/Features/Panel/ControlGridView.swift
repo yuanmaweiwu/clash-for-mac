@@ -22,10 +22,7 @@ struct ControlGridView: View {
                     model.toggleTun()
                 }
                 .disabled(model.isTunBusy)
-                SubscriptionTileView(
-                    profileName: model.subscriptionTileSubtitle,
-                    badgeCount: model.subscriptionBadgeCount
-                ) {
+                SubscriptionTileView(content: model.subscriptionTileContent) {
                     model.openSubscriptions()
                 }
             }
