@@ -8,11 +8,25 @@
       "computedHash": "118d450c2d6ca54fee5f56cf8883fa3231bc2d917bb8f5a3f87488162c55fac9",
       "installMode": "copy"
     },
+    "code-review": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/code-review/SKILL.md",
+      "computedHash": "ce86b40a3d1648a0018b712f0c70704e6c2316b2a9b9e915ab116916a31273dc",
+      "installMode": "copy"
+    },
     "swiftui-expert-skill": {
       "source": "AvdLee/SwiftUI-Agent-Skill",
       "sourceType": "github",
       "skillPath": "skills/swiftui-expert-skill/SKILL.md",
       "computedHash": "187f7d0b9b9103f0935460c1b8060a77131c5ef24fa0d6757f5f5afdd23b7966",
+      "installMode": "copy"
+    },
+    "swiftui-performance": {
+      "source": "dpearson2699/swift-ios-skills",
+      "sourceType": "github",
+      "skillPath": "skills/swiftui-performance/SKILL.md",
+      "computedHash": "0b9e2918a251e5e6dbe3473d6c79f691c6935d3c1c6819348479813531a30dda",
       "installMode": "copy"
     },
     "swiftui-pro": {

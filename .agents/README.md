@@ -9,6 +9,9 @@
 ├── core-process/           # 内核 mihomo：进程 / API / TUN / 配置注入
 ├── menubar-ui/             # 状态栏与控制中心浮层实现约定
 ├── system-proxy/           # 系统代理开关与快照还原
+├── apple-design/           # 外部：Apple 设计原则（材质/动效/排版/克制）
+├── code-review/            # 外部：代码审查流程与清单
+├── swiftui-performance/    # 外部：SwiftUI 性能
 ├── plan/                   # 进度交接与上下文压缩（plan/CURRENT.md）
 ├── git/                    # 提交 / 回退 / 远程安全约定
 ├── swiftui-pro/            # 外部：SwiftUI 代码 review（Paul Hudson）

@@ -33,6 +33,9 @@
 | 目录归属 / 分层 / 新增 feature | [`architecture`](.agents/skills/architecture/SKILL.md) |
 | 内核 mihomo 进程 / API / TUN / 配置注入 | [`core-process`](.agents/skills/core-process/SKILL.md) |
 | 状态栏 UI / 控制中心浮层 / 动效 / 无障碍 | [`menubar-ui`](.agents/skills/menubar-ui/SKILL.md) |
+| 视觉与动效的「苹果味」原则 | [`apple-design`](.agents/skills/apple-design/SKILL.md)（外部） |
+| 代码审查（可维护性 / 过度防御 / 简化） | [`code-review`](.agents/skills/code-review/SKILL.md)（外部） |
+| SwiftUI 性能（列表、绘制、刷新） | [`swiftui-performance`](.agents/skills/swiftui-performance/SKILL.md)（外部） |
 | 系统代理开关 / 快照还原 / 残留排查 | [`system-proxy`](.agents/skills/system-proxy/SKILL.md) |
 | 进度交接 / 续作 / 上下文压缩 | [`plan`](.agents/skills/plan/SKILL.md) |
 | Git：提交 / 检查点 / 回退 / push | [`git`](.agents/skills/git/SKILL.md) |

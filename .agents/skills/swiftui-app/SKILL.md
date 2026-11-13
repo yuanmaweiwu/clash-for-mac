@@ -73,8 +73,10 @@ View → Model(视图状态) → Service(协议) → 实现(网络/进程/磁盘
 |------|------|------|
 | 目录职责、代码放哪、新增 feature、跨 feature 复用 | `architecture` | 分层禁令 + feature 脚手架 |
 | 命名 / 状态管理 / 并发 / 错误处理 / 日志 / 测试 | `swift-style` | 计划中，落地前按本文件铁律 |
-| 阶段性 review / 合并前检查 | `code-review`（计划中）+ `swiftui-pro` | 外部技能已装：九维 review（废弃 API / 性能 / 无障碍 / 并发 / 卫生） |
-| 写/改 View、状态、导航、动画、列表、macOS 场景 | `swiftui-expert-skill` | 外部技能已装：API 正确性与现代写法 |
+| 阶段性 review / 合并前检查 | `code-review` + `swiftui-pro` | 外部技能已装：九维 review（废弃 API / 性能 / 无障碍 / 并发 / 卫生） |
+| 写/改 View、状态、导航、动画、列表、macOS 场景 | `swiftui-expert-skill` |
+| 视觉方向、材质、排版、动效的审美判断 | `apple-design` |
+| 列表/绘制/刷新等性能问题 | `swiftui-performance` | 外部技能已装：API 正确性与现代写法 |
 | 构建、签名、公证、CI、发布 | `build-release` | 计划中 |
 | 续作 / 换电脑 / 进度交接 | `plan` | `plan/CURRENT.md` 是唯一进度源 |
 | Git（自动本地提交） | `git` | 完成可验证改动自动本地 commit；未明确要求禁止远程写 |
