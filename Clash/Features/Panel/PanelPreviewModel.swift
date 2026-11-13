@@ -1,4 +1,4 @@
-// TODO(v0.3): 连接列表与日志窗口仍是空态；流量已接真实 `/traffic` WS
+// TODO(v0.3): 日志窗口仍是空态；连接列表已接 `/connections`
 import CoreGraphics
 import Foundation
 import Observation
@@ -15,8 +15,9 @@ import Observation
 /// - 订阅库（列表 / 激活 / 导入 / 更新 / 重命名 / 删除），来自 `ProfileStore`
 ///   （`profiles/index.json` + `profiles/<id>.yaml`）
 /// - 实时速率与 60 点曲线，来自 `TrafficService`（`/traffic` WS，1Hz）
+/// - 连接列表（条数 / 规则 / 节点 / 关闭），来自 `ConnectionService`（`/connections`，面板打开时 2s 轮询）
 ///
-/// **还没接的**：连接列表（`/connections`）、日志窗口、TUN（helper）。
+/// **还没接的**：日志窗口、TUN（helper）。
 @MainActor
 @Observable
 final class PanelPreviewModel {
@@ -33,6 +34,8 @@ final class PanelPreviewModel {
     @ObservationIgnored private let profiles: ProfileStore
     /// 真实流量采样（`/traffic` WS）
     @ObservationIgnored private let traffic: TrafficService
+    /// 真实连接列表（`/connections` 轮询）
+    @ObservationIgnored private let connections: ConnectionService
 
     /// 连接磁贴的五态（§4.2）；开 / 关成功与否都以读回校验为准
     private(set) var connectionState: ConnectionState = .off
@@ -91,6 +94,15 @@ final class PanelPreviewModel {
     /// WS 断连：曲线保留但降透明度、数值回到 `—`（§4.5 断连态）
     var isTrafficStale: Bool { !traffic.isStreaming }
 
+    // MARK: 连接列表（`/connections`）
+
+    /// 连接列表数据由 `ConnectionService` 持有；只有二级页打开期间才轮询
+    var connectionEntries: [ConnectionEntry] { connections.entries }
+    var connectionCount: Int { connections.count }
+    var connectionsTotalUp: Int64 { connections.totalUp }
+    var connectionsTotalDown: Int64 { connections.totalDown }
+    var connectionsError: String? { connections.lastError }
+
     @ObservationIgnored private var bootstrapTask: Task<Void, Never>?
     /// 内核生命周期串行链：同一时刻只有一条 start / stop 在跑
     @ObservationIgnored private var kernelTask: Task<Void, Never>?
@@ -117,6 +129,7 @@ final class PanelPreviewModel {
         self.systemProxy = systemProxy
         self.proxies = ProxyService(kernel: kernel)
         self.traffic = TrafficService(kernel: kernel)
+        self.connections = ConnectionService(kernel: kernel)
         self.connectionState = systemProxy.isEnabled ? .on : .off
 
         // 内核一就绪就拉真实策略组；停止 / 失败即清空
@@ -208,6 +221,8 @@ final class PanelPreviewModel {
             proxyRefreshTask?.cancel()
             proxies.clear()
             traffic.stop()
+            connections.stopPolling()
+            connections.clear()
             selectedGroupID = nil
             route = .root
             if phase == .failed {
@@ -387,7 +402,11 @@ final class PanelPreviewModel {
 
     func openAllGroups() { route = .allGroups }
     func openSubscriptions() { route = .subscriptions }
-    func popToRoot() { route = .root }
+    func openConnections() { route = .connections }
+    func popToRoot() {
+        connections.stopPolling()
+        route = .root
+    }
 
     func pushGroup(_ id: String) { route = .nodes(id) }
 
@@ -612,6 +631,26 @@ final class PanelPreviewModel {
     // 采样、环形缓冲与重连都在 `TrafficService` 里；这里只按内核相位起停。
     // 面板可见性在 `MenuBarExtra` 下拿不到可靠信号，因此不做「隐藏 30s 断开」：
     // 内核 running 期间保持一条常驻 WS（1Hz，可忽略的开销）。
+
+    // MARK: - 连接列表（真实 `/connections`，2s 轮询）
+    //
+    // 轮询只在二级页打开期间跑（`ConnectionsPanelView` 的 onAppear / onDisappear）；
+    // TODO(v1.0): 换 WS `/connections` 后删掉 `ConnectionService.startPolling` 的定时器。
+
+    func startConnectionPolling() { connections.startPolling() }
+    func stopConnectionPolling() { connections.stopPolling() }
+
+    func closeConnection(id: String) {
+        Task { [weak self] in
+            await self?.connections.close(id: id)
+        }
+    }
+
+    func closeAllConnections() {
+        Task { [weak self] in
+            await self?.connections.closeAll()
+        }
+    }
 
     // MARK: - 底栏
 

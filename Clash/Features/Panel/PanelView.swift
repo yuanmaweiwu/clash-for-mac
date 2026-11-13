@@ -85,6 +85,12 @@ struct PanelView: View {
                     model.popToRoot()
                 }
             }
+        case .connections:
+            pushedContent {
+                ConnectionsPanelView(model: model) {
+                    model.popToRoot()
+                }
+            }
         }
     }
 
@@ -139,7 +145,8 @@ struct PanelView: View {
                 // v0.2：换成 /connections 的真实连接数
                 connectionCount: nil,
                 kernelVersion: model.kernelVersion,
-                onRefresh: { model.refreshProfile() }
+                onRefresh: { model.refreshProfile() },
+                onOpenConnections: { model.openConnections() }
             )
             .padding(.top, Metrics.tileGap)
         }

@@ -9,6 +9,8 @@ struct FooterView: View {
     /// 内核版本（如 `1.19.34`）；未运行传 nil → 显示「—」
     let kernelVersion: String?
     let onRefresh: () -> Void
+    /// 底栏「连接」图标：推入连接列表二级页
+    let onOpenConnections: () -> Void
 
     @Environment(\.openSettings) private var openSettings
 
@@ -32,10 +34,7 @@ struct FooterView: View {
 
             HStack(spacing: 0) {
                 IconButtonView(systemName: "link", label: "连接列表", iconSize: 13) {
-                    PlaceholderPanel.show(
-                        title: "连接列表",
-                        detail: "连接列表与规则命中详情还没接入内核，这里先只验证入口。"
-                    )
+                    onOpenConnections()
                 }
                 Text(connectionCount.map { "\($0)" } ?? "—")
                     .font(Typography.number)

@@ -27,6 +27,11 @@ actor ClashAPIClient {
         let proxies: [String: ProxyEntry]
     }
 
+    private struct ConnectionsResponse: Decodable, Sendable {
+        /// 关掉全部连接后内核会把空列表序列化成 `null`，按可选解码
+        let connections: [ConnectionEntry]?
+    }
+
     private struct DelayResponse: Decodable, Sendable {
         let delay: Int
     }
@@ -123,6 +128,30 @@ actor ClashAPIClient {
     func patchMode(_ mode: String) async throws {
         let body = try JSONEncoder().encode(ModeBody(mode: mode))
         _ = try await send(["configs"], method: "PATCH", body: body)
+    }
+
+    // MARK: - 连接（`core-process` §5）
+
+    /// `GET /connections`：活动连接快照。
+    ///
+    /// 内核还会带 `uploadTotal` / `downloadTotal`（内核启动以来的累计值），这里不取：
+    /// 面板要的是「当前列表里这些连接的总量」，由上层按条目求和，关掉连接后立刻一致。
+    func connections() async throws -> [ConnectionEntry] {
+        let data = try await send(["connections"], method: "GET")
+        guard let response = try? JSONDecoder().decode(ConnectionsResponse.self, from: data) else {
+            throw APIError.malformedResponse
+        }
+        return response.connections ?? []
+    }
+
+    /// `DELETE /connections/{id}`：关闭单条连接
+    func closeConnection(id: String) async throws {
+        _ = try await send(["connections", id], method: "DELETE")
+    }
+
+    /// `DELETE /connections`：关闭全部连接
+    func closeAllConnections() async throws {
+        _ = try await send(["connections"], method: "DELETE")
     }
 
     // MARK: - 实时流量（WS）
