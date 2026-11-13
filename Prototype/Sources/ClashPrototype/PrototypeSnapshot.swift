@@ -38,6 +38,12 @@ enum PrototypeSnapshot {
             nodes.route = .nodes(group.id)
         }
 
+        let nodesTesting = PrototypeModel()
+        if let group = nodesTesting.groups.first {
+            nodesTesting.route = .nodes(group.id)
+            nodesTesting.enterSpeedTestingState(groupID: group.id)
+        }
+
         let subscriptions = PrototypeModel()
         subscriptions.route = .subscriptions
 
@@ -111,6 +117,14 @@ enum PrototypeSnapshot {
         renderPanel(failed, name: "panel-failed@2x.png", appearance: .aqua, in: directory)
         renderPanel(empty, name: "panel-empty@2x.png", appearance: .aqua, in: directory)
         renderPanel(nodes, name: "panel-nodes@2x.png", appearance: .aqua, in: directory)
+        renderPanel(nodesTesting, name: "panel-nodes-testing@2x.png", appearance: .aqua, in: directory)
+        render(
+            PanelView(model: single),
+            size: CGSize(width: Metrics.panelWidth, height: single.panelHeight),
+            appearance: .aqua,
+            scale: 5,
+            to: directory.appendingPathComponent("panel-single@5x.png")
+        )
         renderPanel(subscriptions, name: "panel-subscriptions@2x.png", appearance: .aqua, in: directory)
         renderPanel(allGroups, name: "panel-groups@2x.png", appearance: .aqua, in: directory)
         renderPanel(hoverGroup, name: "hover-group-row@2x.png", appearance: .aqua, in: directory)

@@ -46,7 +46,6 @@ struct AllGroupsPanelView: View {
             Spacer(minLength: 6)
         }
         .frame(height: Metrics.cardHeaderHeight)
-        .overlay(alignment: .bottom) { HairlineView() }
     }
 
     private var footer: some View {
@@ -62,6 +61,5 @@ struct AllGroupsPanelView: View {
                 .foregroundStyle(Theme.textTertiary)
         }
         .frame(height: Metrics.footerHeight)
-        .overlay(alignment: .top) { HairlineView() }
     }
 }

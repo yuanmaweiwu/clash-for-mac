@@ -49,6 +49,5 @@ struct FooterView: View {
             }
         }
         .frame(height: Metrics.footerHeight)
-        .overlay(alignment: .top) { HairlineView() }
     }
 }

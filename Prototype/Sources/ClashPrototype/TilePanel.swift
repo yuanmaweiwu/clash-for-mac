@@ -22,10 +22,11 @@ struct TilePanel<Content: View>: View {
             .background {
                 RoundedRectangle(cornerRadius: Metrics.radiusCard, style: .continuous)
                     .fill(isHoverable && isHovering ? Theme.cardHover : Theme.card)
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: Metrics.radiusCard, style: .continuous)
-                    .strokeBorder(border ?? Theme.hairline, lineWidth: Metrics.hairline)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: Metrics.radiusCard, style: .continuous)
+                            .strokeBorder(border ?? Theme.hairline, lineWidth: Metrics.cardStroke)
+                    }
+                    .compositingGroup()
             }
             .contentShape(RoundedRectangle(cornerRadius: Metrics.radiusCard, style: .continuous))
             .onHover { hovering in

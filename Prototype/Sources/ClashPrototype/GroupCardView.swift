@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 分组卡：卡头 32 + 三行节点 32 = 128pt，卡内不滚动、不画任何分隔线（§3.4 / §4.6）。
+/// 分组卡：卡头 32 + 三行节点 32 + 上下各 4pt 内边距 = 136pt，卡内不滚动、不画分隔线（§3.4 / §4.6）。
 /// 选中项恒在首行，切换时整组三行交叉淡入（不整卡飞入）。
 @MainActor
 struct GroupCardView: View {
@@ -25,15 +25,22 @@ struct GroupCardView: View {
                 .id(group.selectedNodeID)
                 .transition(.opacity)
         }
+        .padding(.vertical, Metrics.cardInsetV)
         .animation(.easeInOut(duration: 0.18), value: group.selectedNodeID)
         .background {
-            RoundedRectangle(cornerRadius: Metrics.radiusCard, style: .continuous)
-                .fill(Theme.card)
+            cardSurface
         }
-        .overlay {
-            RoundedRectangle(cornerRadius: Metrics.radiusCard, style: .continuous)
-                .strokeBorder(Theme.hairline, lineWidth: Metrics.hairline)
-        }
+    }
+
+    /// 单层合成：填充 + 1pt 描边一起光栅化，避免圆角处的半透明过渡带
+    private var cardSurface: some View {
+        RoundedRectangle(cornerRadius: Metrics.radiusCard, style: .continuous)
+            .fill(Theme.card)
+            .overlay {
+                RoundedRectangle(cornerRadius: Metrics.radiusCard, style: .continuous)
+                    .strokeBorder(Theme.hairline, lineWidth: Metrics.cardStroke)
+            }
+            .compositingGroup()
     }
 
     private var rows: some View {

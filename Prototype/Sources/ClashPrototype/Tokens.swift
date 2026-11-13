@@ -121,7 +121,8 @@ enum Metrics {
     // 面板
     static let panelWidth: CGFloat = 340
     static let panelPadding: CGFloat = 12
-    static let panelHeight: CGFloat = 626
+    /// 双卡满态高度（上限 656）
+    static let panelHeight: CGFloat = 642
 
     // 分区
     static let statusBarHeight: CGFloat = 36
@@ -129,9 +130,9 @@ enum Metrics {
     static let chartCardHeight: CGFloat = 80
     static let chartHeight: CGFloat = 40
     static let groupTitleHeight: CGFloat = 20
-    static let groupCardHeight: CGFloat = 128
-    /// 双卡满态
-    static let groupSectionFullHeight: CGFloat = 286
+    static let groupCardHeight: CGFloat = 136
+    /// 双卡满态：20 + 136 + 10 + 136
+    static let groupSectionFullHeight: CGFloat = 302
     static let emptyGroupCardHeight: CGFloat = 120
     static let footerHeight: CGFloat = 32
     static let bannerHeight: CGFloat = 36
@@ -148,6 +149,8 @@ enum Metrics {
     static let cardHeaderHeight: CGFloat = 32
     static let rowHeight: CGFloat = 32
     static let cardPadding: CGFloat = 10
+    /// 卡片上下内边距：卡头 hover 胶囊距卡顶 = 4 + 2 = 6pt
+    static let cardInsetV: CGFloat = 4
     /// 一级卡片 hover / 选中胶囊：左右 6、上下 2（32pt 行 → 胶囊 28，文字距胶囊边 4）
     static let pillInsetH: CGFloat = 6
     static let pillInsetV: CGFloat = 2
@@ -167,6 +170,8 @@ enum Metrics {
 
     /// 1px = 1 / displayScale
     static let hairline: CGFloat = 1 / max(2, NSScreen.main?.backingScaleFactor ?? 2)
+    /// 卡片 / 磁贴描边：固定 1pt（2x 下 2px，连续），不用 0.5pt
+    static let cardStroke: CGFloat = 1
 
     /// 分组区高度：区块标题 20 + N 张卡 + 卡间 10
     static func groupSectionHeight(forCards count: Int) -> CGFloat {

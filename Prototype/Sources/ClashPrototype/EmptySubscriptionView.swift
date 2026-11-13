@@ -34,10 +34,11 @@ struct EmptySubscriptionView: View {
         .background {
             RoundedRectangle(cornerRadius: Metrics.radiusCard, style: .continuous)
                 .fill(Theme.card)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: Metrics.radiusCard, style: .continuous)
-                .strokeBorder(Theme.hairline, lineWidth: Metrics.hairline)
+                .overlay {
+                    RoundedRectangle(cornerRadius: Metrics.radiusCard, style: .continuous)
+                        .strokeBorder(Theme.hairline, lineWidth: Metrics.cardStroke)
+                }
+                .compositingGroup()
         }
     }
 }

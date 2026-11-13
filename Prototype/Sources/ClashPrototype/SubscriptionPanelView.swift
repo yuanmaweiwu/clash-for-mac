@@ -81,7 +81,6 @@ struct SubscriptionPanelView: View {
             .accessibilityLabel(Text("添加订阅"))
         }
         .frame(height: Metrics.cardHeaderHeight)
-        .overlay(alignment: .bottom) { HairlineView() }
     }
 
     private var footer: some View {
@@ -101,7 +100,6 @@ struct SubscriptionPanelView: View {
             }
         }
         .frame(height: Metrics.footerHeight)
-        .overlay(alignment: .top) { HairlineView() }
     }
 
     private func showURLImport() {

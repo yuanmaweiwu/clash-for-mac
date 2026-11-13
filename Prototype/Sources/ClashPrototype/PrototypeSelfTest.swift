@@ -66,6 +66,15 @@ enum PrototypeSelfTest {
                 print("16. 删除后：\(model.activeSubscription?.name ?? "无") / 提示 \(model.subscriptionNotice ?? "无")")
             }
 
+            if let group = model.groups.first {
+                let before = group.nodes.first?.latency ?? 0
+                model.testAllNodes(in: group.id)
+                try? await Task.sleep(for: .seconds(1.4))
+                let after = model.groups.first?.nodes.first?.latency ?? 0
+                print("17. 测速：\(before) ms → \(after) ms（±20）")
+                print("18. 超时节点仍为：\(model.groups.first?.nodes.first { $0.latency == nil }?.name ?? "无")")
+            }
+
             exit(0)
         }
 

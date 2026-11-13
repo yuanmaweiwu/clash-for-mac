@@ -8,6 +8,8 @@ struct NodeRowView: View {
     let node: DemoNode
     let isSelected: Bool
     let isAvailable: Bool
+    /// 测速中：延迟位换成 10pt ProgressView
+    var isTesting = false
     /// 原型调试：强制按 hover 渲染（离屏快照用）
     var forcedHover = false
     /// 二级列表用 44，卡片内保持 32
@@ -56,9 +58,17 @@ struct NodeRowView: View {
 
             Spacer(minLength: 6)
 
-            Text(node.latencyText)
-                .font(Typography.number)
-                .foregroundStyle(isAvailable ? Theme.textSecondary : Theme.textTertiary)
+            if isTesting {
+                ProgressView()
+                    .controlSize(.mini)
+                    .scaleEffect(0.55)
+                    .frame(width: 34, height: 16, alignment: .trailing)
+                    .accessibilityHidden(true)
+            } else {
+                Text(node.latencyText)
+                    .font(Typography.number)
+                    .foregroundStyle(isAvailable ? Theme.textSecondary : Theme.textTertiary)
+            }
         }
         .padding(.horizontal, Metrics.cardPadding)
         .frame(maxWidth: .infinity)
@@ -81,6 +91,7 @@ struct NodeRowView: View {
     }
 
     private var accessibilityValue: String {
+        if isTesting { return "测速中" }
         guard let latency = node.latency else { return "不可用" }
         return isSelected ? "延迟 \(latency) 毫秒，已选中" : "延迟 \(latency) 毫秒"
     }

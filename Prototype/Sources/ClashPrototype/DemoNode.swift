@@ -5,7 +5,7 @@ struct DemoNode: Identifiable, Sendable {
     let id = UUID()
     let name: String
     /// nil 表示超时 / 不可用
-    let latency: Int?
+    var latency: Int?
 
     var latencyText: String {
         guard let latency else { return "超时" }

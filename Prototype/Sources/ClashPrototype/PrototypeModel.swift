@@ -45,6 +45,8 @@ final class PrototypeModel {
     var activeSubscriptionID: UUID?
     private(set) var updatingSubscriptionID: UUID?
     private(set) var subscriptionNotice: String?
+    private(set) var testingGroupID: UUID?
+    private(set) var speedNotice: String?
 
     var connectionCount = 12
     var updatedText = "2 分钟前更新"
@@ -59,6 +61,8 @@ final class PrototypeModel {
     @ObservationIgnored private var feedTask: Task<Void, Never>?
     @ObservationIgnored private var subscriptionTask: Task<Void, Never>?
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
+    @ObservationIgnored private var speedTask: Task<Void, Never>?
+    @ObservationIgnored private var speedNoticeTask: Task<Void, Never>?
 
     init() {
         let initialGroups = Self.makeGroups()
@@ -292,6 +296,55 @@ final class PrototypeModel {
         }
     }
 
+    // MARK: - 节点测速（本地模拟）
+
+    func isSpeedTesting(_ groupID: UUID) -> Bool { testingGroupID == groupID }
+
+    func testAllNodes(in groupID: UUID) {
+        guard testingGroupID == nil else { return }
+        guard let index = groups.firstIndex(where: { $0.id == groupID }) else { return }
+
+        // 没有可测速节点（空组 / 全超时）也给一句一次性提示
+        guard groups[index].nodes.contains(where: { $0.latency != nil }) else {
+            showSpeedNotice("没有可测速的节点")
+            return
+        }
+
+        testingGroupID = groupID
+        speedTask?.cancel()
+        speedTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.2))
+            guard let self, !Task.isCancelled else { return }
+            self.finishSpeedTest(groupID: groupID)
+        }
+    }
+
+    /// 快照用：直接进入「测速中」外观
+    func enterSpeedTestingState(groupID: UUID) {
+        testingGroupID = groupID
+    }
+
+    private func finishSpeedTest(groupID: UUID) {
+        if let index = groups.firstIndex(where: { $0.id == groupID }) {
+            for nodeIndex in groups[index].nodes.indices {
+                // 超时节点保持超时
+                guard let latency = groups[index].nodes[nodeIndex].latency else { continue }
+                groups[index].nodes[nodeIndex].latency = max(1, latency + Int.random(in: -20...20))
+            }
+        }
+        testingGroupID = nil
+    }
+
+    private func showSpeedNotice(_ text: String) {
+        speedNotice = text
+        speedNoticeTask?.cancel()
+        speedNoticeTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2.5))
+            guard let self, !Task.isCancelled else { return }
+            self.speedNotice = nil
+        }
+    }
+
     // MARK: - 流量（1Hz 假数据）
 
     func setTrafficPaused(_ paused: Bool) {
@@ -339,6 +392,8 @@ final class PrototypeModel {
         tunTask?.cancel()
         subscriptionTask?.cancel()
         noticeTask?.cancel()
+        speedTask?.cancel()
+        speedNoticeTask?.cancel()
 
         phase = .running
         systemProxyOn = true
@@ -357,6 +412,8 @@ final class PrototypeModel {
         activeSubscriptionID = profiles.first?.id
         updatingSubscriptionID = nil
         subscriptionNotice = nil
+        testingGroupID = nil
+        speedNotice = nil
 
         downRate = DemoTraffic.initialDownRate
         upRate = DemoTraffic.initialUpRate
