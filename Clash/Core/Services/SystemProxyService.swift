@@ -83,7 +83,8 @@ final class SystemProxyService {
 
     /// 快照 → 逐服务设置 → 读回校验；任一环节失败都按快照全量还原后抛错。
     func enable(port: Int) async throws {
-        guard !isTransitioning else { return }
+        // 过渡中不能把「没执行」当成成功：调用方（清理 / 关代理）会据此删运行时文件
+        guard !isTransitioning else { throw SystemProxyError.busy }
         isTransitioning = true
         defer { isTransitioning = false }
         lastError = nil
@@ -133,7 +134,7 @@ final class SystemProxyService {
 
     /// 读快照 → 逐项还原 → 读回校验 → 全成功才删快照。
     func disable() async throws {
-        guard !isTransitioning else { return }
+        guard !isTransitioning else { throw SystemProxyError.busy }
         isTransitioning = true
         defer { isTransitioning = false }
         lastError = nil
@@ -287,6 +288,8 @@ enum SystemProxyError: Error, Equatable, Sendable {
     case snapshotRemoveFailed(detail: String)
     /// 一个可用的网络服务都没找到
     case noServices
+    /// 开 / 关正在过渡中，本次调用没有执行
+    case busy
 
     /// 面向用户的一句话（banner / 磁贴）
     var userMessage: String {
@@ -307,6 +310,8 @@ enum SystemProxyError: Error, Equatable, Sendable {
             "系统代理已还原，但快照删除失败，下次启动会再核对一次"
         case .noServices:
             "没有找到可用的网络服务"
+        case .busy:
+            "正在切换代理，请稍候"
         }
     }
 
@@ -329,6 +334,8 @@ enum SystemProxyError: Error, Equatable, Sendable {
             "snapshotRemoveFailed（\(detail)）"
         case .noServices:
             "noServices（-listallnetworkservices 没有返回启用的服务）"
+        case .busy:
+            "busy（开 / 关正在过渡中）"
         }
     }
 }

@@ -267,6 +267,11 @@ final class PanelPreviewModel {
             }
             // 内核 running（含重启后新端口 / 新 secret）：重建 `/traffic` 连接
             traffic.start()
+            // 内核 restart（更新订阅 / 开关 TUN 必经 stop→start）在 `.stopped` 里停了轮询；
+            // 用户还停在连接页时要把轮询接回来，否则列表清空后再不刷新（只能退出页面重进）。
+            if route == .connections {
+                connections.startPolling()
+            }
         case .stopped, .failed:
             // 相位变化不再清空策略组、不再重置路由：开关代理 / TUN / 更新订阅都会
             // 让内核 stop → start，清空只会让面板在开关瞬间塌成空态再长回来。
@@ -947,6 +952,8 @@ final class PanelPreviewModel {
 
     func startConnectionPolling() { connections.startPolling() }
     func stopConnectionPolling() { connections.stopPolling() }
+    /// 轮询是否在跑（内核重启后必须自动接回，见 `handleKernelPhase`）
+    var isConnectionPolling: Bool { connections.isPolling }
 
     func closeConnection(id: String) {
         Task { [weak self] in

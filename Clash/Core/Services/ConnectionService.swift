@@ -67,6 +67,9 @@ final class ConnectionService {
         pollTask = nil
     }
 
+    /// 轮询是否在跑（自检 / 状态排查用；轮询本身仍由二级页生命周期驱动）
+    var isPolling: Bool { pollTask != nil }
+
     // MARK: - 读取
 
     /// 拉一次快照；内核没跑就清空（不编造旧数据）
