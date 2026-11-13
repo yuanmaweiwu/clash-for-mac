@@ -13,12 +13,17 @@ final class KernelService {
     // MARK: - 对 UI 暴露的状态
 
     private(set) var phase: KernelPhase = .stopped
+    /// 相位变化回调：面板据此在内核 `running` 后刷新 `/proxies`、`stopped` 后回到空态。
+    /// 单订阅者（`PanelPreviewModel`），只在主线程触发。
+    @ObservationIgnored var onPhaseChange: ((KernelPhase) -> Void)?
     private(set) var lastError: KernelError?
     private(set) var kernelVersion: String?
     /// 本次运行的 API 端口（127.0.0.1）
     private(set) var port: Int?
     /// 本次运行的 API secret；只在内存持有，不写日志
     private(set) var secret: String?
+    /// 本轮启动是否用了用户配置（false = 内置空配置），空态文案据此区分
+    private(set) var hasProfile = false
     /// 启动 / 停止过程中：UI 应禁用连接磁贴
     private(set) var isTransitioning = false
 
@@ -51,6 +56,15 @@ final class KernelService {
         }
     }
 
+    // MARK: - 相位
+
+    /// 唯一写相位的地方：改完通知订阅者（面板据此刷新或清空代理数据）
+    private func setPhase(_ newPhase: KernelPhase) {
+        guard phase != newPhase else { return }
+        phase = newPhase
+        onPhaseChange?(newPhase)
+    }
+
     // MARK: - 启动
 
     func start() async {
@@ -67,6 +81,7 @@ final class KernelService {
 
             // 配置来源：CLASH_PROFILE（DEBUG）/ profiles 下唯一一份，都没有则用内置空配置
             let profileURL = ProfileLocator.locate()
+            hasProfile = profileURL != nil
             let injected = RuntimeConfigBuilder.Injected(
                 controllerPort: ports[0],
                 dnsPort: ports[1],
@@ -79,7 +94,7 @@ final class KernelService {
             try await validateConfiguration(binaryURL: binaryURL, configPath: runtimeURL)
 
             let runner = runner ?? makeRunner(binaryURL: binaryURL)
-            phase = .starting
+            setPhase(.starting)
             let pid = try runner.start(configPath: runtimeURL)
 
             port = injected.controllerPort
@@ -94,7 +109,7 @@ final class KernelService {
             Self.logger.notice("内核进程已拉起 pid=\(pid) controller=127.0.0.1:\(injected.controllerPort)")
 
             kernelVersion = try await waitUntilReady(client: client, runner: runner)
-            phase = .running
+            setPhase(.running)
             Self.logger.notice("内核就绪 version=\(self.kernelVersion ?? "?", privacy: .public)")
         } catch {
             await failStart(with: error)
@@ -117,7 +132,7 @@ final class KernelService {
         await runner?.stop()
         client = nil
         kernelVersion = nil
-        phase = .stopped
+        setPhase(.stopped)
         Self.logger.notice("内核已停止")
     }
 
@@ -136,7 +151,7 @@ final class KernelService {
             await runner.stop()
         }
         client = nil
-        phase = .failed
+        setPhase(.failed)
         lastError = kernelError
 
         Self.logger.error("内核启动失败：\(kernelError.logDescription, privacy: .public)")
@@ -150,7 +165,7 @@ final class KernelService {
 
         client = nil
         kernelVersion = nil
-        phase = .failed
+        setPhase(.failed)
         lastError = .crashed(code: code)
 
         Self.logger.error("内核异常退出 code=\(code)")
@@ -301,7 +316,7 @@ final class KernelService {
     #if DEBUG
     /// Preview / 调试夹具：直接摆出失败态，不启动任何进程
     func applyPreviewFailure(_ error: KernelError = .binaryMissing) {
-        phase = .failed
+        setPhase(.failed)
         lastError = error
     }
     #endif

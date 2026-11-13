@@ -1,23 +1,24 @@
-// TODO(v0.2): 节点 / 订阅 / 流量仍是本地假数据；内核生命周期与 /version 已接真
+// TODO(v0.2): 订阅库 / 流量仍是本地假数据；内核生命周期、策略组与模式已接真
 import CoreGraphics
 import Foundation
 import Observation
 
-/// v0.1 面板模型：**内核是真的**（`KernelService`），其余仍是本地假数据。
+/// v0.1 面板模型：**内核与策略组是真的**（`KernelService` / `ProxyService`），订阅与流量仍是本地假数据。
 ///
-/// 视图只和本模型打交道；内核状态在本模型里做一次转发，
-/// 避免 View 直接依赖 `KernelService`。
+/// 视图只和本模型打交道；内核状态、策略组、节点、模式都在本模型里转发一次，
+/// 避免 View 直接依赖 `KernelService` / `ProxyService`。
 ///
 /// ## 仍是假数据的字段（下一轮接真实订阅 / 流量）
 ///
-/// - `groups` / `activeGroupID` / `isPinned`：策略组与节点（`makeGroups()`，节点延迟是写死的）
 /// - `subscriptions` / `activeSubscriptionID` / `updatingSubscriptionID`：订阅库（`makeSubscriptions()`）
-/// - 节点测速（`testAllNodes` → `finishSpeedTest`）：只改本地数字，没有真的打内核
 /// - 订阅更新 / 重命名 / 删除：只在内存里改，不读写任何文件
 /// - `updatedText` / `refreshProfile()`：底栏「N 分钟前更新」（v0.1 底栏固定显示「未导入配置」）
-/// - `mode`：只改本地状态，还没写进内核配置
+/// - 流量速率与曲线：v0.1 没接管流量，恒走空态
 ///
-/// **已经是真的**：内核生命周期（`phase` / `lastError`），来自 `KernelService`。
+/// **已经是真的**：
+/// - 内核生命周期（`phase` / `lastError`），来自 `KernelService`
+/// - 策略组 / 节点 / 延迟 / 选中项 / 模式，来自 `ProxyService`（`GET /proxies`、`GET /configs`）
+/// - 选节点（`PUT /proxies/{group}`）、批量测速（`GET /group/{name}/delay`）、切模式（`PATCH /configs`）
 ///
 /// **明确不做假的**：系统代理与 TUN（ADR-0007 决定 v0.1 不接管流量），
 /// 因此没有流量数字、没有波形、没有 TUN 开关态。
@@ -29,13 +30,17 @@ final class PanelPreviewModel {
 
     /// 真实内核生命周期；`phase` / `errorMessage` 都从这里转发
     @ObservationIgnored private let kernel: KernelService
+    /// 真实策略组 / 节点 / 模式
+    @ObservationIgnored private let proxies: ProxyService
 
     /// v0.1 没有系统代理（ADR-0007）：恒为 `false`，且刻意声明成 `let`。
     ///
-    /// 没有写入口 ⇒ `status` 在 `running` 时永远走 `guard` 分支返回「已就绪」，
+    /// 没有写入口 ⇒ `status` 在 `running` 时只会是「已就绪 / 直连」，
     /// 「代理中」在 v0.1 结构上不可达。v0.2 接入系统代理后再改成可写状态。
     let systemProxyOn = false
-    var mode: ProxyMode = .rule
+
+    /// 内核当前模式（`GET /configs` 为准）
+    var mode: ProxyMode { proxies.mode }
 
     /// 内核启动失败时的用户文案；真实来源是 `KernelError.userMessage`
     var errorMessage: String? { kernel.lastError?.userMessage }
@@ -47,15 +52,20 @@ final class PanelPreviewModel {
 
     var route: PanelRoute = .root
 
-    // MARK: 分组与订阅（假数据）
+    // MARK: 分组与订阅
 
-    var groups: [DemoGroup]
-    var activeGroupID: UUID?
+    /// 首屏 / 列表用的策略组（不含 `GLOBAL`），来自内核
+    var groups: [ProxyGroupModel] { proxies.groups }
+    /// 全部策略组（含 `GLOBAL`），供「全部策略组」二级页
+    var allGroups: [ProxyGroupModel] { proxies.allGroups }
+    /// 当前操作的组：「全部策略组」的高亮；没操作过时默认第一个（主组）
+    var activeGroupID: String? { selectedGroupID ?? groups.first?.name }
+    @ObservationIgnored private var selectedGroupID: String?
+
     var subscriptions: [SubscriptionProfile]
     var activeSubscriptionID: UUID?
     private(set) var updatingSubscriptionID: UUID?
     private(set) var subscriptionNotice: String?
-    private(set) var testingGroupID: UUID?
     private(set) var speedNotice: String?
     /// 测速完成后的「刚刚更新」短暂提示
     private(set) var speedResultFlash = false
@@ -74,15 +84,22 @@ final class PanelPreviewModel {
     @ObservationIgnored private var speedTask: Task<Void, Never>?
     @ObservationIgnored private var speedNoticeTask: Task<Void, Never>?
     @ObservationIgnored private var speedFlashTask: Task<Void, Never>?
+    @ObservationIgnored private var selectionTask: Task<Void, Never>?
+    @ObservationIgnored private var modeTask: Task<Void, Never>?
+    @ObservationIgnored private var proxyRefreshTask: Task<Void, Never>?
 
     init(kernel: KernelService = KernelService()) {
         self.kernel = kernel
-        let initialGroups = Self.makeGroups()
-        groups = initialGroups
-        activeGroupID = initialGroups.first?.id
+        self.proxies = ProxyService(kernel: kernel)
         let profiles = Self.makeSubscriptions()
         subscriptions = profiles
         activeSubscriptionID = profiles.first?.id
+
+        // 内核一就绪就拉真实策略组；停止 / 失败即清空
+        kernel.onPhaseChange = { [weak self] phase in
+            self?.handleKernelPhase(phase)
+        }
+
         startTrafficFeed()
     }
 
@@ -97,10 +114,10 @@ final class PanelPreviewModel {
     /// 启动 / 停止过程中：连接磁贴不可再点
     var isKernelBusy: Bool { kernel.isTransitioning }
 
-    /// 状态条文案（§3.3）：v0.1 只有「未运行 / 启动中 / 已就绪 / 启动失败」四种。
+    /// 状态条文案（§3.3）：v0.1 只有「未运行 / 启动中 / 已就绪 / 直连 / 启动失败」。
     ///
-    /// `systemProxyOn` 恒为 `false`，所以 `running` 一定返回 `.ready`（已就绪）；
-    /// 「代理中」/「直连」要等 v0.2 系统代理接上之后才可能出现。
+    /// `systemProxyOn` 恒为 `false`，所以 `running` 只会是「已就绪」或「直连」；
+    /// 「代理中」要等 v0.2 系统代理接上之后才可能出现。
     var status: DemoStatus {
         switch phase {
         case .stopped:
@@ -110,7 +127,7 @@ final class PanelPreviewModel {
         case .failed:
             return .failed
         case .running:
-            guard systemProxyOn else { return .ready }
+            guard systemProxyOn else { return mode == .direct ? .direct : .ready }
             return mode == .direct ? .direct : .proxying
         }
     }
@@ -121,8 +138,13 @@ final class PanelPreviewModel {
     var downRateText: String { DemoTraffic.format(rate: downRate) }
     var upRateText: String { DemoTraffic.format(rate: upRate) }
 
-    var pinnedGroups: [DemoGroup] { groups.filter(\.isPinned) }
-    var pinnedGroupIDs: Set<UUID> { Set(pinnedGroups.map(\.id)) }
+    var pinnedGroups: [ProxyGroupModel] { proxies.pinnedGroups }
+    var pinnedGroupIDs: Set<String> { Set(pinnedGroups.map(\.id)) }
+
+    /// 空态文案：有配置且内核给出过数据、但一个策略组都没有 → 「当前配置没有策略组」
+    var emptyGroupTitle: String {
+        proxies.hasLoaded && kernel.hasProfile ? "当前配置没有策略组" : "还没有配置"
+    }
 
     var activeSubscription: SubscriptionProfile? {
         guard let id = activeSubscriptionID else { return nil }
@@ -135,6 +157,26 @@ final class PanelPreviewModel {
     }
 
     var subscriptionBadgeCount: Int { subscriptions.count }
+
+    // MARK: - 内核相位
+
+    private func handleKernelPhase(_ phase: KernelPhase) {
+        switch phase {
+        case .running:
+            proxyRefreshTask?.cancel()
+            proxyRefreshTask = Task { [weak self] in
+                await self?.proxies.refresh()
+            }
+        case .stopped, .failed:
+            // 组数据作废：二级页的目标可能已经不在了，先回首层，避免空白面板
+            proxyRefreshTask?.cancel()
+            proxies.clear()
+            selectedGroupID = nil
+            route = .root
+        case .starting:
+            break
+        }
+    }
 
     // MARK: - 连接磁贴
 
@@ -156,7 +198,7 @@ final class PanelPreviewModel {
         transitionTask = Task { [weak self] in
             guard let self else { return }
             await self.kernel.start()
-            // v0.1 不设置系统代理：内核起来了只是「已就绪」，不是「代理中」
+            // 就绪后由 `onPhaseChange` 触发 `proxies.refresh()`
         }
     }
 
@@ -169,8 +211,13 @@ final class PanelPreviewModel {
 
     // MARK: - 代理模式
 
+    /// 分段点击 → `PATCH /configs`；失败由 service 回滚
     func selectMode(_ newMode: ProxyMode) {
-        mode = newMode
+        guard proxies.mode != newMode else { return }
+        modeTask?.cancel()
+        modeTask = Task { [weak self] in
+            await self?.proxies.setMode(newMode)
+        }
     }
 
     // MARK: - TUN 磁贴
@@ -184,24 +231,26 @@ final class PanelPreviewModel {
     func openSubscriptions() { route = .subscriptions }
     func popToRoot() { route = .root }
 
-    func pushGroup(_ id: UUID) { route = .nodes(id) }
+    func pushGroup(_ id: String) { route = .nodes(id) }
 
     // MARK: - 节点与 pin
 
-    func selectNode(groupID: UUID, nodeID: UUID) {
+    func selectNode(groupID: String, nodeID: String) {
         // 测速中不允许切节点，避免列表顺序抖动
-        guard testingGroupID == nil else { return }
-        guard let index = groups.firstIndex(where: { $0.id == groupID }),
-              let node = groups[index].nodes.first(where: { $0.id == nodeID }),
-              node.latency != nil else { return }
-        groups[index].selectedNodeID = nodeID
-        activeGroupID = groupID
+        guard proxies.testingGroup == nil else { return }
+        guard let group = groups.first(where: { $0.id == groupID }),
+              let node = group.nodes.first(where: { $0.id == nodeID }),
+              node.isAvailable else { return }
+
+        selectedGroupID = groupID
+        selectionTask?.cancel()
+        selectionTask = Task { [weak self] in
+            await self?.proxies.selectNode(group: groupID, node: nodeID)
+        }
     }
 
-    func togglePin(_ groupID: UUID) {
-        guard let index = groups.firstIndex(where: { $0.id == groupID }),
-              !groups[index].isMainGroup else { return }
-        groups[index].isPinned.toggle()
+    func togglePin(_ groupID: String) {
+        proxies.togglePin(group: groupID)
     }
 
     // MARK: - 订阅库
@@ -288,39 +337,31 @@ final class PanelPreviewModel {
         }
     }
 
-    // MARK: - 节点测速（本地模拟）
+    // MARK: - 节点测速（真实 `/group/{name}/delay`）
 
-    func isSpeedTesting(_ groupID: UUID) -> Bool { testingGroupID == groupID }
+    func isSpeedTesting(_ groupID: String) -> Bool { proxies.testingGroup == groupID }
 
-    func testAllNodes(in groupID: UUID) {
-        guard testingGroupID == nil else { return }
-        guard let index = groups.firstIndex(where: { $0.id == groupID }) else { return }
+    func testAllNodes(in groupID: String) {
+        guard proxies.testingGroup == nil else { return }
+        guard let group = groups.first(where: { $0.id == groupID }) else { return }
 
-        // 没有可测速节点（空组 / 全超时）也给一句一次性提示
-        guard groups[index].nodes.contains(where: { $0.latency != nil }) else {
+        guard !group.nodes.isEmpty else {
             showSpeedNotice("没有可测速的节点")
             return
         }
 
-        testingGroupID = groupID
         speedTask?.cancel()
         speedTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(1.2))
-            guard let self, !Task.isCancelled else { return }
-            self.finishSpeedTest(groupID: groupID)
-        }
-    }
+            guard let self else { return }
+            await self.proxies.testAll(group: groupID)
+            guard !Task.isCancelled else { return }
 
-    private func finishSpeedTest(groupID: UUID) {
-        if let index = groups.firstIndex(where: { $0.id == groupID }) {
-            for nodeIndex in groups[index].nodes.indices {
-                // 超时节点保持超时
-                guard let latency = groups[index].nodes[nodeIndex].latency else { continue }
-                groups[index].nodes[nodeIndex].latency = max(1, latency + Int.random(in: -40...40))
+            if let error = self.proxies.lastError {
+                self.showSpeedNotice(error)
+            } else {
+                self.flashSpeedResult()
             }
         }
-        testingGroupID = nil
-        flashSpeedResult()
     }
 
     private func flashSpeedResult() {
@@ -346,7 +387,7 @@ final class PanelPreviewModel {
     // MARK: - 流量（1Hz 假数据）
 
     /// v0.1 没接管流量，不跑假数据源：速率与曲线一律走空态。
-    /// v0.2 接/`traffic` 后，把这里换成真实采样再打开。
+    /// v0.2 接 `/traffic` 后，把这里换成真实采样再打开。
     private func startTrafficFeed() {
         guard systemProxyOn, feedTask == nil else { return }
         feedTask = Task { [weak self] in
@@ -374,38 +415,7 @@ final class PanelPreviewModel {
         updatedText = "刚刚更新"
     }
 
-    // MARK: - 假数据
-
-    static func makeGroups() -> [DemoGroup] {
-        [
-            DemoGroup(
-                name: "节点选择",
-                nodes: [
-                    DemoNode(name: "香港 01", latency: 32),
-                    DemoNode(name: "日本 02", latency: 88),
-                    DemoNode(name: "美国 03", latency: nil),
-                    DemoNode(name: "新加坡 04", latency: 64),
-                    DemoNode(name: "台湾 05", latency: 41),
-                    DemoNode(name: "韩国 06", latency: 95),
-                    DemoNode(name: "德国 07", latency: 210),
-                    DemoNode(name: "英国 08", latency: 245),
-                    DemoNode(name: "澳洲 09", latency: 312)
-                ],
-                isMainGroup: true
-            ),
-            DemoGroup(
-                name: "自动选择",
-                nodes: [
-                    DemoNode(name: "日本 02", latency: 88),
-                    DemoNode(name: "香港 01", latency: 32),
-                    DemoNode(name: "新加坡 04", latency: 64),
-                    DemoNode(name: "台湾 05", latency: 41),
-                    DemoNode(name: "美国 03", latency: nil),
-                    DemoNode(name: "韩国 06", latency: 95)
-                ]
-            )
-        ]
-    }
+    // MARK: - 假数据（订阅库）
 
     static func makeSubscriptions() -> [SubscriptionProfile] {
         [
@@ -441,6 +451,16 @@ final class PanelPreviewModel {
     /// Preview 夹具：直接摆出启动失败态（不启动内核）
     func previewFailure() {
         kernel.applyPreviewFailure()
+    }
+
+    /// Preview 夹具：不启动内核，摆出两张卡（仅设计预览用）
+    func applyPreviewGroups() {
+        proxies.applyPreviewFixture()
+    }
+
+    /// Preview 夹具：把所有可 pin 的组都 pin 上
+    func pinAllPreviewGroups() {
+        proxies.previewPinAllGroups()
     }
     #endif
 }

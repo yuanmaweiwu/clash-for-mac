@@ -5,7 +5,7 @@ import SwiftUI
 @MainActor
 struct NodeListPanelView: View {
     let model: PanelPreviewModel
-    let group: DemoGroup
+    let group: ProxyGroupModel
     let onBack: () -> Void
 
     private var isTesting: Bool { model.isSpeedTesting(group.id) }
@@ -20,7 +20,7 @@ struct NodeListPanelView: View {
                         NodeRowView(
                             node: node,
                             isSelected: group.isSelected(node),
-                            isAvailable: node.latency != nil,
+                            isAvailable: node.isAvailable,
                             isTesting: isTesting,
                             rowHeight: 44,
                             pillInsetV: Metrics.listPillInsetV,

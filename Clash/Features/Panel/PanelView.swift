@@ -66,7 +66,7 @@ struct PanelView: View {
             rootContent
                 .transition(pushTransition)
         case .nodes(let id):
-            if let group = model.groups.first(where: { $0.id == id }) {
+            if let group = model.allGroups.first(where: { $0.id == id }) {
                 pushedContent {
                     NodeListPanelView(model: model, group: group) {
                         model.popToRoot()
@@ -164,11 +164,12 @@ struct PanelView: View {
 private func panelPreviewModel(pinnedFailure: Bool = false, empty: Bool = false) -> PanelPreviewModel {
     let model = PanelPreviewModel()
     if empty {
-        model.groups = []
         model.subscriptions = []
+    } else {
+        model.applyPreviewGroups()
     }
     if pinnedFailure {
-        for index in model.groups.indices { model.groups[index].isPinned = true }
+        model.pinAllPreviewGroups()
         model.previewFailure()
     }
     return model

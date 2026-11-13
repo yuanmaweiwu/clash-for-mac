@@ -4,7 +4,7 @@ import SwiftUI
 /// 当前组只加粗 + 底色，不加 ✓；星标控制是否固定到首屏（主组禁用）。
 @MainActor
 struct AllGroupsRowView: View {
-    let group: DemoGroup
+    let group: ProxyGroupModel
     let isActive: Bool
     let onTogglePin: () -> Void
     let onOpen: () -> Void
@@ -55,7 +55,7 @@ struct AllGroupsRowView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(PressableButtonStyle())
-        .disabled(group.isMainGroup)
+        .disabled(!group.canPin)
         .focused($isStarFocused)
         .focusEffectDisabled()
         .overlay {
@@ -65,12 +65,12 @@ struct AllGroupsRowView: View {
                     .padding(-1)
             }
         }
-        .help(group.isMainGroup ? "主组固定显示" : (group.isPinned ? "取消固定" : "固定到首屏"))
+        .help(group.canPin ? (group.isPinned ? "取消固定" : "固定到首屏") : "主组固定显示")
         .accessibilityLabel(Text(group.isPinned ? "取消固定 \(group.name)" : "固定 \(group.name)"))
     }
 
     private var starColor: Color {
-        if group.isMainGroup { return Theme.textTertiary }
+        if !group.canPin { return Theme.textTertiary }
         return group.isPinned ? Theme.accent : Theme.textSecondary
     }
 }

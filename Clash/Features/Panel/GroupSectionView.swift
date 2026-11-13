@@ -9,7 +9,7 @@ struct GroupSectionView: View {
     var body: some View {
         Group {
             if model.groups.isEmpty {
-                EmptyGroupView()
+                EmptyGroupView(title: model.emptyGroupTitle)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView(.vertical) {

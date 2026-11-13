@@ -12,7 +12,7 @@ struct AllGroupsPanelView: View {
 
             ScrollView(.vertical) {
                 LazyVStack(spacing: 0) {
-                    ForEach(Array(model.groups.enumerated()), id: \.element.id) { _, group in
+                    ForEach(Array(model.allGroups.enumerated()), id: \.element.id) { _, group in
                         AllGroupsRowView(
                             group: group,
                             isActive: group.id == model.activeGroupID,
@@ -49,7 +49,7 @@ struct AllGroupsPanelView: View {
 
     private var footer: some View {
         HStack(spacing: 6) {
-            Text("共 \(model.groups.count) 个策略组")
+            Text("共 \(model.allGroups.count) 个策略组")
                 .font(Typography.caption)
                 .foregroundStyle(Theme.textSecondary)
 

@@ -4,14 +4,20 @@ import SwiftUI
 /// 选中项恒在首行，切换时整组三行交叉淡入（不整卡飞入）。
 @MainActor
 struct GroupCardView: View {
-    let group: DemoGroup
+    let group: ProxyGroupModel
     let onOpen: () -> Void
-    let onSelect: (UUID) -> Void
+    let onSelect: (String) -> Void
 
     @State private var isHeaderHovering = false
     @FocusState private var isHeaderFocused: Bool
 
     private var showsHeaderPill: Bool { isHeaderHovering }
+
+    /// 卡头右侧：还有更多节点时显示剩余数，组内 ≤3 个时显示当前节点名（§3.4）
+    private var headerTrailingText: String {
+        if group.extraCount > 0 { return "还有 \(group.extraCount) 个" }
+        return group.now ?? group.type
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -45,7 +51,7 @@ struct GroupCardView: View {
                 NodeRowView(
                     node: node,
                     isSelected: group.isSelected(node),
-                    isAvailable: node.latency != nil,
+                    isAvailable: node.isAvailable,
                     action: { onSelect(node.id) }
                 )
             }
@@ -61,9 +67,12 @@ struct GroupCardView: View {
 
                 Spacer(minLength: 6)
 
-                Text("还有 \(group.extraCount) 个")
+                Text(headerTrailingText)
                     .font(Typography.caption)
                     .foregroundStyle(Theme.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: 120, alignment: .trailing)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(Theme.textTertiary)
@@ -94,7 +103,9 @@ struct GroupCardView: View {
         .onHover { isHeaderHovering = $0 }
         .animation(.easeInOut(duration: 0.12), value: isHeaderHovering)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text("\(group.name)，还有 \(group.extraCount) 个节点"))
+        .accessibilityLabel(Text(group.extraCount > 0
+            ? "\(group.name)，还有 \(group.extraCount) 个节点"
+            : "\(group.name)，当前 \(headerTrailingText)"))
         .accessibilityHint("按下查看全部节点")
         .accessibilityAddTraits(.isButton)
     }

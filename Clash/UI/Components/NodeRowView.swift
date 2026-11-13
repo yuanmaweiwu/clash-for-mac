@@ -5,7 +5,7 @@ import SwiftUI
 /// 选中态只靠底色 + 加粗表达，行尾不放 ✓；延迟数字右对齐到卡内边距 10pt。
 @MainActor
 struct NodeRowView: View {
-    let node: DemoNode
+    let node: ProxyNodeModel
     let isSelected: Bool
     let isAvailable: Bool
     /// 测速中：延迟位换成 10pt ProgressView
@@ -46,7 +46,7 @@ struct NodeRowView: View {
 
     private var rowContent: some View {
         HStack(spacing: 6) {
-            LatencyDotView(latency: node.latency)
+            LatencyDotView(latency: node.delay)
 
             Text(node.name)
                 .font(isSelected ? Typography.title : Typography.body)
@@ -90,7 +90,7 @@ struct NodeRowView: View {
 
     private var accessibilityValue: String {
         if isTesting { return "测速中" }
-        guard let latency = node.latency else { return "不可用" }
+        guard let latency = node.delay else { return "不可用" }
         return isSelected ? "延迟 \(latency) 毫秒，已选中" : "延迟 \(latency) 毫秒"
     }
 }
