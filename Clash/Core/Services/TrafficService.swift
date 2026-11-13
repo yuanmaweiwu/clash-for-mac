@@ -4,7 +4,8 @@ import Observation
 /// 实时流量：`/traffic` WS 采样 → 60 点环形缓冲（`docs/01-ARCHITECTURE.md` §8）。
 ///
 /// 边界：
-/// - 只在内核 `running` 时连接；`stopped` / `failed` 清空序列并断开
+/// - 只在内核 `running` 时连接；`stopped` / `failed` 断开连接，但**保留最后一帧波形**
+///   按断连态显示（内核 stop → start 的开关 / 更新订阅场景不再闪回「暂无流量」）
 /// - 断线自动重连 1s → 2s → 4s → 8s 封顶，**重连期间保留曲线**（`isStreaming = false`，
 ///   UI 走 §4.5 断连态：曲线 30% 透明、数值 `—`）
 /// - 端口 / secret 变了（内核重启）→ 用新的 `ClashAPIClient` 重建连接，不复用旧 socket
@@ -51,7 +52,12 @@ final class TrafficService {
         }
     }
 
-    /// 内核停止 / 失败：断开并清空，避免下次启动显示上一次会话的波形
+    /// 内核停止 / 失败：断开连接并保留最后一帧波形（断连态）。
+    ///
+    /// 不清空采样：开关 TUN / 更新订阅都会让内核 stop → start，清空会让曲线卡在
+    /// 开关瞬间闪回「暂无流量」再重新长出来。内核没跑时 `isStreaming = false`，
+    /// 曲线按 §4.5 断连态降到 30%，数值回 `—`；App 下一次启动是新的 Service 实例，
+    /// 不会把上一次会话的波形带过来。
     func stop() {
         runTask?.cancel()
         runTask = nil
@@ -61,11 +67,8 @@ final class TrafficService {
         Task { await current?.stopTraffic() }
 
         isStreaming = false
-        hasSamples = false
         down = 0
         up = 0
-        downSeries = Array(repeating: 0, count: Self.sampleCount)
-        upSeries = Array(repeating: 0, count: Self.sampleCount)
     }
 
     // MARK: - 连接循环
