@@ -36,6 +36,16 @@
 
 清单与结构见 [`.agents/README.md`](.agents/README.md)。
 
+## 项目文档
+
+| 内容 | 文件 |
+|------|------|
+| 产品定位 / 范围 / 术语 | [`docs/00-PRODUCT.md`](docs/00-PRODUCT.md) |
+| 架构：进程模型 / 模块 / 配置流水线 | [`docs/01-ARCHITECTURE.md`](docs/01-ARCHITECTURE.md) |
+| UI 规范：Token / 面板 / 组件 / 动效 | [`docs/02-UI-SPEC.md`](docs/02-UI-SPEC.md) |
+| 路线图与验收标准 | [`docs/03-ROADMAP.md`](docs/03-ROADMAP.md) |
+| 关键决策记录 | [`docs/adr/`](docs/adr/) |
+
 ## 铁律
 
 1. **完成一小段可验证改动 → 自动本地 commit**，用户不必再说「提交」；不要只改一半就提交。

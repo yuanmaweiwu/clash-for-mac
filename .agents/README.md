@@ -25,8 +25,11 @@
 
 ## 计划中
 
-`swift-style`（写法约定）、`code-review`（分级审核）、`build-release`（构建/签名/公证/CI）；
-`persistence` / `networking` / `core-process` 视项目形态决定是否新增。
+`swift-style`（写法约定）、`code-review`（分级审核）、`build-release`（构建/签名/公证/CI）、
+`core-process`（mihomo 生命周期 + API）、`system-proxy`（networksetup 快照/还原）、
+`menubar-ui`（控制中心规范落地）。
+
+> 全部装到本目录（`.agents/skills/`），见根 `AGENTS.md` <铁律 0>。
 
 ## 外部技能的维护
 

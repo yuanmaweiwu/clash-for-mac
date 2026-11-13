@@ -20,20 +20,25 @@ description: "本仓库（Clash，SwiftUI macOS 原生应用）总入口与路�
 | UI | SwiftUI（iOS 习惯不要照搬，先看 `architecture` 的 macOS 差异） | 已定 |
 | UI 兜底 | AppKit 桥接（`NSViewRepresentable` / `NSViewControllerRepresentable`） | 按需 |
 | 状态 | `@Observable` + `@State`/`@Environment` | 已定 |
-| 并发 | Swift Concurrency（`async/await`、`actor`、`@MainActor`） | 已定 |
+| 并发 | Swift Concurrency（`async/await`、`actor`、`@MainActor`），Swift 6 严格检查 | 已定 |
 | 日志 | `os.Logger`（`Logger(subsystem:category:)`） | 已定 |
-| 最低 macOS | **待定**（决定可用 API 面） | TBD |
-| Swift / Xcode | **待定** | TBD |
-| 工程形态 | **待定**（`.xcodeproj` 或 SPM + 打包脚本） | TBD |
-| 持久化 | **待定**（SwiftData / GRDB / 仅 YAML 文件） | TBD |
-| 分发 | **待定**（签名 / 公证 / Sparkle） | TBD |
+| 最低 macOS | **macOS 15 Sequoia**（`docs/adr/0002`） | 已定 |
+| Swift / Xcode | Swift 6 语言模式；Xcode 16+（以实机版本为准） | 已定 |
+| 工程形态 | `.xcodeproj` 手写入库；target = App / Helper / Tests（`docs/adr/0003`） | 已定 |
+| 内核 | 自带 `mihomo` 二进制，helper 以子进程管理（`docs/adr/0001`、`0004`） | 已定 |
+| 配置生成 | 解析原 YAML → 覆盖顶层键 → 写 `runtime/`，**绝不改写用户配置** | 已定 |
+| 持久化 | 设置 JSON（`Codable` + 原子写）+ 配置 YAML 文件；**不用 SwiftData/GRDB** | 已定 |
+| 第三方依赖 | 仅 `Yams`（YAML 解析，提议待确认）；Sparkle 到 v1.0 | 提议 |
+| 分发 | 自助下载 + 签名/公证 + Sparkle（App Store 不做） | 已定（细节 v1.0） |
 
-**TBD 项未定前**：不要引入依赖它的框架或 API；先问用户，再落地。
+**未确认项**：不要提前写依赖它的代码；`docs/00-PRODUCT.md`、`01-ARCHITECTURE.md`、`03-ROADMAP.md` 是本节的展开。
 
 ## 2. 目录总览（目标结构）
 
 ```
-App/                   @main、场景与窗口、AppDelegate 桥接、依赖装配（AppEnvironment）
+App/                   @main、场景与窗口（MenuBarExtra / 设置）、AppDelegate 桥接、AppEnvironment
+Helper/                LaunchDaemon target（root）+ XPC 服务端
+Shared/                App 与 Helper 共用：XPC 协议、DTO（必须 Sendable）
 Features/<Feature>/    一个功能一个目录：<Feature>View / <Feature>Model / <Feature>Service
 Core/
 ├── Models/            领域模型（优先 Sendable 值类型）
@@ -41,10 +46,11 @@ Core/
 ├── Storage/           持久化实现
 └── Utilities/         无 UI 的纯工具
 UI/                    可复用控件、样式、Design Token、Preview 支持
-Resources/             Assets、本地化、Info.plist 相关
-Tests/                 单元测试 / UI 测试
+Resources/             Assets、本地化、Info.plist、mihomo 二进制与 LICENSE
+Tests/                 单元测试 / 集成测试
 ```
 
+依赖方向单向：`Features → Core → Shared`；`Helper → Shared`（**禁止** import App 侧）；`UI` 只被 `Features` 使用。
 工程形态确定前，目录只作**约定**，不急着建空目录。
 
 ## 3. 分层（跨任务总闸）
@@ -92,27 +98,27 @@ View → Model(视图状态) → Service(协议) → 实现(网络/进程/磁盘
 
 ## 6. 常用命令
 
-构建方式随工程形态而定（TBD）。确定后在此固定，例如：
-
 ```bash
-# .xcodeproj
-xcodebuild -scheme Clash -configuration Debug build
+# 构建（Debug）
+xcodebuild -project Clash.xcodeproj -scheme Clash -configuration Debug build
 
-# SPM
-swift build
-swift test
+# 单元测试
+xcodebuild -project Clash.xcodeproj -scheme Clash -destination 'platform=macOS' test
+
+# 内核集成自检（待 v0.1 脚本落地）
+./Scripts/kernel-smoke.sh
 ```
 
-未确定前，改完以「能编译 + 手工跑通相关路径」为验收标准，并在 `plan/CURRENT.md` 记下实际命令。
+工程尚未创建前，以「方案可落地 + 文档自洽」为验收；工程落地后立即用上述命令实测并修正本节。
 
-## 7. 待用户拍板的决定
+## 7. 已拍板的决定
 
-| # | 问题 | 影响 |
+| # | 决定 | 记录 |
 |---|------|------|
-| 1 | 是否为 Clash 内核（mihomo）的图形客户端？需管进程 / 改 YAML / 设系统代理 / TUN helper？ | 决定是否新增 `core-process`、`system-proxy` 技能 |
-| 2 | 最低 macOS 版本 + Xcode / Swift 版本 | 决定可用 SwiftUI API 与并发写法 |
-| 3 | 工程形态：`.xcodeproj` 还是 SPM + 打包脚本 | 决定构建命令、CI 与 feature 目录归属 |
-| 4 | 持久化：SwiftData / GRDB / 纯 YAML 文件 | 决定是否建 `persistence` 技能 |
-| 5 | 分发：App Store / 自助下载 + 公证 / Sparkle 自动更新 | 决定 `build-release` 内容 |
+| 1 | 自带 mihomo 二进制，helper 管理内核；v1 含 TUN | `docs/adr/0001`、`0004` |
+| 2 | 最低 macOS 15 Sequoia | `docs/adr/0002` |
+| 3 | 手写 `.xcodeproj` 入库（不用 XcodeGen/Tuist） | `docs/adr/0003` |
+| 4 | 持久化 = 设置 JSON + 配置 YAML，不用 SwiftData/GRDB | `docs/01-ARCHITECTURE.md` |
+| 5 | 依赖仅 Yams（待确认）+ Sparkle（v1.0） | `docs/adr/0005` |
 
-答案落地后，删掉对应 TBD 行并更新本文件，避免约定长期空转。
+仍有待确认：Yams 是否引入；签名/公证/Sparkle 细节（v1.0 前）。
