@@ -31,7 +31,10 @@
 
 ## 下一步（按优先级）
 
-1. 用户试交互 → 收反馈（当前进行中）
+1. v0.1 骨架：`Clash.xcodeproj`（App target，同步文件夹）+ `MenuBarExtra` + 内置内核 + `/version`（进行中）
+2. 移植原型 UI 到 `Clash/Features/Panel` + `Clash/UI`
+3. `KernelService`（App 用户态启动，见 `adr/0007`）→ 启动/停止/错误分类
+4. 拿到代码签名身份后接 helper（`adr/0004`），否则 v0.2 系统代理与 v0.4 TUN 无法开工
 2. 补齐技能（全部项目级）：`swift-style`、`build-release`
 3. v0.1 骨架：`.xcodeproj`（App / Helper / Tests）+ `MenuBarExtra` 空面板 + helper 安装 + 内核启停 + `/version`
 4. 内核签名与 helper spawn 校验方案（v0.1 内落地）
@@ -40,6 +43,7 @@
 
 - 分支 `test`；remote 为内网 Gitea（`http://内网地址:3000/Clash/Clash.git`）
 - 已定：macOS 15+ / **仅 arm64** / Swift 6 / `.xcodeproj` 手写 / 自带 mihomo / v1 含 TUN / 设置 JSON + 配置 YAML
+- **无代码签名身份**：v0.1 内核由 App 用户态直启，helper/TUN/系统代理待签名（`adr/0007`）
 - 架构要点：**helper（root）是内核与系统写操作的唯一持有者**；App 只通过 XPC + mihomo HTTP/WS 通信
 - 配置原则：用户 YAML 永不改写，注入只进 `runtime/`；订阅库多条、单条 active、`pinnedGroups` 只是 UI 偏好
 - 构建命令已写入 `.agents/skills/swiftui-app/SKILL.md` §6（工程创建后需实测修正）
