@@ -34,7 +34,7 @@
 1. v0.1 骨架：`Clash.xcodeproj`（App target，同步文件夹）+ `MenuBarExtra` + 内置内核 + `/version`（进行中）
 2. 移植原型 UI 到 `Clash/Features/Panel` + `Clash/UI`
 3. `KernelService`（App 用户态启动，见 `adr/0007`）→ 启动/停止/错误分类
-4. 拿到代码签名身份后接 helper（`adr/0004`），否则 v0.2 系统代理与 v0.4 TUN 无法开工
+4. v0.2 前接入 helper（管理员授权安装 LaunchDaemon，`adr/0008`），随后做系统代理
 2. 补齐技能（全部项目级）：`swift-style`、`build-release`
 3. v0.1 骨架：`.xcodeproj`（App / Helper / Tests）+ `MenuBarExtra` 空面板 + helper 安装 + 内核启停 + `/version`
 4. 内核签名与 helper spawn 校验方案（v0.1 内落地）
@@ -43,7 +43,8 @@
 
 - 分支 `test`；remote 为内网 Gitea（`http://内网地址:3000/Clash/Clash.git`）
 - 已定：macOS 15+ / **仅 arm64** / Swift 6 / `.xcodeproj` 手写 / 自带 mihomo / v1 含 TUN / 设置 JSON + 配置 YAML
-- **无代码签名身份**：v0.1 内核由 App 用户态直启，helper/TUN/系统代理待签名（`adr/0007`）
+- **无代码签名身份、不上架**：ad-hoc 签名；helper 用「一次管理员授权装 LaunchDaemon」（`adr/0008`），v0.1 先由 App 用户态直启内核（`adr/0007`）
+- v0.2 起系统代理/TUN 依赖 helper 安装流程，属于必做项，不再等证书
 - 架构要点：**helper（root）是内核与系统写操作的唯一持有者**；App 只通过 XPC + mihomo HTTP/WS 通信
 - 配置原则：用户 YAML 永不改写，注入只进 `runtime/`；订阅库多条、单条 active、`pinnedGroups` 只是 UI 偏好
 - 构建命令已写入 `.agents/skills/swiftui-app/SKILL.md` §6（工程创建后需实测修正）

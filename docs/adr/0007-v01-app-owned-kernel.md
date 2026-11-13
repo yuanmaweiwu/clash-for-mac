@@ -1,6 +1,6 @@
 # ADR-0007 · v0.1 暂由 App 直接启动内核（helper 延后）
 
-- 状态：已接受（临时方案）
+- 状态：已接受（临时方案，helper 安装方式见 `adr/0008`）
 - 日期：2026-11-13
 - 相关：`adr/0004-tun-and-helper-in-v1.md`
 
@@ -28,5 +28,5 @@
 
 ## 触发回退的条件
 
-- 拿到 Apple Development / Developer ID 证书，或决定走内部分发签名
-- 届时：加 Helper target（`SMAppService.daemon` + `NSXPCListener` + 白名单方法），`LocalKernelRunner` 保留为 Debug 兜底（`#if DEBUG`）
+- **不再等证书**：用户确认不使用开发者账号、不上架（见 `adr/0008`），helper 改由「一次性管理员授权安装 LaunchDaemon」落地
+- v0.1 先用 `LocalKernelRunner` 把内核链路跑通，作为 Debug 兜底；helper 在 v0.2（系统代理）之前接入

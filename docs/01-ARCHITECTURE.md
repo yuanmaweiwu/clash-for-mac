@@ -176,8 +176,8 @@ idle ──start──► starting ──ok──► running ──stop──►
 
 ## 7. 权限与安全
 
-- helper 通过 `SMAppService.daemon` 注册（用户首次开 TUN/代理时引导到系统设置批准）
-- XPC 连接校验：仅接受签名与 bundle id 匹配的客户端（`audit token` 校验），拒绝其他进程
+- helper 通过**一次性管理员授权**安装为 LaunchDaemon（`adr/0008`）：`osascript … with administrator privileges` 写 `/Library/PrivilegedHelperTools/` + `/Library/LaunchDaemons/` 并 `launchctl bootstrap system`；不用 `SMAppService`（无签名身份无法注册）
+- XPC 连接校验：取 `audit token` 的 pid → 反查可执行路径，必须等于当前 App 的 bundle 路径；ad-hoc 签名无 team id，故不依赖签名校验
 - helper 只暴露白名单操作：`startKernel(mode)`、`stopKernel()`、`setSystemProxy(enabled, port)`、`restoreSystemProxy()`、`installTun()`、`state()`
 - helper **不提供**任意命令执行接口
 - 日志用 `os.Logger(subsystem: "com.clash.app", category:)`；secret、订阅 URL 中的 token 需脱敏
@@ -202,4 +202,4 @@ idle ──start──► starting ──ok──► running ──stop──►
 ## 10. 尚未定（见 `adr/0005`）
 
 - YAML 解析库：`Yams`（建议）vs 零依赖方案
-- 分发与更新：签名 / 公证 / Sparkle 的具体配置，v1.0 前定
+- 分发与更新：ad-hoc 签名 + 用户手动允许（`adr/0008`）；Sparkle 需要签名，v1.0 可能改为手动下载更新
