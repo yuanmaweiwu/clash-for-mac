@@ -33,30 +33,30 @@ struct AllGroupsPanelView: View {
     }
 
     private var breadcrumb: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: Space.xs) {
             IconButtonView(systemName: "chevron.left", label: "返回", iconSize: 12) {
                 onBack()
             }
 
             Text("全部策略组")
-                .font(Typography.title)
+                .font(Typography.pageTitle)
                 .foregroundStyle(Theme.textPrimary)
 
-            Spacer(minLength: 6)
+            Spacer(minLength: Space.s)
         }
-        .frame(height: Metrics.cardHeaderHeight)
+        .frame(height: Metrics.breadcrumbHeight)
     }
 
     private var footer: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Space.s) {
             Text("共 \(model.allGroups.count) 个策略组")
                 .font(Typography.caption)
                 .foregroundStyle(Theme.textSecondary)
 
-            Spacer(minLength: 6)
+            Spacer(minLength: Space.s)
 
             Text("星标固定到首屏")
-                .font(.system(size: 10))
+                .font(Typography.caption)
                 .foregroundStyle(Theme.textTertiary)
         }
         .frame(height: Metrics.footerHeight)

@@ -13,8 +13,8 @@ struct AllGroupsRowView: View {
     @FocusState private var isStarFocused: Bool
 
     var body: some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: Space.m) {
+            VStack(alignment: .leading, spacing: Space.hair) {
                 Text(group.name)
                     .font(isActive ? Typography.title : Typography.body)
                     .foregroundStyle(Theme.textPrimary)
@@ -24,12 +24,12 @@ struct AllGroupsRowView: View {
                     .foregroundStyle(Theme.textTertiary)
             }
 
-            Spacer(minLength: 6)
+            Spacer(minLength: Space.s)
 
             starButton
         }
         .padding(.horizontal, Metrics.cardPadding)
-        .frame(height: 48)
+        .frame(height: Metrics.listRowHeight)
         .frame(maxWidth: .infinity)
         .background {
             if isActive || isHovering {
