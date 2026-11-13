@@ -177,32 +177,48 @@ enum UIPreviewHarness {
         }
 
         let hosting = NSHostingView(rootView: LogWindowView(store: model.logStore))
-        present(hosting, size: NSSize(width: 760, height: 520), name: "log")
+        present(hosting, size: NSSize(width: 760, height: 520), name: "log", titled: true)
     }
 
     // MARK: - 摆窗与坐标
 
-    private static func present(_ view: NSView, size: NSSize, name: String) {
-        let window = PreviewPanel(
-            contentRect: NSRect(origin: .zero, size: size),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.hasShadow = false
-        window.level = .floating
-        window.isReleasedWhenClosed = false
+    private static func present(_ view: NSView, size: NSSize, name: String, titled: Bool = false) {
+        let window: NSWindow
+        if titled {
+            // 日志是独立系统窗口：要带标题栏与窗口底色，才能看到真实的窗口观感
+            let titledWindow = NSWindow(
+                contentRect: NSRect(origin: .zero, size: size),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            titledWindow.title = "日志"
+            titledWindow.isReleasedWhenClosed = false
+            window = titledWindow
+        } else {
+            let panel = PreviewPanel(
+                contentRect: NSRect(origin: .zero, size: size),
+                styleMask: [.borderless, .nonactivatingPanel],
+                backing: .buffered,
+                defer: false
+            )
+            panel.isOpaque = false
+            panel.backgroundColor = .clear
+            panel.hasShadow = false
+            panel.level = .floating
+            panel.isReleasedWhenClosed = false
+            window = panel
+        }
         window.contentView = view
 
         let screen = NSScreen.screens.first ?? NSScreen.main
         let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let origin = NSPoint(
+        if titled { window.setContentSize(size) }
+        let frame = window.frame
+        window.setFrameOrigin(NSPoint(
             x: visible.minX + screenInset,
-            y: visible.maxY - screenInset - size.height
-        )
-        window.setFrame(NSRect(origin: origin, size: size), display: true)
+            y: visible.maxY - screenInset - frame.height
+        ))
         window.orderFrontRegardless()
         windows.append(window)
 
@@ -211,9 +227,10 @@ enum UIPreviewHarness {
         NSApp.deactivate()
 
         let screenHeight = screen?.frame.height ?? visible.height
-        let regionX = Int(origin.x.rounded())
-        let regionY = Int((screenHeight - origin.y - size.height).rounded())
-        print("CLASH_PREVIEW_REGION \(regionX),\(regionY),\(Int(size.width)),\(Int(size.height))")
+        let windowFrame = window.frame
+        let regionX = Int(windowFrame.minX.rounded())
+        let regionY = Int((screenHeight - windowFrame.maxY).rounded())
+        print("CLASH_PREVIEW_REGION \(regionX),\(regionY),\(Int(windowFrame.width)),\(Int(windowFrame.height))")
         print("CLASH_PREVIEW_NAME \(name)")
         fflush(stdout)
     }

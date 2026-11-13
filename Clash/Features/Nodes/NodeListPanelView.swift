@@ -22,7 +22,7 @@ struct NodeListPanelView: View {
                             isSelected: group.isSelected(node),
                             isAvailable: node.isAvailable,
                             isTesting: isTesting,
-                            rowHeight: 44,
+                            rowHeight: Metrics.listRowHeight,
                             pillInsetV: Metrics.listPillInsetV,
                             action: { model.selectNode(groupID: group.id, nodeID: node.id) }
                         )
@@ -44,20 +44,20 @@ struct NodeListPanelView: View {
     }
 
     private var breadcrumb: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: Space.xs) {
             IconButtonView(systemName: "chevron.left", label: "返回", iconSize: 12) {
                 onBack()
             }
 
             Text(group.name)
-                .font(Typography.title)
+                .font(Typography.pageTitle)
                 .foregroundStyle(Theme.textPrimary)
 
-            Spacer(minLength: 6)
+            Spacer(minLength: Space.s)
 
             speedButton
         }
-        .frame(height: Metrics.cardHeaderHeight)
+        .frame(height: Metrics.breadcrumbHeight)
     }
 
     @ViewBuilder
@@ -79,7 +79,7 @@ struct NodeListPanelView: View {
     }
 
     private var footer: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Space.s) {
             if let notice = model.speedNotice {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 10, weight: .medium))
@@ -93,7 +93,7 @@ struct NodeListPanelView: View {
                     .foregroundStyle(Theme.textSecondary)
             }
 
-            Spacer(minLength: 6)
+            Spacer(minLength: Space.s)
 
             if isTesting {
                 Text("测速中…")
