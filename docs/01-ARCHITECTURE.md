@@ -32,8 +32,8 @@
 
 ```
 App/
-  ClashApp.swift            @main、MenuBarExtra / 设置窗口场景
-  AppDelegate.swift         LSUIElement、激活策略、退出清理
+  main.swift                @main 入口：纯 AppKit（NSApplication.shared + run）
+  AppDelegate.swift         LSUIElement、激活策略、状态栏、主菜单、退出清理
   AppEnvironment.swift      依赖装配（唯一允许的容器）
 Core/
   Models/                   Profile、ProxyGroup、Node、TrafficSample、KernelState…

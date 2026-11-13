@@ -3,6 +3,7 @@ import OSLog
 
 /// App 级入口：状态栏图标 + 最小主菜单（`docs/adr/0011`）。
 ///
+/// 由 `main.swift`（纯 AppKit）创建并持有；SwiftUI 只剩视图层，没有 `Scene`。
 /// `LSUIElement` 应用没有 Dock 图标：设置与添加订阅都在面板内，独立窗口只剩「日志」。
 /// 状态栏图标由本类持有，生命周期与进程一致。
 @MainActor
@@ -31,6 +32,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if UIPreviewHarness.runIfRequested() { return }
         #endif
         installMainMenu()
+        // 组合根必须显式建好再交出去：以前靠 `ClashApp.init` 触发，
+        // 现在没有 SwiftUI `App`，状态栏要的 model / panel 只能从这里取
         let environment = AppEnvironment.shared
         statusItemController = StatusItemController(model: environment.model, panel: environment.panel)
         Self.logger.info("状态栏图标已创建（左键面板 / 右键菜单）")
