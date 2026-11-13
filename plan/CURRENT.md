@@ -15,6 +15,7 @@ macOS 原生 Clash 客户端：状态栏「控制中心」风格，自带 mihomo
 - 技能：`swiftui-app`、`architecture`、`plan`、`git`、`core-process`、`menubar-ui`、`system-proxy`
 
 **内核与配置**
+- 内核 / geodata 运行时下载：包内只留 VERSION + SHA256；自动三档下载源（直连 / 预置镜像 / 自定义）+ SHA256 校验 + 临时文件清理（ADR-0012）
 - runtime 配置生成（Yams 解析重写、端口/secret/DNS 注入、`-t` 校验、原子写）
 - 内核生命周期：App 启动静默拉起、关代理不停内核、崩溃分类、孤儿回收、端口预检
 - 退出清理：SIGTERM/SIGINT/SIGHUP + ⌘Q；`kill -9` 靠快照兜底

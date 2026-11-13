@@ -57,7 +57,7 @@ UI/
   Components/               磁贴、分段控件、节点行、流量曲线
 Helper/                     LaunchDaemon target（root）+ XPC 协议
 Shared/                     App 与 Helper 共用的 XPC 协议与 DTO
-Resources/                  Assets、字符串目录、mihomo 二进制、LICENSE
+Resources/                  Assets、字符串目录、LICENSE（内核不随包分发，ADR-0012）
 Tests/                      单元测试（YAML 注入、状态机、还原逻辑）
 ```
 
@@ -95,7 +95,7 @@ idle ──start──► starting ──ok──► running ──stop──►
 - **安全默认值必须覆盖订阅里的值**：实测真实订阅带 `allow-lan: true`、`dns.listen: 0.0.0.0:1053`——照搬等于把代理与 DNS 暴露到局域网。默认一律收紧为 `allow-lan: false` + `127.0.0.1`，用户显式开启才放开
 - **`tun` 段整段替换**（不 merge）：TUN 开 → `enable/stack/auto-route/auto-detect-interface/dns-hijack` 全由 App 决定，`dns` 强制 `enhanced-mode: fake-ip` + `fake-ip-range: 198.18.0.1/16`；TUN 关 → 只写 `tun.enable: false`，不复用订阅里的 tun 配置
 - **TUN 模式下配置正文经 XPC 送 helper**（`adr/0010`）：App 只生成字符串，helper 校验后原子写 root 目录
-- **geodata 随组件安装**：订阅里有 `GEOIP,` / `GEOSITE,` 规则时，内核必须在 `-d` 目录（helper 运行目录）找到 `geoip.metadb` / `geosite.dat`；缺失会触发内核在线下载（国内 90s 超时，表现为「未就绪」）。安装脚本从 App 包内 `Contents/Resources/Kernel/` 拷贝；App 在启动 TUN 前做存在性预检并给出具体原因
+- **内核与 geodata 运行时下载**（`adr/0012`）：包内只有 `Resources/Kernel/VERSION` / `SHA256`。首次需要内核（启动 / 连接 / TUN / 导入校验）时下载到 `~/Library/Application Support/Clash/kernel/`，逐源尝试（直连 → gh-proxy.com → ghproxy.net）并强制校验 SHA256；安装脚本从该目录把内核与 geodata 拷进 helper 运行目录
 - 注入方式：解析原 YAML → 覆盖顶层键 → 输出；**不用字符串拼接**。实测把同名键追加到文件末尾会让 `mihomo -t` 直接失败：`mapping key "mixed-port" already defined at line 1`
 - secret 只存在内存 + 运行配置；App 存于内存，禁止落盘明文到日志
 - 端口冲突：启动前探测，被占用则让用户在设置里改，不静默换端口
@@ -146,7 +146,7 @@ idle ──start──► starting ──ok──► running ──stop──►
 - 订阅 URL 常含 token：日志、错误文案、崩溃报告一律脱敏
 - `pinnedGroups` 是 UI 偏好，只存 index，**不注入** runtime 配置
 - **主组识别**：首屏第一张卡 = 配置里第一个 `select` 组（实测真实订阅叫「机场A」，不是「节点选择」），名字一律取自配置
-- **geodata 共享**：内核 `-d` 目录全 profile 共用一个（首次运行会下载 `geoip.metadb` 约 8MB），不要按 profile 各建一个，否则每份订阅重复 8MB
+- **geodata 共享**：内核 `-d` 目录全 profile 共用一个（首次运行会下载 `geoip.metadb` 约 8MB），不要按 profile 各建一个，否则每份订阅重复 8MB；下载源与内核同一策略，`geoip.metadb` 必需、`geosite.dat` 失败只告警
 
 ## 5. 与内核的接口面（只依赖这些）
 

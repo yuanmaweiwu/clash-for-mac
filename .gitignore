@@ -2,7 +2,8 @@
 xcuserdata/
 DerivedData/
 
-# 内核二进制由 Scripts/fetch-kernel.sh 生成，不入库（VERSION / SHA256 入库）
+# 内核二进制不再入库、也不进包：运行时下载到 ~/Library/Application Support/Clash/kernel/
+# （此规则只防历史残留；VERSION / SHA256 入库）
 Resources/Kernel/mihomo
 
 # 本地运行配置与日志
@@ -14,7 +15,7 @@ Resources/Kernel/runtime/
 Prototype/.build/
 .swiftpm/
 
-# geodata（脚本下载，随安装器拷进 helper 目录；不入库）
+# geodata（运行时下载到用户目录；此规则只防历史残留）
 Resources/Kernel/geoip.metadb
 Resources/Kernel/geosite.dat
 
