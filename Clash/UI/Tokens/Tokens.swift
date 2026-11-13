@@ -243,6 +243,16 @@ enum Metrics {
     /// 二级列表（48pt 行）胶囊：上下 4（行高更高，胶囊更厚）
     static let listPillInsetV: CGFloat = 4
 
+    // 输入框（§4.9 / §4.10）：系统紧凑尺寸只有 19–22pt，放到面板里又扁又挤
+    /// 输入框高度：数字框同高
+    static let fieldHeight: CGFloat = 30
+    /// 输入框左右内边距
+    static let fieldInsetH: CGFloat = Space.m
+    /// 输入框描边：静止 / hover 1pt
+    static let fieldStroke: CGFloat = 1
+    /// 输入框聚焦描边（强调色，替代系统焦点环）
+    static let fieldFocusStroke: CGFloat = 1.5
+
     // 圆角（面板 16 / 卡片 12 / 行 7 / 控件 6）
     static let radiusPanel: CGFloat = 16
     static let radiusCard: CGFloat = 12

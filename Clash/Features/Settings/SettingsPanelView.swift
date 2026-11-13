@@ -61,7 +61,7 @@ struct SettingsPanelView: View {
                 .padding(.bottom, Metrics.sectionGap)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .scrollIndicators(.hidden)
+            .scrollIndicators(.never)
         }
         .frame(width: contentWidth, height: contentHeight)
         .onAppear {
@@ -129,23 +129,18 @@ struct SettingsPanelView: View {
 
     private var proxySection: some View {
         section("代理") {
-            VStack(alignment: .leading, spacing: Space.hair) {
+            VStack(alignment: .leading, spacing: Space.m) {
                 row("混合端口") {
-                    TextField("7890", text: $portText)
-                        .textFieldStyle(.roundedBorder)
-                        .controlSize(.small)
-                        .font(Typography.number)
-                        .multilineTextAlignment(.trailing)
-                        .foregroundStyle(isPortValid ? Theme.textPrimary : Theme.error)
-                        .frame(width: 64)
-                        .overlay {
-                            if !isPortValid {
-                                RoundedRectangle(cornerRadius: Metrics.radiusRow, style: .continuous)
-                                    .strokeBorder(Theme.error, lineWidth: 1)
-                            }
-                        }
-                        .onChange(of: portText) { _, text in applyPort(text) }
-                        .accessibilityLabel(Text("混合端口"))
+                    PanelTextField(
+                        "7890",
+                        text: $portText,
+                        label: "混合端口",
+                        hint: "1024–65535",
+                        kind: .number,
+                        isInvalid: !isPortValid
+                    )
+                    .frame(width: 72)
+                    .onChange(of: portText) { _, text in applyPort(text) }
                 }
 
                 if !isPortValid {
@@ -203,14 +198,15 @@ struct SettingsPanelView: View {
             }
 
             if uaChoice == .custom {
-                TextField(customUAPlaceholder, text: Binding(
-                    get: { settings.subscriptionUserAgent },
-                    set: { settings.subscriptionUserAgent = $0 }
-                ))
-                .textFieldStyle(.roundedBorder)
-                .controlSize(.small)
-                .font(.system(size: 11))
-                .accessibilityLabel(Text("自定义 User-Agent"))
+                PanelTextField(
+                    customUAPlaceholder,
+                    text: Binding(
+                        get: { settings.subscriptionUserAgent },
+                        set: { settings.subscriptionUserAgent = $0 }
+                    ),
+                    label: "自定义 User-Agent"
+                )
+                .padding(.vertical, Space.m)
             }
 
             row("默认更新间隔") {
@@ -256,15 +252,16 @@ struct SettingsPanelView: View {
             }
 
             if settings.kernelDownloadMode == .custom {
-                TextField("https://gh-proxy.com/", text: Binding(
-                    get: { settings.customMirrorPrefix },
-                    set: { settings.customMirrorPrefix = $0 }
-                ))
-                .textFieldStyle(.roundedBorder)
-                .controlSize(.small)
-                .font(.system(size: 11))
-                .accessibilityLabel(Text("自定义下载镜像前缀"))
-                .accessibilityHint(Text("镜像前缀加原始 GitHub 地址，原样拼接"))
+                PanelTextField(
+                    "https://gh-proxy.com/",
+                    text: Binding(
+                        get: { settings.customMirrorPrefix },
+                        set: { settings.customMirrorPrefix = $0 }
+                    ),
+                    label: "自定义下载镜像前缀",
+                    hint: "镜像前缀加原始 GitHub 地址，原样拼接"
+                )
+                .padding(.vertical, Space.m)
             }
 
             Text(downloadHint)

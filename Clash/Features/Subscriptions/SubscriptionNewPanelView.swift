@@ -12,7 +12,6 @@ struct SubscriptionNewPanelView: View {
     let onBack: () -> Void
 
     @State private var urlText = ""
-    @FocusState private var isURLFocused: Bool
 
     private var contentWidth: CGFloat { Metrics.panelWidth - Metrics.panelPadding * 2 }
     private var contentHeight: CGFloat { Metrics.panelHeight - Metrics.panelPadding * 2 }
@@ -26,14 +25,14 @@ struct SubscriptionNewPanelView: View {
             breadcrumb
 
             VStack(alignment: .leading, spacing: Space.l) {
-                TextField("订阅链接（https://…）", text: $urlText)
-                    .textFieldStyle(.roundedBorder)
-                    .controlSize(.regular)
-                    .font(Typography.body)
-                    .focused($isURLFocused)
-                    .disabled(model.isImportingProfile)
-                    .onSubmit { submit() }
-                    .accessibilityLabel(Text("订阅链接"))
+                PanelTextField(
+                    "订阅链接（https://…）",
+                    text: $urlText,
+                    label: "订阅链接",
+                    isAutofocused: true
+                )
+                .disabled(model.isImportingProfile)
+                .onSubmit { submit() }
 
                 if let error = model.importError {
                     Text(error)
@@ -54,7 +53,6 @@ struct SubscriptionNewPanelView: View {
             Spacer(minLength: 0)
         }
         .frame(width: contentWidth, height: contentHeight, alignment: .topLeading)
-        .onAppear { isURLFocused = true }
     }
 
     // MARK: - 面包屑
