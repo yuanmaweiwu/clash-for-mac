@@ -66,12 +66,15 @@ View → Model(视图状态) → Service(协议) → 实现(网络/进程/磁盘
 |------|------|------|
 | 目录职责、代码放哪、新增 feature、跨 feature 复用 | `architecture` | 分层禁令 + feature 脚手架 |
 | 命名 / 状态管理 / 并发 / 错误处理 / 日志 / 测试 | `swift-style` | 计划中，落地前按本文件铁律 |
-| 阶段性 review / 合并前检查 | `code-review` | 计划中；可配合外部 `swiftui-pro` |
+| 阶段性 review / 合并前检查 | `code-review`（计划中）+ `swiftui-pro` | 外部技能已装：九维 review（废弃 API / 性能 / 无障碍 / 并发 / 卫生） |
+| 写/改 View、状态、导航、动画、列表、macOS 场景 | `swiftui-expert-skill` | 外部技能已装：API 正确性与现代写法 |
 | 构建、签名、公证、CI、发布 | `build-release` | 计划中 |
 | 续作 / 换电脑 / 进度交接 | `plan` | `plan/CURRENT.md` 是唯一进度源 |
 | Git（自动本地提交） | `git` | 完成可验证改动自动本地 commit；未明确要求禁止远程写 |
 
 未命中上表时**禁止**连读多个子技能「以防万一」。
+
+外部技能是本仓库的**参考**，不是约定源：与本仓分层冲突时以 `architecture` / 本文件为准；它们假定较新 API（iOS 26 / Swift 6.2 语境），最低 macOS 未定前不要照搬版本相关写法。
 
 ## 5. 全局铁律
 

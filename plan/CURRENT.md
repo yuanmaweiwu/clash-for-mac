@@ -13,6 +13,7 @@
 - [x] `swiftui-app` 总入口：技术栈快照、分层总闸、子技能路由、全局铁律
 - [x] `architecture` 技能：目录归属决策树、依赖禁令、新增 feature 流程、macOS 与 iOS 差异
 - [x] `plan` 技能：`plan/CURRENT.md` 作为唯一进度源与上下文压缩落点
+- [x] 项目级安装外部技能（`-a universal --copy`，vendor 进仓）：`swiftui-pro`、`swiftui-expert-skill`，版本锁在 `skills-lock.json`
 
 ## 进行中
 
@@ -22,9 +23,8 @@
 ## 下一步（按优先级）
 
 1. 第 2 批技能：`swift-style`、`code-review`
-2. 项目级安装外部技能：`twostraws/swiftui-agent-skill@swiftui-pro`、`avdlee/swiftui-agent-skill@swiftui-expert-skill`（`npx skills add` 默认项目级，勿加 `-g`）
-3. 第 3 批技能：`build-release`；按 TBD 结论决定是否加 `persistence` / `networking` / `core-process`
-4. 工程初始化：Xcode 工程或 SPM 包 + 打包脚本（形态待定）
+2. 第 3 批技能：`build-release`；按 TBD 结论决定是否加 `persistence` / `networking` / `core-process`
+3. 工程初始化：Xcode 工程或 SPM 包 + 打包脚本（形态待定）
 
 ## 关键上下文（续作必读）
 
