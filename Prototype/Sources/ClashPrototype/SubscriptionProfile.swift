@@ -13,10 +13,10 @@ struct SubscriptionProfile: Identifiable, Sendable {
     /// 演示用：这条怎么更新都失败
     var alwaysFailsUpdate = false
 
+    /// 第二行：更新时间 · 用量（到期信息单独放在行尾）
     var detailText: String {
         var parts = [updatedText]
         if let quotaText, !quotaText.isEmpty { parts.append(quotaText) }
-        if let expiryText, !expiryText.isEmpty { parts.append(expiryText) }
         if updateFailed { parts.append("更新失败，仍在使用旧配置") }
         return parts.joined(separator: " · ")
     }

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 订阅库的一行 48pt：来源图标 + 名称 + 第二行说明 + 状态 / ⋯ 菜单（§4.8）。
+/// 订阅库的一行 48pt：来源图标 + 名称 + 第二行说明；行尾是状态图标与到期文本（§4.8）。
 @MainActor
 struct SubscriptionRowView: View {
     let profile: SubscriptionProfile
@@ -10,9 +10,13 @@ struct SubscriptionRowView: View {
     let onUpdate: () -> Void
     let onRename: () -> Void
     let onDelete: () -> Void
+    /// 原型调试：强制 hover（离屏快照用）
+    var forcedHover = false
 
     @State private var isHovering = false
     @FocusState private var isFocused: Bool
+
+    private var showsHover: Bool { isHovering || forcedHover }
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -58,12 +62,24 @@ struct SubscriptionRowView: View {
                     .font(Typography.caption)
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
-                    .truncationMode(.tail)
             }
 
             Spacer(minLength: 6)
 
-            statusIcon
+            // 行尾：上槽放状态 / 下图右对齐到期文本，与第二行同基线
+            VStack(alignment: .trailing, spacing: 2) {
+                statusIcon
+                    .frame(width: 16, height: 16)
+
+                if let expiry = profile.expiryText {
+                    Text(expiry)
+                        .font(Typography.caption)
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
+                } else {
+                    Color.clear.frame(width: 1, height: 13)
+                }
+            }
         }
         .padding(.leading, 14)
         .padding(.trailing, 36)
@@ -78,12 +94,12 @@ struct SubscriptionRowView: View {
             ProgressView()
                 .controlSize(.mini)
                 .scaleEffect(0.7)
-                .frame(width: 16, height: 16)
         } else if profile.updateFailed {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Theme.warning)
-                .frame(width: 16)
+        } else {
+            Color.clear
         }
     }
 
@@ -105,8 +121,8 @@ struct SubscriptionRowView: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .padding(.trailing, 6)
-        .opacity(isHovering ? 1 : 0)
-        .allowsHitTesting(isHovering)
+        .opacity(showsHover ? 1 : 0)
+        .allowsHitTesting(showsHover)
         .accessibilityLabel(Text("订阅操作"))
     }
 
@@ -120,7 +136,7 @@ struct SubscriptionRowView: View {
 
     @ViewBuilder
     private var rowBackground: some View {
-        if isActive || isHovering {
+        if isActive || showsHover {
             RoundedRectangle(cornerRadius: Metrics.radiusRow, style: .continuous)
                 .fill(isActive ? Theme.rowSelected : Theme.rowHover)
                 .padding(.horizontal, Metrics.pillInsetH)

@@ -12,11 +12,13 @@ struct AllGroupsPanelView: View {
 
             ScrollView(.vertical) {
                 LazyVStack(spacing: 0) {
-                    ForEach(model.groups) { group in
+                    ForEach(Array(model.groups.enumerated()), id: \.element.id) { index, group in
                         AllGroupsRowView(
                             group: group,
+                            isActive: group.id == model.activeGroupID,
                             onTogglePin: { model.togglePin(group.id) },
-                            onOpen: { model.pushGroup(group.id) }
+                            onOpen: { model.pushGroup(group.id) },
+                            forcedHover: model.debugHoverGroupIndex == index
                         )
                     }
                 }

@@ -24,7 +24,7 @@ struct SubscriptionPanelView: View {
             } else {
                 ScrollView(.vertical) {
                     LazyVStack(spacing: 0) {
-                        ForEach(model.subscriptions) { profile in
+                        ForEach(Array(model.subscriptions.enumerated()), id: \.element.id) { index, profile in
                             SubscriptionRowView(
                                 profile: profile,
                                 isActive: profile.id == model.activeSubscriptionID,
@@ -36,7 +36,8 @@ struct SubscriptionPanelView: View {
                                         model.renameSubscription(profile.id, to: name)
                                     }
                                 },
-                                onDelete: { model.deleteSubscription(profile.id) }
+                                onDelete: { model.deleteSubscription(profile.id) },
+                                forcedHover: model.debugHoverSubscriptionIndex == index
                             )
                         }
                     }

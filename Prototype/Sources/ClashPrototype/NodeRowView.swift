@@ -10,6 +10,8 @@ struct NodeRowView: View {
     let isAvailable: Bool
     /// 原型调试：强制按 hover 渲染（离屏快照用）
     var forcedHover = false
+    /// 二级列表用 44，卡片内保持 32
+    var rowHeight: CGFloat?
     let action: () -> Void
 
     @State private var isHovering = false
@@ -58,7 +60,7 @@ struct NodeRowView: View {
         }
         .padding(.horizontal, Metrics.cardPadding)
         .frame(maxWidth: .infinity)
-        .frame(height: Metrics.rowHeight)
+        .frame(height: rowHeight ?? Metrics.rowHeight)
         .background {
             if showsPill {
                 RoundedRectangle(cornerRadius: Metrics.radiusRow, style: .continuous)

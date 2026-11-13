@@ -18,6 +18,7 @@ struct NodeListPanelView: View {
                             node: node,
                             isSelected: group.isSelected(node),
                             isAvailable: node.latency != nil,
+                            rowHeight: 44,
                             action: { model.selectNode(groupID: group.id, nodeID: node.id) }
                         )
                     }

@@ -23,6 +23,8 @@ final class PrototypeModel {
     var debugHoverRowIndex: Int?
     var debugHoverCardIndex = 0
     var debugHoverHeader = false
+    var debugHoverGroupIndex: Int?
+    var debugHoverSubscriptionIndex: Int?
 
     // MARK: 内核 / 系统代理 / 模式 / TUN
 
@@ -38,6 +40,7 @@ final class PrototypeModel {
     // MARK: 分组与订阅（假数据）
 
     var groups: [DemoGroup]
+    var activeGroupID: UUID?
     var subscriptions: [SubscriptionProfile]
     var activeSubscriptionID: UUID?
     private(set) var updatingSubscriptionID: UUID?
@@ -58,7 +61,9 @@ final class PrototypeModel {
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
 
     init() {
-        groups = Self.makeGroups()
+        let initialGroups = Self.makeGroups()
+        groups = initialGroups
+        activeGroupID = initialGroups.first?.id
         let profiles = Self.makeSubscriptions()
         subscriptions = profiles
         activeSubscriptionID = profiles.first?.id
@@ -188,6 +193,7 @@ final class PrototypeModel {
               let node = groups[index].nodes.first(where: { $0.id == nodeID }),
               node.latency != nil else { return }
         groups[index].selectedNodeID = nodeID
+        activeGroupID = groupID
     }
 
     func togglePin(_ groupID: UUID) {
@@ -343,7 +349,9 @@ final class PrototypeModel {
         simulateFailure = false
         route = .root
 
-        groups = Self.makeGroups()
+        let initialGroups = Self.makeGroups()
+        groups = initialGroups
+        activeGroupID = initialGroups.first?.id
         let profiles = Self.makeSubscriptions()
         subscriptions = profiles
         activeSubscriptionID = profiles.first?.id
@@ -357,6 +365,15 @@ final class PrototypeModel {
         updatedText = "2 分钟前更新"
 
         if trafficPaused { setTrafficPaused(false) }
+    }
+
+    /// 直接进空态（快照用）：内核停止、TUN 关闭，避免「未运行 + TUN 已开启」的错位
+    func enterIdleState() {
+        transitionTask?.cancel()
+        tunTask?.cancel()
+        phase = .stopped
+        systemProxyOn = false
+        tun = .off
     }
 
     /// 直接进失败态（快照 / 演示用）
@@ -413,8 +430,8 @@ final class PrototypeModel {
                 name: "机场 A",
                 source: .url,
                 updatedText: "3 小时前更新",
-                quotaText: "已用 12.3/100 GB",
-                expiryText: "12月3日到期",
+                quotaText: "12.3/100 GB",
+                expiryText: "12/3 到期",
                 updateFailed: false
             ),
             SubscriptionProfile(
@@ -423,7 +440,7 @@ final class PrototypeModel {
                 updatedText: "1 天前更新",
                 quotaText: nil,
                 expiryText: nil,
-                updateFailed: false,
+                updateFailed: true,
                 alwaysFailsUpdate: true
             ),
             SubscriptionProfile(

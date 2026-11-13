@@ -30,7 +30,7 @@ enum PrototypeSnapshot {
         failed.enterFailedState()
 
         let empty = PrototypeModel()
-        empty.phase = .stopped
+        empty.enterIdleState()
         empty.showsEmptyState = true
 
         let nodes = PrototypeModel()
@@ -58,6 +58,14 @@ enum PrototypeSnapshot {
 
         let allGroups = PrototypeModel()
         allGroups.route = .allGroups
+
+        let hoverGroup = PrototypeModel()
+        hoverGroup.route = .allGroups
+        hoverGroup.debugHoverGroupIndex = 1
+
+        let hoverSubscription = PrototypeModel()
+        hoverSubscription.route = .subscriptions
+        hoverSubscription.debugHoverSubscriptionIndex = 1
 
         let hoverDark = PrototypeModel()
         hoverDark.appearance = .dark
@@ -95,6 +103,8 @@ enum PrototypeSnapshot {
         renderPanel(nodes, name: "panel-nodes@2x.png", appearance: .aqua, in: directory)
         renderPanel(subscriptions, name: "panel-subscriptions@2x.png", appearance: .aqua, in: directory)
         renderPanel(allGroups, name: "panel-groups@2x.png", appearance: .aqua, in: directory)
+        renderPanel(hoverGroup, name: "hover-group-row@2x.png", appearance: .aqua, in: directory)
+        renderPanel(hoverSubscription, name: "hover-subscription-row@2x.png", appearance: .aqua, in: directory)
         renderPanel(hoverFirst, name: "hover-first-row@2x.png", appearance: .aqua, in: directory)
         renderPanel(hoverLast, name: "hover-last-row@2x.png", appearance: .aqua, in: directory)
         renderPanel(hoverHeader, name: "hover-header@2x.png", appearance: .aqua, in: directory)
