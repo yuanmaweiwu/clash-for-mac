@@ -5,7 +5,7 @@ import Foundation
 ///
 /// 状态只由「内核相位 + 是否接管系统代理」决定；代理模式（规则/全局/直连）
 /// 不再影响状态条文案。`proxying` = 内核 running + 系统代理读回校验通过。
-/// `showsLiveTraffic` 仍为 false（`/traffic` 未接），所以速率位显示 `—`。
+/// 速率位另看 `/traffic` WS 是否在线（`showsLiveTraffic`），与系统代理开关无关。
 enum DemoStatus: String, CaseIterable, Identifiable, Sendable {
     case idle
     case starting

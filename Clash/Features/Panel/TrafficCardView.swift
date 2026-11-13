@@ -3,8 +3,10 @@ import SwiftUI
 /// 曲线卡 80pt：标题行 16 + 间距 4 + 绘制区 40，内边距 10（§3.2 / §4.5）。
 @MainActor
 struct TrafficCardView: View {
-    /// 是否真的有流量可画；v0.1 未接管流量 → 空态（虚线 + 「暂无流量」，数值位「—」）
-    let showsRates: Bool
+    /// 有采样：画 60 点曲线；无采样：虚线 + 「暂无流量」空态
+    let hasCurve: Bool
+    /// WS 在线：数值实时；断连时曲线 30% 透明、数值回 `—`（§4.5 断连态）
+    let isLive: Bool
     let downRate: Double
     let upRate: Double
     let downSeries: [Double]
@@ -28,8 +30,10 @@ struct TrafficCardView: View {
             .frame(height: 16)
 
             Group {
-                if showsRates {
+                if hasCurve {
                     TrafficChartView(downSeries: downSeries, upSeries: upSeries)
+                        // 断连：保留波形但降透明度，明确「数据暂停」
+                        .opacity(isLive ? 1 : 0.3)
                 } else {
                     NoTrafficChartView()
                 }
@@ -37,11 +41,7 @@ struct TrafficCardView: View {
             .frame(height: Metrics.chartHeight)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("实时流量")
-            .accessibilityValue(
-                showsRates
-                    ? "下载 \(DemoTraffic.spoken(rate: downRate))，上传 \(DemoTraffic.spoken(rate: upRate))"
-                    : "暂无流量"
-            )
+            .accessibilityValue(accessibilityValue)
         }
         .padding(Metrics.cardPadding)
         .frame(height: Metrics.chartCardHeight, alignment: .top)
@@ -72,10 +72,18 @@ struct TrafficCardView: View {
             Image(systemName: arrow)
                 .font(.system(size: 8, weight: .semibold))
                 .foregroundStyle(tint)
-            Text(showsRates ? DemoTraffic.format(rate: value) : "—")
+            Text(isLive ? TrafficFormat.rate(value) : "—")
                 .font(Typography.number)
                 .foregroundStyle(Theme.textSecondary)
+                .monospacedDigit()
         }
         .accessibilityHidden(true)
+    }
+
+    /// 无采样 → 空态；断连 → 只报「数据暂停」不报旧数字；在线 → 报实时上下行
+    private var accessibilityValue: String {
+        guard hasCurve else { return "暂无流量" }
+        guard isLive else { return "数据暂停" }
+        return "下载 \(TrafficFormat.spoken(downRate))，上传 \(TrafficFormat.spoken(upRate))"
     }
 }

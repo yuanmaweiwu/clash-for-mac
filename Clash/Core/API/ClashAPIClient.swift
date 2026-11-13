@@ -39,11 +39,17 @@ actor ClashAPIClient {
         let mode: String
     }
 
+    private let port: Int
     private let baseURL: URL
     private let secret: String
     private let session: URLSession
+    /// WS 专用会话：REST 的 5s 资源超时会把长连接掐掉，这里单独放宽
+    private let streamSession: URLSession
+    /// 在连的 `/traffic` socket；`stopTraffic()` 与内核重启时统一关闭
+    private var sockets: [UUID: URLSessionWebSocketTask] = [:]
 
     init(port: Int, secret: String, timeout: TimeInterval = 5) {
+        self.port = port
         self.baseURL = URL(string: "http://127.0.0.1:\(port)") ?? URL(string: "http://127.0.0.1")!
         self.secret = secret
 
@@ -53,6 +59,13 @@ actor ClashAPIClient {
         configuration.waitsForConnectivity = false
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         self.session = URLSession(configuration: configuration)
+
+        let streamConfiguration = URLSessionConfiguration.ephemeral
+        streamConfiguration.timeoutIntervalForRequest = 15
+        streamConfiguration.timeoutIntervalForResource = 24 * 60 * 60
+        streamConfiguration.waitsForConnectivity = false
+        streamConfiguration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        self.streamSession = URLSession(configuration: streamConfiguration)
     }
 
     /// `GET /version`：连通性判定 + 面板展示版本
@@ -110,6 +123,95 @@ actor ClashAPIClient {
     func patchMode(_ mode: String) async throws {
         let body = try JSONEncoder().encode(ModeBody(mode: mode))
         _ = try await send(["configs"], method: "PATCH", body: body)
+    }
+
+    // MARK: - 实时流量（WS）
+
+    /// `/traffic`：逐秒 `{up,down}`（字节 / 秒，`core-process` §5）。
+    ///
+    /// - 鉴权走 `Authorization` 头（与 REST 一致）：secret 不进 URL，也就不会落进日志 / 崩溃报告
+    /// - 单帧解析失败直接跳过，不中断流
+    /// - 断流判定：内核被挂起或连接半开时 `receive()` 会一直不返回，超过 `idleTimeout`
+    ///   没有帧就关 socket 结束流，交给上层重连
+    /// - 取消：`stopTraffic()` 或流被释放都会关 socket，消费端 `for await` 正常退出
+    func traffic(idleTimeout: Duration = .seconds(3)) -> AsyncThrowingStream<TrafficSample, Error> {
+        let socket = streamSession.webSocketTask(with: streamRequest(path: "traffic"))
+        let id = UUID()
+        sockets[id] = socket
+
+        return AsyncThrowingStream { continuation in
+            let activity = FrameActivity()
+
+            let producer = Task {
+                socket.resume()
+
+                // 看门狗：只负责「多久没帧」，收到帧的判定在收包循环里做
+                let watchdog = Task {
+                    while !Task.isCancelled {
+                        try? await Task.sleep(for: .milliseconds(500))
+                        guard await activity.isIdle(beyond: idleTimeout) else { continue }
+                        socket.cancel(with: .goingAway, reason: nil)
+                        return
+                    }
+                }
+                defer { watchdog.cancel() }
+
+                do {
+                    while !Task.isCancelled {
+                        let message = try await socket.receive()
+                        await activity.touch()
+                        guard let sample = Self.decodeTraffic(message) else { continue }
+                        continuation.yield(sample)
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: TrafficStreamError.interrupted)
+                }
+            }
+
+            continuation.onTermination = { _ in
+                producer.cancel()
+                socket.cancel(with: .goingAway, reason: nil)
+                Task { await self.removeSocket(id) }
+            }
+        }
+    }
+
+    /// 关闭所有 `/traffic` 连接（服务停止 / 内核重启）；消费端随后从 `for await` 退出
+    func stopTraffic() {
+        for socket in sockets.values {
+            socket.cancel(with: .goingAway, reason: nil)
+        }
+        sockets.removeAll()
+    }
+
+    private func removeSocket(_ id: UUID) {
+        sockets.removeValue(forKey: id)
+    }
+
+    private func streamRequest(path: String) -> URLRequest {
+        var components = URLComponents()
+        components.scheme = "ws"
+        components.host = "127.0.0.1"
+        components.port = port
+        components.path = "/" + path
+
+        var request = URLRequest(url: components.url ?? URL(string: "ws://127.0.0.1")!)
+        request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
+        return request
+    }
+
+    private static func decodeTraffic(_ message: URLSessionWebSocketTask.Message) -> TrafficSample? {
+        let data: Data
+        switch message {
+        case .data(let payload):
+            data = payload
+        case .string(let text):
+            data = Data(text.utf8)
+        @unknown default:
+            return nil
+        }
+        return try? JSONDecoder().decode(TrafficSample.self, from: data)
     }
 
     // MARK: - 请求
@@ -198,3 +300,22 @@ extension ClashAPIClient.APIError {
         }
     }
 }
+
+/// `/traffic` 流的中断原因：握手失败、socket 被关、或断流（长时间无帧）。
+enum TrafficStreamError: Error, Equatable, Sendable {
+    case interrupted
+}
+
+/// 最近一帧的到达时间；看门狗与收包循环跨 actor 共享。
+private actor FrameActivity {
+    private var last = ContinuousClock.now
+
+    func touch() {
+        last = ContinuousClock.now
+    }
+
+    func isIdle(beyond duration: Duration) -> Bool {
+        ContinuousClock.now - last > duration
+    }
+}
+

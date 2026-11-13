@@ -250,11 +250,22 @@ enum SystemProxyHarness {
         )
         failures += report("kernel-running", model.phase == .running, "phase=\(model.phase)")
         failures += report("status-proxying", model.status == .proxying, "\(model.status)")
-        failures += report("traffic-placeholder", !model.showsLiveTraffic, "showsLiveTraffic=\(model.showsLiveTraffic)")
+
+        // `/traffic` WS：内核 running 后应在一个重连周期内拿到采样（状态条出真实速率）
+        var trafficWaited = 0.0
+        while trafficWaited < 8, !model.showsLiveTraffic {
+            try? await Task.sleep(for: .milliseconds(200))
+            trafficWaited += 0.2
+        }
+        failures += report(
+            "traffic-live",
+            model.showsLiveTraffic,
+            "showsLiveTraffic=\(model.showsLiveTraffic) down=\(model.downRateText) up=\(model.upRateText)"
+        )
 
         if hold {
             print("HOLD proxy-on port=\(kernel.port ?? 0) version=\(kernel.kernelVersion ?? "-")")
-            try? await Task.sleep(for: .seconds(8))
+            await traceTraffic(model: model, seconds: 24)
         }
 
         model.toggleConnection()
@@ -274,7 +285,7 @@ enum SystemProxyHarness {
 
         if hold {
             print("HOLD proxy-off kernel-phase=\(model.phase)")
-            try? await Task.sleep(for: .seconds(8))
+            await traceTraffic(model: model, seconds: 12)
         }
 
         // 清理：代理与内核都不能留在运行态（与 App 退出走同一套同步实现）
@@ -285,6 +296,17 @@ enum SystemProxyHarness {
             await kernel.stop()
         }
         return failures
+    }
+
+    /// 逐秒打印面板的速率 / 在线状态：供外部 shell 在 `panel-hold` 期间制造流量、挂起内核取证
+    private static func traceTraffic(model: PanelPreviewModel, seconds: Int) async {
+        for _ in 0..<seconds {
+            print(
+                "NOTE rate down=\(model.downRateText) up=\(model.upRateText)"
+                    + " streaming=\(model.showsLiveTraffic) curve=\(model.hasTrafficCurve)"
+            )
+            try? await Task.sleep(for: .seconds(1))
+        }
     }
 
     private static func runReadOnly(service: SystemProxyService) async -> Int {

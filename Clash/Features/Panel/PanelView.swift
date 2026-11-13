@@ -119,7 +119,8 @@ struct PanelView: View {
             ControlGridView(model: model)
 
             TrafficCardView(
-                showsRates: model.showsLiveTraffic,
+                hasCurve: model.hasTrafficCurve,
+                isLive: model.showsLiveTraffic,
                 downRate: model.downRate,
                 upRate: model.upRate,
                 downSeries: model.downSeries,

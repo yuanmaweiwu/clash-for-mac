@@ -1,12 +1,12 @@
-// TODO(v0.3): 流量仍是空态；内核、策略组、模式与订阅库都已接真
+// TODO(v0.3): 连接列表与日志窗口仍是空态；流量已接真实 `/traffic` WS
 import CoreGraphics
 import Foundation
 import Observation
 
-/// 面板模型：内核生命周期 / 策略组 / 订阅库全部来自真实服务。
+/// 面板模型：内核生命周期 / 策略组 / 订阅库 / 实时流量全部来自真实服务。
 ///
-/// 视图只和本模型打交道；内核状态、策略组、节点、模式、订阅都在本模型里转发一次，
-/// 避免 View 直接依赖 `KernelService` / `ProxyService` / `ProfileStore`。
+/// 视图只和本模型打交道；内核状态、策略组、节点、模式、订阅、流量都在本模型里转发一次，
+/// 避免 View 直接依赖 `KernelService` / `ProxyService` / `TrafficService` / `ProfileStore`。
 ///
 /// **已经是真的**：
 /// - 内核生命周期（`phase` / `lastError`），来自 `KernelService`
@@ -14,9 +14,9 @@ import Observation
 /// - 策略组 / 节点 / 延迟 / 选中项 / 模式，来自 `ProxyService`（`GET /proxies`、`GET /configs`）
 /// - 订阅库（列表 / 激活 / 导入 / 更新 / 重命名 / 删除），来自 `ProfileStore`
 ///   （`profiles/index.json` + `profiles/<id>.yaml`）
+/// - 实时速率与 60 点曲线，来自 `TrafficService`（`/traffic` WS，1Hz）
 ///
-/// **还没接的**：流量采样（`/traffic` WS）与 TUN（helper），
-/// 因此速率位一律 `—`、TUN 磁贴仍是「需要管理员组件」。
+/// **还没接的**：连接列表（`/connections`）、日志窗口、TUN（helper）。
 @MainActor
 @Observable
 final class PanelPreviewModel {
@@ -31,6 +31,8 @@ final class PanelPreviewModel {
     @ObservationIgnored private let proxies: ProxyService
     /// 真实订阅库（`profiles/index.json`）
     @ObservationIgnored private let profiles: ProfileStore
+    /// 真实流量采样（`/traffic` WS）
+    @ObservationIgnored private let traffic: TrafficService
 
     /// 连接磁贴的五态（§4.2）；开 / 关成功与否都以读回校验为准
     private(set) var connectionState: ConnectionState = .off
@@ -78,17 +80,22 @@ final class PanelPreviewModel {
         guard let profile = activeSubscription else { return "未导入配置" }
         return profile.updatedAgoText
     }
-    private(set) var downRate = DemoTraffic.initialDownRate
-    private(set) var upRate = DemoTraffic.initialUpRate
-    private(set) var downSeries = DemoTraffic.downSeries
-    private(set) var upSeries = DemoTraffic.upSeries
+
+    /// 实时速率（字节 / 秒）与 60 点曲线，均来自 `TrafficService`
+    var downRate: Double { traffic.down }
+    var upRate: Double { traffic.up }
+    var downSeries: [Double] { traffic.downSeries }
+    var upSeries: [Double] { traffic.upSeries }
+    /// 有采样就画曲线；没有采样走「暂无流量」空态
+    var hasTrafficCurve: Bool { traffic.hasSamples }
+    /// WS 断连：曲线保留但降透明度、数值回到 `—`（§4.5 断连态）
+    var isTrafficStale: Bool { !traffic.isStreaming }
 
     @ObservationIgnored private var bootstrapTask: Task<Void, Never>?
     /// 内核生命周期串行链：同一时刻只有一条 start / stop 在跑
     @ObservationIgnored private var kernelTask: Task<Void, Never>?
     /// 串行链代号：新指令让旧指令让位，保证「只保留最新意图」
     @ObservationIgnored private var kernelTaskID = 0
-    @ObservationIgnored private var feedTask: Task<Void, Never>?
     @ObservationIgnored private var subscriptionTask: Task<Void, Never>?
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
     @ObservationIgnored private var speedTask: Task<Void, Never>?
@@ -109,6 +116,7 @@ final class PanelPreviewModel {
         self.profiles = profileStore
         self.systemProxy = systemProxy
         self.proxies = ProxyService(kernel: kernel)
+        self.traffic = TrafficService(kernel: kernel)
         self.connectionState = systemProxy.isEnabled ? .on : .off
 
         // 内核一就绪就拉真实策略组；停止 / 失败即清空
@@ -119,7 +127,6 @@ final class PanelPreviewModel {
         // 退出顺序（先还原系统代理、再停内核）由 `AppTerminationGuard` 统一负责，
         // 覆盖 ⌘Q 与 SIGTERM / SIGINT / SIGHUP 三条路径。
 
-        startTrafficFeed()
         bootstrap(autoStartsKernel: autoStartsKernel)
     }
 
@@ -150,11 +157,12 @@ final class PanelPreviewModel {
         }
     }
 
-    /// 是否真的有流量可以展示：`/traffic` WS 还没接，速率位一律 `—`（§3.3 / §4.5）。
-    var showsLiveTraffic: Bool { false }
+    /// 是否有实时速率可展示：**只看内核与 WS 状态，与系统代理开关无关**（§3.3）。
+    /// 内核查在跑就有流量数据；代理关时通常接近 0，但仍应显示 `0.0 B/s` 而不是 `—`。
+    var showsLiveTraffic: Bool { phase == .running && traffic.isStreaming }
 
-    var downRateText: String { DemoTraffic.format(rate: downRate) }
-    var upRateText: String { DemoTraffic.format(rate: upRate) }
+    var downRateText: String { TrafficFormat.rate(downRate) }
+    var upRateText: String { TrafficFormat.rate(upRate) }
 
     var pinnedGroups: [ProxyGroupModel] { proxies.pinnedGroups }
     var pinnedGroupIDs: Set<String> { Set(pinnedGroups.map(\.id)) }
@@ -193,10 +201,13 @@ final class PanelPreviewModel {
             proxyRefreshTask = Task { [weak self] in
                 await self?.proxies.refresh()
             }
+            // 内核 running（含重启后新端口 / 新 secret）：重建 `/traffic` 连接
+            traffic.start()
         case .stopped, .failed:
             // 组数据作废：二级页的目标可能已经不在了，先回首层，避免空白面板
             proxyRefreshTask?.cancel()
             proxies.clear()
+            traffic.stop()
             selectedGroupID = nil
             route = .root
             if phase == .failed {
@@ -596,31 +607,11 @@ final class PanelPreviewModel {
         }
     }
 
-    // MARK: - 流量（1Hz 假数据）
-
-    /// v0.1 没接管流量，不跑假数据源：速率与曲线一律走空态。
-    /// v0.2 系统代理已接管，但 `/traffic` WS 还没接 → `showsLiveTraffic` 仍为 false，
-    /// 速率位用 `—` 表示「代理中但还没有采样」。接流量后再打开这里。
-    private func startTrafficFeed() {
-        guard showsLiveTraffic, feedTask == nil else { return }
-        feedTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
-                guard let self, !Task.isCancelled else { return }
-                self.tickTraffic()
-            }
-        }
-    }
-
-    private func tickTraffic() {
-        downRate = min(max(downRate + Double.random(in: -0.9 ... 0.9), 0.6), 12)
-        upRate = min(max(upRate + Double.random(in: -0.22 ... 0.22), 0.1), 3.2)
-
-        downSeries.removeFirst()
-        downSeries.append(min(1, downRate / 12))
-        upSeries.removeFirst()
-        upSeries.append(min(1, upRate / 3.2))
-    }
+    // MARK: - 流量（真实 `/traffic` WS）
+    //
+    // 采样、环形缓冲与重连都在 `TrafficService` 里；这里只按内核相位起停。
+    // 面板可见性在 `MenuBarExtra` 下拿不到可靠信号，因此不做「隐藏 30s 断开」：
+    // 内核 running 期间保持一条常驻 WS（1Hz，可忽略的开销）。
 
     // MARK: - 底栏
 

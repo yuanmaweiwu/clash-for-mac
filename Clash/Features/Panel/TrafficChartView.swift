@@ -1,6 +1,8 @@
 import SwiftUI
 
 /// 296×40 绘制区：60 点双色面积，下行在上、上行在下，0.18 填充 + 1.5pt 顶线，无坐标轴（§4.5）。
+///
+/// 入参是原始采样（字节 / 秒），Y 轴按窗口峰值自适应，最小满刻度 1 KB/s。
 @MainActor
 struct TrafficChartView: View {
     let downSeries: [Double]
@@ -18,6 +20,9 @@ struct TrafficChartView: View {
     }
 }
 
+/// Y 轴满刻度的下限：1 KB/s（§4.5「最小刻度 1 KB/s」）
+private let minimumPeakBytesPerSecond = 1024.0
+
 /// 纯绘制函数：不碰任何状态，保住 Canvas 闭包的隔离约束。
 private func drawSeries(
     _ values: [Double],
@@ -28,9 +33,10 @@ private func drawSeries(
 ) {
     guard values.count > 1, size.width > 0, size.height > 1 else { return }
 
+    // 最小满刻度 1 KB/s：极低流量时不把噪点放大成满屏波形（§4.5）
+    let peak = max(values.max() ?? 0, minimumPeakBytesPerSecond)
     let midY = size.height / 2
     let amplitude = max(midY - 1, 1)
-    let peak = max(values.max() ?? 1, 0.35)
     let stepX = size.width / CGFloat(values.count - 1)
 
     var line = Path()

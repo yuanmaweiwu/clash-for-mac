@@ -4,7 +4,7 @@ import SwiftUI
 @MainActor
 struct StatusStripView: View {
     let status: DemoStatus
-    /// 是否展示实时速率；`/traffic` WS 还没接，恒为 false → 速率位显示「—」
+    /// 是否展示实时速率：内核 running 且 `/traffic` WS 在线；否则速率位显示「—」
     let showsRates: Bool
     let downText: String
     let upText: String
