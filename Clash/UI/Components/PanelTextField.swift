@@ -100,7 +100,12 @@ struct PanelTextField: View {
         .onHover { isHovering = $0 }
         .animation(.easeOut(duration: 0.12), value: isHovering)
         .onAppear {
-            guard isAutofocused else { return }
+            guard isAutofocused else {
+                // 窗口把默认焦点落到第一个输入框，还会全选内容：设置页一推入就选中「7890」
+                // 既像误触又容易被下一次按键覆盖，这里把这次「白给的焦点」退回去。
+                Task { @MainActor in isFocused = false }
+                return
+            }
             isFocused = true
         }
         .accessibilityLabel(Text(label))
