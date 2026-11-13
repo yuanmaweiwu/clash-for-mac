@@ -57,12 +57,6 @@ struct SettingsWindowView: View {
         } message: {
             Text("将还原系统代理、停止内核，并删除订阅配置、运行配置、内核数据、日志与代理快照。App 本身与设置会保留。此操作不可撤销。")
         }
-        .alert("卸载特权组件？", isPresented: $showsUninstallConfirmation) {
-            Button("取消", role: .cancel) {}
-            Button("卸载", role: .destructive) { Task { await helper.perform() } }
-        } message: {
-            Text("将停止 TUN、移除管理员组件；系统代理与订阅不受影响。")
-        }
     }
 
     // MARK: - 代理
@@ -291,6 +285,12 @@ struct SettingsWindowView: View {
             if let notice = helper.notice {
                 noticeText(notice, isError: helper.noticeIsError)
             }
+        }
+        .alert("卸载特权组件？", isPresented: $showsUninstallConfirmation) {
+            Button("取消", role: .cancel) {}
+            Button("卸载", role: .destructive) { Task { await helper.perform() } }
+        } message: {
+            Text("将停止 TUN、移除管理员组件；系统代理与订阅不受影响。")
         }
     }
 
