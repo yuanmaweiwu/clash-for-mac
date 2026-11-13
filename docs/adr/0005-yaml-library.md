@@ -20,7 +20,7 @@
 
 | 方案 | 否决原因 |
 |---|---|
-| 字符串拼接注入 | 遇到已有同名键/锚点会静默出错，且无法测试 |
+| 字符串拼接注入 | 实测直接失败：把 `mixed-port` 等追加到真实订阅末尾，`mihomo -t` 报 `mapping key "mixed-port" already defined at line 1` |
 | 零依赖手写解析器 | 边界情况（多文档、块标量、转义）极易翻车，不值得 |
 | SwiftData / GRDB 做持久化 | v1 数据量小（设置 JSON + 少量 YAML），引入迁移成本反而更大 |
 | 引入 Alamofire / 第三方 UI 库 | 系统框架足够；第三方 UI 会破坏原生观感与可访问性 |

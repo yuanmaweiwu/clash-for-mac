@@ -91,8 +91,9 @@ idle ──start──► starting ──ok──► running ──stop──►
 关键约定：
 
 - **用户配置永不改写**：所有注入只写进 `runtime/`，删除即恢复原状
-- 注入字段（最小集合）：`mixed-port`、`socks-port`、`port`、`allow-lan`、`mode`、`log-level`、`external-controller: 127.0.0.1:<随机空闲端口>`、`secret: <每次启动随机>`、`tun.*`
-- 注入方式：解析原 YAML → 覆盖顶层键 → 输出；**不用字符串拼接**（YAML 结构不可靠）
+- 注入字段（最小集合）：`mixed-port`、`socks-port`、`port`、`allow-lan`、`mode`、`log-level`、`external-controller: 127.0.0.1:<随机空闲端口>`、`secret: <每次启动随机>`、`dns.listen: 127.0.0.1:<随机空闲端口>`、`bind-address: 127.0.0.1`、`tun.*`
+- **安全默认值必须覆盖订阅里的值**：实测真实订阅带 `allow-lan: true`、`dns.listen: 0.0.0.0:1053`——照搬等于把代理与 DNS 暴露到局域网。默认一律收紧为 `allow-lan: false` + `127.0.0.1`，用户显式开启才放开
+- 注入方式：解析原 YAML → 覆盖顶层键 → 输出；**不用字符串拼接**。实测把同名键追加到文件末尾会让 `mihomo -t` 直接失败：`mapping key "mixed-port" already defined at line 1`
 - secret 只存在内存 + 运行配置；App 存于内存，禁止落盘明文到日志
 - 端口冲突：启动前探测，被占用则让用户在设置里改，不静默换端口
 
@@ -122,8 +123,12 @@ idle ──start──► starting ──ok──► running ──stop──►
 
 更新流程（App 侧执行，**不需要** root）：
 
-1. `GET <url>`，UA 带应用名与版本（部分机场据此返回不同格式）
-2. 读响应头 `subscription-userinfo: upload=…; download=…; total=…; expire=…`，缺字段留空，**不猜**
+1. `GET <url>`，UA 策略见 [`adr/0006`](adr/0006-subscription-user-agent.md)：默认 `mihomo/<内核版本>`，遇 422 自动换预设 UA 重试一次
+2. 读响应头并映射（实测该机场四个头齐全，`expire` 缺失）：
+   - `subscription-userinfo: upload=…; download=…; total=…; expire=…` → 缺字段留空，**不猜**
+   - `Profile-Update-Interval: <小时>` → 作为**建议**更新间隔（实测为 1 小时）
+   - `Profile-Web-Page-Url` → 订阅管理里的「打开订阅页」（续费入口）
+   - `Content-Disposition: … filename="X"` → 无名字时作默认 profile 名
 3. 生成临时 runtime → `mihomo -t` 校验；失败则保留旧文件，只写 `lastError` / `lastAttemptAt`
 4. 校验通过 → 原子替换 `profiles/<id>.yaml` → 更新 index
 5. 若它正是 active 且内核在跑 → 重建 runtime → `PUT /configs?force=true`
@@ -132,10 +137,12 @@ idle ──start──► starting ──ok──► running ──stop──►
 
 - **同一时刻只有一条 active**；切换 = 换 active + 重建 runtime + 重载，不做并存
 - 更新失败不清空、不覆盖旧配置；UI 只标记「更新失败」，继续用旧版
-- 定时更新由 App 调度（`autoUpdateHours`: 0=手动，6/12/24），只在 App 运行时执行，错过不补跑
+- 定时更新由 App 调度（`autoUpdateHours`: 0=手动，1/6/12/24），默认取 `Profile-Update-Interval` 建议值（缺省 24）；只在 App 运行时执行，错过不补跑
 - profile 删除前若为 active：先切到另一条或停内核，**不允许删出空 active**
 - 订阅 URL 常含 token：日志、错误文案、崩溃报告一律脱敏
 - `pinnedGroups` 是 UI 偏好，只存 index，**不注入** runtime 配置
+- **主组识别**：首屏第一张卡 = 配置里第一个 `select` 组（实测真实订阅叫「机场A」，不是「节点选择」），名字一律取自配置
+- **geodata 共享**：内核 `-d` 目录全 profile 共用一个（首次运行会下载 `geoip.metadb` 约 8MB），不要按 profile 各建一个，否则每份订阅重复 8MB
 
 ## 5. 与内核的接口面（只依赖这些）
 

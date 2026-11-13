@@ -20,6 +20,7 @@
 - [x] UI 规范 `docs/02-UI-SPEC.md`：Token / 340×640 面板结构 / 组件四态 / 7 处动效 / 无障碍 / 空错态
   - 已裁定冲突：状态栏图标语义统一为「是否接管流量」；Dynamic Type 分场景（面板固定、设置窗口支持）
 - [x] 内核获取：`Scripts/fetch-kernel.sh` 取上游 latest arm64；已实测 v1.19.34（arm64，57MB）
+- [x] 真实订阅联调（2026-11-13）：UA 门禁（陌生 UA → 422）、重复键注入失败、`expire` 缺失、`Profile-Update-Interval: 1h`、主组名为机场名、订阅自带 `allow-lan: true` / `dns.listen 0.0.0.0` → 全部写进文档与 `adr/0006`
 
 ## 进行中
 

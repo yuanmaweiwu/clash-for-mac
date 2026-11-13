@@ -43,8 +43,9 @@
 
 - [ ] 订阅库：URL 导入 + 本地 YAML 导入，多条并存（`profiles/index.json`）
 - [ ] 单条激活：切换 = 重建 runtime + 热重载，同一时刻只有一条生效
-- [ ] 每条独立定时更新（手动 / 6h / 12h / 24h），失败保留旧配置并标记
-- [ ] `subscription-userinfo` 解析：上传/下载/总量/到期，拿不到就不显示
+- [ ] 每条独立定时更新（手动 / 1h / 6h / 12h / 24h，默认取 `Profile-Update-Interval`），失败保留旧配置并标记
+- [ ] 订阅 UA 策略：默认 `mihomo/<内核版本>`，422 自动换 UA 重试并给明确文案（`adr/0006`）
+- [ ] 响应头映射：`subscription-userinfo`（含缺 `expire` 的机场）、`Profile-Update-Interval`、`Profile-Web-Page-Url`、`Content-Disposition` 默认命名
 - [ ] 订阅管理面板：更新 / 切换 / 重命名 / 删除 / 复制链接
 - [ ] 规则只读查看 + 「在访达中显示」
 - [ ] 端口冲突检测与引导修改

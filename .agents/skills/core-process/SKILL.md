@@ -40,6 +40,7 @@ App ──XPC──► helper(root) ──posix_spawn──► mihomo
 ├── settings.json           应用设置（原子写）
 ├── profiles/<id>.yaml      用户配置，原样保存，永不改写
 ├── profiles/index.json     订阅库索引：activeProfileID、每条 name/source/updatedAt/autoUpdateHours/lastError/subscriptionInfo/pinnedGroups
+├── kernel/                 内核共享工作目录（`-d`）：geoip.metadb、cache.db、geosite
 ├── runtime/<id>.yaml       每次启动重建的最终配置
 ├── logs/clash-YYYYMMDD.log
 └── systemproxy-snapshot.json
@@ -62,10 +63,15 @@ App ──XPC──► helper(root) ──posix_spawn──► mihomo
 | `mode` | 面板当前模式 | `rule` / `global` / `direct` |
 | `log-level` | 设置 | 默认 `info` |
 | `external-controller` | **固定 `127.0.0.1`** + 随机空闲端口 | 禁止 `0.0.0.0` |
+| `dns.listen` | `127.0.0.1` + 随机空闲端口 | 真实订阅常带 `0.0.0.0:1053`，必须收紧 |
+| `bind-address` | `127.0.0.1` | 与 `allow-lan: false` 配套 |
 | `secret` | 每次启动随机 32 字节（内存持有） | 禁止写日志 |
 | `tun.*` | TUN 开关 | 见 §6 |
 
-生成后先 `mihomo -t -d <dir> -f <runtime>` 校验，失败不进 `starting`。
+生成后先 `mihomo -t -d <sharedDir> -f <runtime>` 校验，失败不进 `starting`（退出码 0/1 可靠，别解析 stderr 文本）。
+
+**`-d` 目录全 profile 共用一个**：首次运行会下载 `geoip.metadb`（约 8MB）到 `-d` 目录；按 profile 分开会让每份订阅各下一份。
+首次启动需要网络（`Can't find MMDB, start download`）；离线首启要能给出「正在准备地理数据」而不是「配置无效」。
 
 订阅更新时同样用临时 runtime 校验，通过后才原子替换 `profiles/<id>.yaml`；失败保留旧文件并只写 `lastError`。
 `subscription-userinfo` 响应头（`upload/download/total/expire`）解析进 index，缺字段留空。
