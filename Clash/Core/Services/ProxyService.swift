@@ -9,6 +9,8 @@ import Observation
 /// 边界：
 /// - `GLOBAL` 是内核合成的容器组，放进 `allGroups` 供「全部策略组」二级页，但默认不 pin、不进首屏
 /// - 组内嵌套组（组的 `all` 里出现另一个组名）按普通条目处理：选中它就是让父组指向子组
+/// - 机场的信息节点（到期时间 / 流量用量 …）在 `makeGroup` 里被 `ProxyNodeFilter` 丢掉：
+///   只是展示与可选项，不影响内核配置；过滤后没有节点的组整组不出现
 @MainActor
 @Observable
 final class ProxyService {
@@ -138,8 +140,8 @@ final class ProxyService {
         for nodeIndex in allGroups[index].nodes.indices {
             let name = allGroups[index].nodes[nodeIndex].name
             guard let delay = delays[name] else { continue }
-            // 本次没测到的条目保留原值；测到 0 视为超时
-            allGroups[index].nodes[nodeIndex].delay = delay > 0 ? delay : nil
+            // 本次没测到的条目保留原值；测到 0 视为超时（与「没测过」区分开）
+            allGroups[index].nodes[nodeIndex].delayState = delay > 0 ? .ok(delay) : .timeout
         }
         allGroups[index].delay = allGroups[index].nodes.compactMap(\.delay).min()
     }
@@ -184,50 +186,74 @@ final class ProxyService {
 
     private func apply(proxies: [String: ProxyEntry]) {
         let orderedNames = Self.orderedGroupNames(in: proxies)
-        // §3.4：主组 = 配置里第一个 `select` 组，默认 pin、不可取消
-        let mainGroupName = orderedNames.first { proxies[$0]?.type == "Selector" } ?? orderedNames.first
 
         var built = orderedNames.compactMap { name -> ProxyGroupModel? in
             guard let entry = proxies[name] else { return nil }
-            return makeGroup(name: name, entry: entry, proxies: proxies, mainGroupName: mainGroupName)
+            return makeGroup(name: name, entry: entry, proxies: proxies)
         }
 
-        // GLOBAL 只进「全部策略组」
+        // GLOBAL 只进「全部策略组」；被过滤空的组不再作为条目出现
         if let global = proxies["GLOBAL"], global.isGroup {
-            built.append(makeGroup(name: "GLOBAL", entry: global, proxies: proxies, mainGroupName: nil, isGlobal: true))
+            let droppedGroups = Set(orderedNames).subtracting(built.map(\.name))
+            if let group = makeGroup(
+                name: "GLOBAL",
+                entry: global,
+                proxies: proxies,
+                excluding: droppedGroups,
+                isGlobal: true
+            ) {
+                built.append(group)
+            }
+        }
+
+        // §3.4：主组 = 过滤后仍存活的第一个 `select` 组（默认 pin、不可取消）
+        let mainGroupName = built.first { !$0.isGlobal && $0.type == "Selector" }?.name
+            ?? built.first { !$0.isGlobal }?.name
+        for index in built.indices where !built[index].isGlobal {
+            let isMain = built[index].name == mainGroupName
+            built[index].isPinned = isMain || pinnedNames.contains(built[index].name)
+            built[index].canPin = !isMain
         }
 
         allGroups = built
         hasLoaded = true
     }
 
+    /// 单组的映射；`nil` = 过滤掉信息节点后没有任何可选项（整组不显示，避免空卡）
     private func makeGroup(
         name: String,
         entry: ProxyEntry,
         proxies: [String: ProxyEntry],
-        mainGroupName: String?,
+        excluding excludedNames: Set<String> = [],
         isGlobal: Bool = false
-    ) -> ProxyGroupModel {
+    ) -> ProxyGroupModel? {
         let nodes = (entry.all ?? []).compactMap { nodeName -> ProxyNodeModel? in
-            guard let node = proxies[nodeName] else { return nil }
+            guard let node = proxies[nodeName], !excludedNames.contains(nodeName) else { return nil }
+            // 机场塞的信息节点（到期时间 / 流量用量 / 官网…）：只能展示，绝不能可选
+            guard !ProxyNodeFilter.isInfoNode(nodeName) else { return nil }
             return ProxyNodeModel(
                 name: nodeName,
                 type: node.type ?? "",
                 isGroup: node.isGroup,
-                delay: node.lastDelay,
+                delayState: node.delayState,
                 isAvailable: node.alive ?? true
             )
         }
+        guard !nodes.isEmpty else { return nil }
 
-        let isMainGroup = !isGlobal && name == mainGroupName
+        // `now` 指向被过滤项（或已经不存在的条目）→ 视为「无有效选中」，卡片首行退化为延迟最低的可用节点
+        let now = entry.now.flatMap { name -> String? in
+            nodes.contains { $0.name == name } ? name : nil
+        }
+
         return ProxyGroupModel(
             name: name,
             type: entry.type ?? "",
-            now: entry.now,
+            now: now,
             nodes: nodes,
             delay: entry.lastDelay,
-            isPinned: !isGlobal && (isMainGroup || pinnedNames.contains(name)),
-            canPin: !isGlobal && !isMainGroup,
+            isPinned: false,
+            canPin: !isGlobal,
             isGlobal: isGlobal
         )
     }
@@ -274,8 +300,8 @@ final class ProxyService {
     #if DEBUG
     /// Preview 夹具：不启动内核，摆出两张同结构的卡（仅设计预览用，不参与运行）
     func applyPreviewFixture() {
-        func node(_ name: String, _ delay: Int?) -> ProxyNodeModel {
-            ProxyNodeModel(name: name, type: "Shadowsocks", isGroup: false, delay: delay, isAvailable: true)
+        func node(_ name: String, _ state: ProxyDelayState) -> ProxyNodeModel {
+            ProxyNodeModel(name: name, type: "Shadowsocks", isGroup: false, delayState: state, isAvailable: true)
         }
 
         allGroups = [
@@ -284,15 +310,15 @@ final class ProxyService {
                 type: "Selector",
                 now: "香港 01",
                 nodes: [
-                    node("香港 01", 32),
-                    node("日本 02", 88),
-                    node("美国 03", nil),
-                    node("新加坡 04", 64),
-                    node("台湾 05", 41),
-                    node("韩国 06", 95),
-                    node("德国 07", 210),
-                    node("英国 08", 245),
-                    node("澳洲 09", 312)
+                    node("香港 01", .ok(32)),
+                    node("日本 02", .ok(88)),
+                    node("美国 03", .unknown),
+                    node("新加坡 04", .ok(64)),
+                    node("台湾 05", .ok(41)),
+                    node("韩国 06", .ok(95)),
+                    node("德国 07", .ok(210)),
+                    node("英国 08", .ok(245)),
+                    node("澳洲 09", .ok(312))
                 ],
                 delay: 32,
                 isPinned: true,
@@ -304,12 +330,12 @@ final class ProxyService {
                 type: "URLTest",
                 now: "香港 01",
                 nodes: [
-                    node("日本 02", 88),
-                    node("香港 01", 32),
-                    node("新加坡 04", 64),
-                    node("台湾 05", 41),
-                    node("美国 03", nil),
-                    node("韩国 06", 95)
+                    node("日本 02", .ok(88)),
+                    node("香港 01", .ok(32)),
+                    node("新加坡 04", .ok(64)),
+                    node("台湾 05", .ok(41)),
+                    node("美国 03", .unknown),
+                    node("韩国 06", .ok(95))
                 ],
                 delay: 32,
                 isPinned: false,

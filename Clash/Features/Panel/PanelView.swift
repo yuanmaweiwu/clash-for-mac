@@ -133,8 +133,8 @@ struct PanelView: View {
                 .disabled(model.isGroupDisabled)
 
             FooterView(
-                // v0.1 没导入真实配置、也没接管流量：底栏不宣称「N 分钟前更新」
-                updatedText: model.showsLiveTraffic ? model.updatedText : "未导入配置",
+                // 底栏时间取自 active 订阅的 updatedAt；没订阅才写「未导入配置」
+                updatedText: model.footerUpdatedText,
                 // v0.2：换成 /connections 的真实连接数
                 connectionCount: nil,
                 kernelVersion: model.kernelVersion,
@@ -169,7 +169,13 @@ private func panelPreviewModel(pinnedFailure: Bool = false, empty: Bool = false)
         path: "clash-preview-\(empty ? "empty" : "default")",
         directoryHint: .isDirectory
     )
-    let model = PanelPreviewModel(profileStore: ProfileStore(directory: directory))
+    let model = PanelPreviewModel(
+        profileStore: ProfileStore(directory: directory),
+        // 预览不读写真实系统代理快照
+        systemProxy: SystemProxyService(
+            snapshotURL: directory.appending(path: "systemproxy-snapshot.json")
+        )
+    )
     if !empty {
         model.applyPreviewGroups()
     }

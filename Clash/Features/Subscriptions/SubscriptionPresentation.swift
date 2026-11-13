@@ -52,6 +52,9 @@ extension ProfileEntry {
         return Date(timeIntervalSince1970: TimeInterval(timestamp)) < .now
     }
 
+    /// 单独的相对更新时间（底栏 / 行内共用）：刚刚更新 / N 分钟前更新 / N 小时前更新 / N 天前更新
+    var updatedAgoText: String { Self.updatedText(updatedAt) }
+
     // MARK: - 格式化
 
     private static let expiryFormatter: DateFormatter = {

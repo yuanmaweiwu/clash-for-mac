@@ -46,7 +46,7 @@ struct NodeRowView: View {
 
     private var rowContent: some View {
         HStack(spacing: 6) {
-            LatencyDotView(latency: node.delay)
+            LatencyDotView(state: node.delayState)
 
             Text(node.name)
                 .font(isSelected ? Typography.title : Typography.body)
@@ -90,7 +90,13 @@ struct NodeRowView: View {
 
     private var accessibilityValue: String {
         if isTesting { return "测速中" }
-        guard let latency = node.delay else { return "不可用" }
-        return isSelected ? "延迟 \(latency) 毫秒，已选中" : "延迟 \(latency) 毫秒"
+        switch node.delayState {
+        case let .ok(latency):
+            return isSelected ? "延迟 \(latency) 毫秒，已选中" : "延迟 \(latency) 毫秒"
+        case .timeout:
+            return isSelected ? "超时，已选中" : "超时"
+        case .unknown:
+            return isSelected ? "未测速，已选中" : "未测速"
+        }
     }
 }

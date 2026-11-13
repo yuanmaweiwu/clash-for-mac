@@ -23,19 +23,29 @@ struct ProxyGroupModel: Identifiable, Sendable, Equatable {
 
     var selectedNode: ProxyNodeModel? { nodes.first { $0.name == now } }
 
-    /// 按延迟升序；超时/未测速沉底；同延迟按配置顺序（稳定排序）
+    /// 已测速按延迟升序 → 未测速 → 超时；同类按配置顺序（稳定排序）
     var nodesSortedByLatency: [ProxyNodeModel] {
         nodes.enumerated()
             .sorted { lhs, rhs in
-                let left = lhs.element.delay ?? Int.max
-                let right = rhs.element.delay ?? Int.max
-                if left != right { return left < right }
+                let left = Self.sortKey(lhs.element)
+                let right = Self.sortKey(rhs.element)
+                if left.rank != right.rank { return left.rank < right.rank }
+                if left.delay != right.delay { return left.delay < right.delay }
                 return lhs.offset < rhs.offset
             }
             .map(\.element)
     }
 
-    /// 卡内只露 3 行：选中项恒第一，其余按延迟升序取前 2（超时自然沉底）
+    /// 排序键：`ok`（0 + 延迟）→ `unknown`（1）→ `timeout`（2）
+    private static func sortKey(_ node: ProxyNodeModel) -> (rank: Int, delay: Int) {
+        switch node.delayState {
+        case let .ok(delay): return (0, delay)
+        case .unknown: return (1, 0)
+        case .timeout: return (2, 0)
+        }
+    }
+
+    /// 卡内只露 3 行：选中项恒第一，其余按延迟升序取前 2（未测速 / 超时自然沉底）
     var orderedNodes: [ProxyNodeModel] {
         guard let selected = selectedNode else { return Array(nodesSortedByLatency.prefix(3)) }
         let rest = nodesSortedByLatency.filter { $0.name != selected.name }

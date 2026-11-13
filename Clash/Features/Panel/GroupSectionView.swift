@@ -9,8 +9,11 @@ struct GroupSectionView: View {
     var body: some View {
         Group {
             if model.groups.isEmpty {
-                EmptyGroupView(title: model.emptyGroupTitle)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                EmptyGroupView(
+                    title: model.emptyGroupTitle,
+                    showsImportActions: model.showsEmptyGroupImportActions
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView(.vertical) {
                     VStack(spacing: 0) {

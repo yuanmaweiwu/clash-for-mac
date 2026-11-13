@@ -20,6 +20,12 @@ struct ProxyEntry: Decodable, Sendable, Equatable {
         guard let delay = history?.last?.delay, delay > 0 else { return nil }
         return delay
     }
+
+    /// 测速三态：`history` 为空 = 从没测过，有条目但延迟 ≤ 0 = 超时
+    var delayState: ProxyDelayState {
+        guard let last = history?.last else { return .unknown }
+        return last.delay > 0 ? .ok(last.delay) : .timeout
+    }
 }
 
 /// 延迟历史的一条（`{"time": "...", "delay": 123}`）

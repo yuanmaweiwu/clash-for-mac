@@ -10,12 +10,13 @@ import Observation
 ///
 /// **已经是真的**：
 /// - 内核生命周期（`phase` / `lastError`），来自 `KernelService`
+/// - **系统代理总开关**（快照 → 写入 → 读回校验 → 失败回滚），来自 `SystemProxyService`
 /// - 策略组 / 节点 / 延迟 / 选中项 / 模式，来自 `ProxyService`（`GET /proxies`、`GET /configs`）
 /// - 订阅库（列表 / 激活 / 导入 / 更新 / 重命名 / 删除），来自 `ProfileStore`
 ///   （`profiles/index.json` + `profiles/<id>.yaml`）
 ///
-/// **明确不做假的**：系统代理与 TUN（ADR-0007 决定 v0.1 不接管流量），
-/// 因此没有流量数字、没有波形、没有 TUN 开关态。
+/// **还没接的**：流量采样（`/traffic` WS）与 TUN（helper），
+/// 因此速率位一律 `—`、TUN 磁贴仍是「需要管理员组件」。
 @MainActor
 @Observable
 final class PanelPreviewModel {
@@ -24,22 +25,26 @@ final class PanelPreviewModel {
 
     /// 真实内核生命周期；`phase` / `errorMessage` 都从这里转发
     @ObservationIgnored private let kernel: KernelService
+    /// 真实系统代理（快照落盘 + 逐服务还原）
+    @ObservationIgnored private let systemProxy: SystemProxyService
     /// 真实策略组 / 节点 / 模式
     @ObservationIgnored private let proxies: ProxyService
     /// 真实订阅库（`profiles/index.json`）
     @ObservationIgnored private let profiles: ProfileStore
 
-    /// v0.1 没有系统代理（ADR-0007）：恒为 `false`，且刻意声明成 `let`。
-    ///
-    /// 没有写入口 ⇒ `status` 在 `running` 时只会是「已就绪 / 直连」，
-    /// 「代理中」在 v0.1 结构上不可达。v0.2 接入系统代理后再改成可写状态。
-    let systemProxyOn = false
+    /// 连接磁贴的五态（§4.2）；开 / 关成功与否都以读回校验为准
+    private(set) var connectionState: ConnectionState = .off
+    /// 系统代理操作的失败文案（优先于内核错误进 banner）
+    private(set) var connectionError: String?
+
+    /// 我们是否正在接管系统代理（快照存在且未还原）
+    var isSystemProxyOn: Bool { systemProxy.isEnabled }
 
     /// 内核当前模式（`GET /configs` 为准）
     var mode: ProxyMode { proxies.mode }
 
-    /// 内核启动失败时的用户文案；真实来源是 `KernelError.userMessage`
-    var errorMessage: String? { kernel.lastError?.userMessage }
+    /// 失败文案：代理操作失败优先，其次内核启动失败
+    var errorMessage: String? { connectionError ?? kernel.lastError?.userMessage }
 
     /// 是否展示 banner（派生，不再手动置位）
     var showsErrorBanner: Bool { errorMessage != nil }
@@ -68,8 +73,11 @@ final class PanelPreviewModel {
     /// 测速完成后的「刚刚更新」短暂提示
     private(set) var speedResultFlash = false
 
-    /// 底栏「N 分钟前更新」：仍是假数据，且 v0.1 不展示（底栏固定显示「未导入配置」）
-    var updatedText = "2 分钟前更新"
+    /// 底栏更新时间：无订阅 →「未导入配置」；有订阅但从未成功更新 →「尚未更新」；否则相对时间
+    var footerUpdatedText: String {
+        guard let profile = activeSubscription else { return "未导入配置" }
+        return profile.updatedAgoText
+    }
     private(set) var downRate = DemoTraffic.initialDownRate
     private(set) var upRate = DemoTraffic.initialUpRate
     private(set) var downSeries = DemoTraffic.downSeries
@@ -85,18 +93,32 @@ final class PanelPreviewModel {
     @ObservationIgnored private var selectionTask: Task<Void, Never>?
     @ObservationIgnored private var modeTask: Task<Void, Never>?
     @ObservationIgnored private var proxyRefreshTask: Task<Void, Never>?
+    @ObservationIgnored private var connectionTask: Task<Void, Never>?
+    @ObservationIgnored private var launchRestoreTask: Task<Void, Never>?
 
-    init(kernel: KernelService = KernelService(), profileStore: ProfileStore = ProfileStore()) {
+    init(
+        kernel: KernelService = KernelService(),
+        profileStore: ProfileStore = ProfileStore(),
+        systemProxy: SystemProxyService = SystemProxyService()
+    ) {
         self.kernel = kernel
         self.profiles = profileStore
+        self.systemProxy = systemProxy
         self.proxies = ProxyService(kernel: kernel)
+        self.connectionState = systemProxy.isEnabled ? .on : .off
 
         // 内核一就绪就拉真实策略组；停止 / 失败即清空
         kernel.onPhaseChange = { [weak self] phase in
             self?.handleKernelPhase(phase)
         }
 
+        // 退出顺序：先还原系统代理（同步），再停内核
+        kernel.onWillTerminate = { [weak systemProxy] in
+            systemProxy?.disableSynchronouslyForTermination()
+        }
+
         startTrafficFeed()
+        restoreProxyAtLaunch()
     }
 
     // MARK: - 派生状态
@@ -107,13 +129,12 @@ final class PanelPreviewModel {
     /// 内核版本（`/version` 的 `version` 字段）；未运行时为 nil
     var kernelVersion: String? { kernel.kernelVersion }
 
-    /// 启动 / 停止过程中：连接磁贴不可再点
-    var isKernelBusy: Bool { kernel.isTransitioning }
+    /// 连接磁贴不可再点：内核启停中，或系统代理正在写入
+    var isConnectionBusy: Bool { kernel.isTransitioning || connectionState.isBusy }
 
-    /// 状态条文案（§3.3）：v0.1 只有「未运行 / 启动中 / 已就绪 / 直连 / 启动失败」。
+    /// 状态条文案（§3.3）：代理中 = 内核 running 且系统代理读回校验通过。
     ///
-    /// `systemProxyOn` 恒为 `false`，所以 `running` 只会是「已就绪」或「直连」；
-    /// 「代理中」要等 v0.2 系统代理接上之后才可能出现。
+    /// 直连模式下即使接管了系统代理也显示「直连」（§3.3 第 5 行）。
     var status: DemoStatus {
         switch phase {
         case .stopped:
@@ -123,13 +144,13 @@ final class PanelPreviewModel {
         case .failed:
             return .failed
         case .running:
-            guard systemProxyOn else { return mode == .direct ? .direct : .ready }
+            guard isSystemProxyOn else { return mode == .direct ? .direct : .ready }
             return mode == .direct ? .direct : .proxying
         }
     }
 
-    /// 是否真的有流量可以展示：v0.1 没接管流量的通道，一律不显示数字与波形（§4.5 空态）。
-    var showsLiveTraffic: Bool { systemProxyOn && status.hasLiveRates }
+    /// 是否真的有流量可以展示：`/traffic` WS 还没接，速率位一律 `—`（§3.3 / §4.5）。
+    var showsLiveTraffic: Bool { false }
 
     var downRateText: String { DemoTraffic.format(rate: downRate) }
     var upRateText: String { DemoTraffic.format(rate: upRate) }
@@ -137,10 +158,17 @@ final class PanelPreviewModel {
     var pinnedGroups: [ProxyGroupModel] { proxies.pinnedGroups }
     var pinnedGroupIDs: Set<String> { Set(pinnedGroups.map(\.id)) }
 
-    /// 空态文案：有配置且内核给出过数据、但一个策略组都没有 → 「当前配置没有策略组」
+    /// 空态文案：没配置「还没有配置」/ 有配置但内核没跑「启用代理后显示节点」/ 跑了但没组「当前配置没有策略组」
     var emptyGroupTitle: String {
-        proxies.hasLoaded && kernel.hasProfile ? "当前配置没有策略组" : "还没有配置"
+        guard hasConfiguredProfile else { return "还没有配置" }
+        return proxies.hasLoaded ? "当前配置没有策略组" : "启用代理后显示节点"
     }
+
+    /// 已经导入订阅就不摆「导入订阅 / 选择 YAML」：用户不是没导入，只是还没启用代理
+    var showsEmptyGroupImportActions: Bool { !hasConfiguredProfile }
+
+    /// 是否已有可用配置：订阅库有 active，或本次内核用了用户配置（DEBUG 的 `CLASH_PROFILE` 也算）
+    private var hasConfiguredProfile: Bool { activeSubscription != nil || kernel.hasProfile }
 
     var activeSubscription: ProfileEntry? { profiles.activeProfile }
 
@@ -169,40 +197,124 @@ final class PanelPreviewModel {
             proxies.clear()
             selectedGroupID = nil
             route = .root
+            if phase == .failed {
+                // 内核异常退出：先撤系统代理，不能让用户对着死内核被代理
+                restoreProxyAfterKernelFailure()
+            }
         case .starting:
             break
         }
     }
 
-    // MARK: - 连接磁贴
+    // MARK: - 启动兜底
 
-    /// 未运行 → 启动内核；运行中 → 停止内核；启动/停止过程中忽略点击
-    func toggleConnection() {
-        guard !kernel.isTransitioning else { return }
-        switch phase {
-        case .starting:
-            return
-        case .stopped, .failed:
-            startKernel()
-        case .running:
-            stopKernel()
-        }
-    }
-
-    private func startKernel() {
-        transitionTask?.cancel()
-        transitionTask = Task { [weak self] in
+    /// 上次退出没还原干净（崩溃 / 强杀）→ 启动时立即还原。
+    /// 此刻内核一定是新起的、没在跑，所以快照存在就直接 `disable()`（`system-proxy` §6）。
+    private func restoreProxyAtLaunch() {
+        launchRestoreTask?.cancel()
+        launchRestoreTask = Task { [weak self] in
             guard let self else { return }
-            await self.kernel.start()
-            // 就绪后由 `onPhaseChange` 触发 `proxies.refresh()`
+            await self.systemProxy.restoreIfNeeded(kernelRunning: self.kernel.phase == .running)
+            guard !Task.isCancelled else { return }
+            self.connectionState = self.systemProxy.isEnabled ? .on : .off
+            if let error = self.systemProxy.lastError {
+                self.failConnection(.disable, message: error.userMessage)
+            }
         }
     }
 
-    private func stopKernel() {
-        transitionTask?.cancel()
-        transitionTask = Task { [weak self] in
-            await self?.kernel.stop()
+    // MARK: - 连接磁贴（系统代理总开关）
+
+    /// 关闭 → 起内核 + 接管系统代理；开启 → 还原系统代理 + 停内核；过渡中忽略点击。
+    func toggleConnection() {
+        guard !isConnectionBusy else { return }
+        if isSystemProxyOn {
+            turnOffProxy()
+        } else {
+            turnOnProxy()
         }
+    }
+
+    /// 开启：内核未运行就先 `start()` 并等 `running`，再 `enable(port:)`。
+    /// `SystemProxyService.enable` 负责「快照 → 写入 → 读回校验 → 失败回滚」，这里不重复兜底。
+    private func turnOnProxy() {
+        connectionTask?.cancel()
+        connectionState = .turningOn
+        connectionError = nil
+
+        connectionTask = Task { [weak self] in
+            guard let self else { return }
+
+            if self.kernel.phase != .running {
+                await self.kernel.start()
+                guard !Task.isCancelled else { return }
+                guard self.kernel.phase == .running else {
+                    self.failConnection(
+                        .enable,
+                        message: self.kernel.lastError?.userMessage ?? "内核未能就绪，代理没有开启"
+                    )
+                    return
+                }
+            }
+
+            do {
+                try await self.systemProxy.enable(port: RuntimeConfigBuilder.defaultMixedPort)
+                guard !Task.isCancelled else { return }
+                self.connectionState = .on
+                self.connectionError = nil
+            } catch {
+                self.failConnection(.enable, error: error)
+            }
+        }
+    }
+
+    /// 关闭：先还原系统代理，再停内核（顺序不能反，否则内核先死会留下指向死端口的代理）。
+    private func turnOffProxy() {
+        connectionTask?.cancel()
+        connectionState = .turningOff
+        connectionError = nil
+
+        connectionTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.systemProxy.disable()
+            } catch {
+                self.failConnection(.disable, error: error)
+                return
+            }
+            guard !Task.isCancelled else { return }
+            // TODO(v0.2+): 设置项「关闭代理时保留内核」打开后跳过下面这行
+            await self.kernel.stop()
+            self.connectionState = .off
+        }
+    }
+
+    /// 内核异常退出：先还原系统代理，别让用户对着一个死内核被代理（`system-proxy` §6）
+    private func restoreProxyAfterKernelFailure() {
+        guard systemProxy.isEnabled else { return }
+        connectionTask?.cancel()
+        connectionState = .turningOff
+        connectionError = nil
+
+        connectionTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.systemProxy.disable()
+                self.connectionState = .off
+            } catch {
+                self.failConnection(.disable, error: error)
+            }
+        }
+    }
+
+    private func failConnection(_ stage: ConnectionState.Stage, error: Error) {
+        let message = (error as? SystemProxyError)?.userMessage ?? "代理操作失败"
+        failConnection(stage, message: message)
+    }
+
+    private func failConnection(_ stage: ConnectionState.Stage, message: String) {
+        connectionState = .failed(stage)
+        connectionError = message
     }
 
     // MARK: - 代理模式
@@ -373,6 +485,11 @@ final class PanelPreviewModel {
     private func stopKernelForProfileChange() {
         guard kernel.phase == .running else { return }
         transitionTask?.cancel()
+        // 代理开着就必须一起撤掉，否则会指向一个已经停掉的内核
+        if isSystemProxyOn {
+            turnOffProxy()
+            return
+        }
         transitionTask = Task { [weak self] in
             await self?.kernel.stop()
         }
@@ -438,9 +555,10 @@ final class PanelPreviewModel {
     // MARK: - 流量（1Hz 假数据）
 
     /// v0.1 没接管流量，不跑假数据源：速率与曲线一律走空态。
-    /// v0.2 接 `/traffic` 后，把这里换成真实采样再打开。
+    /// v0.2 系统代理已接管，但 `/traffic` WS 还没接 → `showsLiveTraffic` 仍为 false，
+    /// 速率位用 `—` 表示「代理中但还没有采样」。接流量后再打开这里。
     private func startTrafficFeed() {
-        guard systemProxyOn, feedTask == nil else { return }
+        guard showsLiveTraffic, feedTask == nil else { return }
         feedTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
@@ -462,8 +580,10 @@ final class PanelPreviewModel {
 
     // MARK: - 底栏
 
+    /// 底栏刷新按钮：有 active 订阅就真去拉一次（成功后 `updatedAt` 推进，底栏变「刚刚更新」）
     func refreshProfile() {
-        updatedText = "刚刚更新"
+        guard let id = activeSubscriptionID else { return }
+        updateSubscription(id)
     }
 
     #if DEBUG
