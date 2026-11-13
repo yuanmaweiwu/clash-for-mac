@@ -114,10 +114,7 @@ enum Theme {
     static var accentStroke: Color { Color(nsColor: .controlAccentColor).opacity(0.40) }
     static let panelShadow = Color(nsColor: clashDynamicColor(light: clashBlack(0.18), dark: clashBlack(0.50)))
     /// 键盘焦点环 2pt、外扩 2pt（§2.2 / §6.2）
-    static var focus: Color { hidesFocusRing ? .clear : Color(nsColor: .controlAccentColor).opacity(0.70) }
-
-    /// 截图走查用：把焦点环画成透明（不影响真实运行）
-    static var hidesFocusRing = false
+    static var focus: Color { Color(nsColor: .controlAccentColor).opacity(0.70) }
 
     // MARK: 文本（不写纯黑 / 纯白；正文压到 4.5:1 以上）
 

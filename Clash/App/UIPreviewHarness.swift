@@ -27,7 +27,6 @@ enum UIPreviewHarness {
         if let variant = environment["CLASH_SCRIM_VARIANT"] {
             Theme.scrimStyle = ScrimStyle(rawValue: variant) ?? .balanced
         }
-        Theme.hidesFocusRing = environment["CLASH_PREVIEW_HIDE_FOCUS"] == "1"
         if let appearance = environment["CLASH_PREVIEW_APPEARANCE"] {
             NSApp.appearance = NSAppearance(named: appearance == "dark" ? .darkAqua : .aqua)
         }

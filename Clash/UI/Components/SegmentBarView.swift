@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// 规则 / 全局 / 直连分段：点击即切换、选中段位移、←/→ 可切（§4.3）。
@@ -10,6 +11,8 @@ struct SegmentBarView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var isFocused: Bool
     @State private var hoveredMode: ProxyMode?
+    /// 只有键盘把焦点移过来时才画焦点环：面板刚打开时的默认焦点不算
+    @State private var showsFocusRing = false
 
     private var selectionAnimation: Animation {
         reduceMotion
@@ -23,6 +26,15 @@ struct SegmentBarView: View {
             .focused($isFocused)
             .focusEffectDisabled()
             .overlay { focusRing }
+            .onChange(of: isFocused) { _, focused in
+                // 面板首帧会把默认焦点落到第一个可聚焦控件上；只有按键（Tab / 方向键）
+                // 引起的焦点变化才配得上焦点环，否则一打开就有一圈蓝框。
+                if focused {
+                    showsFocusRing = NSApp.currentEvent?.type == .keyDown
+                } else {
+                    showsFocusRing = false
+                }
+            }
             .onKeyPress(.leftArrow) {
                 move(-1)
                 return .handled
@@ -61,7 +73,7 @@ struct SegmentBarView: View {
 
     @ViewBuilder
     private var focusRing: some View {
-        if isFocused {
+        if showsFocusRing {
             RoundedRectangle(cornerRadius: Metrics.radiusTrack + 2, style: .continuous)
                 .strokeBorder(Theme.focus, lineWidth: 2)
                 .padding(-2)
