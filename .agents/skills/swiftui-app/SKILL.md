@@ -94,7 +94,7 @@ View → Model(视图状态) → Service(协议) → 实现(网络/进程/磁盘
 7. **不擅自改架构**：不擅自引入 MVVM 之外的第三套结构、不加全局单例（除 `AppEnvironment`）。
 8. **面向 macOS 而非 iOS**：窗口/菜单/快捷键/多窗口/拖放优先，别照搬 iPhone 的导航栈与全屏假设。
 9. **冲突先问人**：需求模糊、与实码或本约定冲突时先问，禁止自作主张。
-10. **可访问性与深浅色**：默认支持 Dynamic Type、VoiceOver、Reduce Motion、深色模式；不要写死颜色与像素。
+10. **可访问性与深浅色**：必须支持 VoiceOver、Reduce Motion、深色模式；Dynamic Type 分场景——状态栏面板固定尺寸不缩放，设置窗口/日志等自由排版界面必须支持。不要写死颜色与像素（用 `docs/02-UI-SPEC.md` 的 token）。
 11. **技能只装项目级**：一切 skill / agent 装进 `.agents/skills/`，永不加 `-g`；只能用全局的，先问用户（见 `AGENTS.md` 铁律 0）。
 
 ## 6. 常用命令
