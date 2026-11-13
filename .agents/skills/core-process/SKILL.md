@@ -31,6 +31,8 @@ App ──XPC──► helper(root) ──posix_spawn──► mihomo
 - 降权时需要补 `setgroups` 时，不要硬塞进 spawn attr，改用一个极小的 setuid 包装（或先 `chown` 配置目录再以用户身份写）；**不要**让 root 内核直接写用户目录
 - 停止：先 `SIGTERM`，等 3s，再 `SIGKILL`；端口释放后再回报 `stopped`
 - 单实例保护：helper 内维护 pid + 启动时间戳；重复 `start` 返回既有实例，不重复 spawn
+- **孤儿清理**：App 被 `SIGKILL` / 系统强杀时子进程会残留。`start()` 前必须用 `libproc`（`proc_listallpids` + `proc_pidpath`）找出**可执行路径完全等于 bundle 内 mihomo** 的进程，`SIGTERM` → 2s → `SIGKILL`，再启动；**禁止按进程名模糊匹配**（会误杀 ClashX 等）
+- 启动前确认 `mixed-port` 空闲，被占则报 `portInUse`，不要硬起（两个内核抢同一端口时行为不可预测）
 - 崩溃重试：非用户停止的退出 → 最多 3 次（1s / 3s / 9s 退避）；仍失败则锁定为 `failed` 并上报 exit code + 最后 20 行日志
 
 ## 3. 目录布局
