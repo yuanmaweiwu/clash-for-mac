@@ -24,11 +24,11 @@
 ## 进行中
 
 - [ ] 可交互原型：`Prototype/`（SPM 包 + `MenuBarExtra` 真浮层，假数据，designer 实现中）→ 用户亲手试交互
-- [ ] UI 规范待用户过目（`docs/02-UI-SPEC.md` 已自查并消解与技能的口径冲突）
+- [ ] 原型交互评审：多订阅 / 策略组 pin 刚定，需同步到原型后再给用户试
 
 ## 下一步（按优先级）
 
-1. 用户确认视觉方向 → 定稿 UI 规范
+1. 用户试交互 → 收反馈（多订阅面板、pin 星标、面板高度动画）
 2. 补齐技能（全部项目级）：`swift-style`、`build-release`
 3. v0.1 骨架：`.xcodeproj`（App / Helper / Tests）+ `MenuBarExtra` 空面板 + helper 安装 + 内核启停 + `/version`
 4. 内核签名与 helper spawn 校验方案（v0.1 内落地）
@@ -38,7 +38,7 @@
 - 分支 `test`；remote 为内网 Gitea（`http://内网地址:3000/Clash/Clash.git`）
 - 已定：macOS 15+ / **仅 arm64** / Swift 6 / `.xcodeproj` 手写 / 自带 mihomo / v1 含 TUN / 设置 JSON + 配置 YAML
 - 架构要点：**helper（root）是内核与系统写操作的唯一持有者**；App 只通过 XPC + mihomo HTTP/WS 通信
-- 配置原则：用户 YAML 永不改写，注入只进 `runtime/`
+- 配置原则：用户 YAML 永不改写，注入只进 `runtime/`；订阅库多条、单条 active、`pinnedGroups` 只是 UI 偏好
 - 构建命令已写入 `.agents/skills/swiftui-app/SKILL.md` §6（工程创建后需实测修正）
 - 唯一 Swift 代码在 `Prototype/`（可交互原型，未接内核；正式工程 v0.1 再建）
 

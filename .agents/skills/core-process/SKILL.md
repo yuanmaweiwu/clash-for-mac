@@ -39,7 +39,7 @@ App ──XPC──► helper(root) ──posix_spawn──► mihomo
 ~/Library/Application Support/Clash/
 ├── settings.json           应用设置（原子写）
 ├── profiles/<id>.yaml      用户配置，原样保存，永不改写
-├── profiles/index.json     元数据（名称、来源 URL、更新时间、hash）
+├── profiles/index.json     订阅库索引：activeProfileID、每条 name/source/updatedAt/autoUpdateHours/lastError/subscriptionInfo/pinnedGroups
 ├── runtime/<id>.yaml       每次启动重建的最终配置
 ├── logs/clash-YYYYMMDD.log
 └── systemproxy-snapshot.json
@@ -47,6 +47,8 @@ App ──XPC──► helper(root) ──posix_spawn──► mihomo
 
 - 所有写入走「临时文件 + `rename`」原子替换
 - 除 `settings.json` 外不做跨版本迁移；profiles 只增不改
+- **同一时刻只有一条 active**：切换 = 改 `activeProfileID` → 重建 runtime → `PUT /configs?force=true`
+- `pinnedGroups` / 上次选中等 UI 偏好只存 index 或 settings，**不注入** runtime，也不触发重载
 
 ## 4. 运行配置注入（最小集合）
 
@@ -64,6 +66,9 @@ App ──XPC──► helper(root) ──posix_spawn──► mihomo
 | `tun.*` | TUN 开关 | 见 §6 |
 
 生成后先 `mihomo -t -d <dir> -f <runtime>` 校验，失败不进 `starting`。
+
+订阅更新时同样用临时 runtime 校验，通过后才原子替换 `profiles/<id>.yaml`；失败保留旧文件并只写 `lastError`。
+`subscription-userinfo` 响应头（`upload/download/total/expire`）解析进 index，缺字段留空。
 
 ## 5. API 契约（只依赖这些）
 

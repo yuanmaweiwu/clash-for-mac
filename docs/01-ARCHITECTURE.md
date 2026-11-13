@@ -96,6 +96,47 @@ idle ──start──► starting ──ok──► running ──stop──►
 - secret 只存在内存 + 运行配置；App 存于内存，禁止落盘明文到日志
 - 端口冲突：启动前探测，被占用则让用户在设置里改，不静默换端口
 
+### 4.1 订阅库与更新
+
+`profiles/index.json` 是唯一索引（列表元数据，不含配置正文）：
+
+```json
+{
+  "activeProfileID": "p_01",
+  "profiles": [
+    {
+      "id": "p_01",
+      "name": "机场 A",
+      "source": { "kind": "url", "url": "https://…" },
+      "updatedAt": "2026-11-13T06:00:00Z",
+      "autoUpdateHours": 24,
+      "lastAttemptAt": "2026-11-13T06:00:00Z",
+      "lastError": null,
+      "subscriptionInfo": { "upload": 0, "download": 0, "total": 0, "expire": 0 },
+      "pinnedGroups": ["节点选择"]
+    },
+    { "id": "p_02", "name": "本地 规则集", "source": { "kind": "file", "path": "…" }, "autoUpdateHours": 0 }
+  ]
+}
+```
+
+更新流程（App 侧执行，**不需要** root）：
+
+1. `GET <url>`，UA 带应用名与版本（部分机场据此返回不同格式）
+2. 读响应头 `subscription-userinfo: upload=…; download=…; total=…; expire=…`，缺字段留空，**不猜**
+3. 生成临时 runtime → `mihomo -t` 校验；失败则保留旧文件，只写 `lastError` / `lastAttemptAt`
+4. 校验通过 → 原子替换 `profiles/<id>.yaml` → 更新 index
+5. 若它正是 active 且内核在跑 → 重建 runtime → `PUT /configs?force=true`
+
+约束：
+
+- **同一时刻只有一条 active**；切换 = 换 active + 重建 runtime + 重载，不做并存
+- 更新失败不清空、不覆盖旧配置；UI 只标记「更新失败」，继续用旧版
+- 定时更新由 App 调度（`autoUpdateHours`: 0=手动，6/12/24），只在 App 运行时执行，错过不补跑
+- profile 删除前若为 active：先切到另一条或停内核，**不允许删出空 active**
+- 订阅 URL 常含 token：日志、错误文案、崩溃报告一律脱敏
+- `pinnedGroups` 是 UI 偏好，只存 index，**不注入** runtime 配置
+
 ## 5. 与内核的接口面（只依赖这些）
 
 | 能力 | 接口 |
