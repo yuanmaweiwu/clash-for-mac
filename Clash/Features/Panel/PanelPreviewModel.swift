@@ -1,26 +1,30 @@
-// TODO(v0.2): 替换为真实模型，当前为面板假数据
+// TODO(v0.2): 节点 / 订阅 / 流量仍是本地假数据；内核生命周期与 /version 已接真
 import CoreGraphics
 import Foundation
 import Observation
 
-/// **只服务 v0.1 的面板假数据演示。**
+/// v0.1 面板模型：**内核是真的**（`KernelService`），其余仍是本地假数据。
 ///
-/// 这里的状态与数据全是本地的：不启动内核、不发网络请求、不读写磁盘。
-/// 启动/停止、测速、订阅更新都在内存里用 `Task.sleep` 模拟；
-/// v0.2 由 `KernelService`、订阅服务与真实策略组替换掉对应字段。
+/// 视图只和本模型打交道；内核状态在本模型里做一次转发，
+/// 避免 View 直接依赖 `KernelService`。
 @MainActor
 @Observable
 final class PanelPreviewModel {
 
     // MARK: 内核 / 系统代理 / 模式 / TUN
 
-    var phase: KernelPhase = .running
+    /// 真实内核生命周期；`phase` / `errorMessage` 都从这里转发
+    @ObservationIgnored private let kernel: KernelService
+
     var systemProxyOn = true
     var mode: ProxyMode = .rule
     private(set) var tun: TunState = .on
 
-    /// 内核启动失败时展示 banner；真实版本由 `KernelService` 的错误分类驱动。
-    var showsErrorBanner = false
+    /// 内核启动失败时的用户文案；真实来源是 `KernelError.userMessage`
+    var errorMessage: String? { kernel.lastError?.userMessage }
+
+    /// 是否展示 banner（派生，不再手动置位）
+    var showsErrorBanner: Bool { errorMessage != nil }
 
     // MARK: 导航（首层 / 二级）
 
@@ -56,7 +60,8 @@ final class PanelPreviewModel {
     @ObservationIgnored private var speedNoticeTask: Task<Void, Never>?
     @ObservationIgnored private var speedFlashTask: Task<Void, Never>?
 
-    init() {
+    init(kernel: KernelService = KernelService()) {
+        self.kernel = kernel
         let initialGroups = Self.makeGroups()
         groups = initialGroups
         activeGroupID = initialGroups.first?.id
@@ -67,6 +72,12 @@ final class PanelPreviewModel {
     }
 
     // MARK: - 派生状态
+
+    /// 内核相位（转发 `KernelService`，只读）
+    var phase: KernelPhase { kernel.phase }
+
+    /// 启动 / 停止过程中：连接磁贴不可再点
+    var isKernelBusy: Bool { kernel.isTransitioning }
 
     var status: DemoStatus {
         switch phase {
@@ -102,26 +113,34 @@ final class PanelPreviewModel {
 
     // MARK: - 连接磁贴
 
+    /// 未运行 → 启动内核；运行中 → 停止内核；启动/停止过程中忽略点击
     func toggleConnection() {
+        guard !kernel.isTransitioning else { return }
         switch phase {
         case .starting:
             return
         case .stopped, .failed:
-            startProxy()
+            startKernel()
         case .running:
-            systemProxyOn.toggle()
+            stopKernel()
         }
     }
 
-    private func startProxy() {
+    private func startKernel() {
         transitionTask?.cancel()
-        phase = .starting
-
         transitionTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(0.8))
-            guard let self, !Task.isCancelled else { return }
-            self.systemProxyOn = true
-            self.phase = .running
+            guard let self else { return }
+            await self.kernel.start()
+            if self.kernel.phase == .running {
+                self.systemProxyOn = true
+            }
+        }
+    }
+
+    private func stopKernel() {
+        transitionTask?.cancel()
+        transitionTask = Task { [weak self] in
+            await self?.kernel.stop()
         }
     }
 
@@ -417,6 +436,13 @@ final class PanelPreviewModel {
             )
         ]
     }
+
+    #if DEBUG
+    /// Preview 夹具：直接摆出启动失败态（不启动内核）
+    func previewFailure() {
+        kernel.applyPreviewFailure()
+    }
+    #endif
 }
 
 // MARK: - 布局派生值

@@ -1,7 +1,9 @@
-// TODO(v0.2): 替换为真实模型，当前为面板假数据
 import Foundation
 
-/// 内核进程的五态（演示用，不接触真实进程）。
+/// 内核进程状态（唯一来源：`KernelService`）。
+///
+/// `starting` 覆盖「校验 + 拉起 + 就绪探测」全过程；`stopping` 由
+/// `KernelService.isTransitioning` 表达，UI 侧不再单列状态值。
 enum KernelPhase: String, Sendable {
     case stopped
     case starting

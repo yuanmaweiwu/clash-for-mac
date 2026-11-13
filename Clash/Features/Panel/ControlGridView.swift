@@ -11,6 +11,7 @@ struct ControlGridView: View {
                 ConnectionTileView(status: model.status) {
                     model.toggleConnection()
                 }
+                .disabled(model.isKernelBusy)
                 ProxyModeTileView(mode: model.mode) { mode in
                     model.selectMode(mode)
                 }

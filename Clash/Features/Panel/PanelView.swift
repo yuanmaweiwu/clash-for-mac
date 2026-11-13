@@ -100,8 +100,8 @@ struct PanelView: View {
             StatusStripView(status: model.status, downText: model.downRateText, upText: model.upRateText)
 
             // 顶部 banner：插在状态条正下方，占固定高度，不把面板撑高（§7）
-            if model.showsErrorBanner {
-                ErrorBannerView {
+            if let message = model.errorMessage {
+                ErrorBannerView(message: message) {
                     PlaceholderPanel.show(
                         title: "日志",
                         detail: "日志窗口会在接入内核后提供，先在这里展示内核输出。"
@@ -161,9 +161,8 @@ private func panelPreviewModel(pinnedFailure: Bool = false, empty: Bool = false)
     }
     if pinnedFailure {
         for index in model.groups.indices { model.groups[index].isPinned = true }
-        model.phase = .failed
+        model.previewFailure()
         model.systemProxyOn = false
-        model.showsErrorBanner = true
     }
     return model
 }

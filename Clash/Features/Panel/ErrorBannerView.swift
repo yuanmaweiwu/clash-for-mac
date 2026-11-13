@@ -4,6 +4,8 @@ import SwiftUI
 /// 出现在状态条正下方，占固定高度，从分组区扣，不把面板撑高。
 @MainActor
 struct ErrorBannerView: View {
+    /// 失败原因（来自 `KernelError.userMessage`）
+    var message: String = "内核启动失败，点此查看日志"
     let action: () -> Void
 
     @FocusState private var isFocused: Bool
@@ -15,7 +17,7 @@ struct ErrorBannerView: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Theme.error)
 
-                Text("内核启动失败，点此查看日志")
+                Text(message)
                     .font(Typography.status)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
@@ -49,7 +51,7 @@ struct ErrorBannerView: View {
                     .padding(-2)
             }
         }
-        .accessibilityLabel(Text("内核启动失败，点此查看日志"))
+        .accessibilityLabel(Text(message))
         .accessibilityAddTraits(.isButton)
     }
 }
