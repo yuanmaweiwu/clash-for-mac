@@ -20,7 +20,8 @@ enum TunSmokeHarness {
         mode: String,
         systemProxy: SystemProxyService,
         kernel: KernelService,
-        tun: TunService
+        tun: TunService,
+        model: PanelPreviewModel
     ) {
         Task { @MainActor in
             let failures: Int
@@ -31,6 +32,12 @@ enum TunSmokeHarness {
                 failures = await badConfig()
             case "dump":
                 failures = dumpConfig()
+            case "reopen":
+                failures = await reopenCycle(model: model, tun: tun)
+            case "resub":
+                failures = await resubscribeCycle(model: model, tun: tun)
+            case "helper":
+                failures = await helperStates(tun: tun)
             default:
                 failures = await fullCycle(tun: tun, kernel: kernel, systemProxy: systemProxy)
             }
@@ -199,6 +206,97 @@ enum TunSmokeHarness {
         return failures
     }
 
+    /// 「TUN 开着 → 改配置 → 自动重开」的真机验证：走面板模型的真实入口
+    private static func reopenCycle(model: PanelPreviewModel, tun: TunService) async -> Int {
+        var failures = 0
+
+        print("=== ENABLE ===")
+        await tun.enable()
+        guard await waitUntilSettled(tun: tun) else {
+            print("SKIP reopen 前置 enable 未成功：\(tun.bannerMessage ?? "—")")
+            return 0
+        }
+        dumpNetworkState()
+
+        print("=== CONFIG CHANGE (restartKernelForSettings) ===")
+        model.restartKernelForSettings()
+        let leftOn = await waitUntilLeavesOn(tun: tun)
+        let backOn = await waitUntilSettled(tun: tun)
+        print("leftOn=\(leftOn) backOn=\(backOn) phase=\(tun.phase) banner=\(tun.bannerMessage ?? "—")")
+        if !leftOn || !backOn {
+            print("FAIL 自动重开未完成")
+            failures += 1
+        }
+        dumpNetworkState()
+
+        await tun.disable(restartLocalKernel: false)
+        _ = await waitUntilOff(tun: tun)
+        return failures
+    }
+
+    /// 订阅更新触发「关 → 换配置 → 重开」：走 `refreshProfile()` 的真实路径
+    private static func resubscribeCycle(model: PanelPreviewModel, tun: TunService) async -> Int {
+        var failures = 0
+
+        print("=== ENABLE ===")
+        await tun.enable()
+        guard await waitUntilSettled(tun: tun) else {
+            print("SKIP resub 前置 enable 未成功：\(tun.bannerMessage ?? "—")")
+            return 0
+        }
+        dumpNetworkState()
+
+        print("=== REFRESH SUBSCRIPTION ===")
+        let updatedBefore = model.activeSubscription?.updatedAt
+        model.refreshProfile()
+        for _ in 0..<240 where model.updatingProfileID != nil {
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        let updated = model.activeSubscription?.updatedAt != updatedBefore
+        print("subscription updated=\(updated) phase=\(tun.phase) banner=\(tun.bannerMessage ?? "—")")
+
+        if updated {
+            let leftOn = await waitUntilLeavesOn(tun: tun)
+            let backOn = await waitUntilSettled(tun: tun)
+            print("leftOn=\(leftOn) backOn=\(backOn) phase=\(tun.phase)")
+            if !leftOn || !backOn {
+                print("FAIL 订阅更新后未自动重开")
+                failures += 1
+            }
+        } else {
+            // 更新失败：按要求不重开，TUN 保持原状（旧配置仍有效）
+            print("INFO 订阅更新失败 → 不重开；phase=\(tun.phase)")
+            if tun.phase != .on {
+                print("FAIL 更新失败时 TUN 不该被关闭")
+                failures += 1
+            }
+        }
+        dumpNetworkState()
+
+        await tun.disable(restartLocalKernel: false)
+        _ = await waitUntilOff(tun: tun)
+        return failures
+    }
+
+    /// 组件状态机文案（真实状态 + 三种夹具状态）
+    private static func helperStates(tun: TunService) async -> Int {
+        let model = HelperComponentModel(tun: tun)
+        await model.refresh()
+        print("REAL state=\(model.state) status=\(model.statusText) action=\(model.action?.title ?? "nil")")
+
+        let fixtures: [(String, HelperComponentModel.State)] = [
+            ("未安装", .notInstalled),
+            ("已安装", .installed(version: HelperVersion)),
+            ("需要更新", .needsUpdate(installedVersion: 2, legacyPayload: true)),
+            ("已装未运行", .installedNotRunning)
+        ]
+        for (label, state) in fixtures {
+            model.applyPreviewState(state)
+            print("FIXTURE [\(label)] status=\(model.statusText) | hint=\(model.hintText) | action=\(model.action?.title ?? "nil")")
+        }
+        return 0
+    }
+
     // MARK: - 等待
 
     private static func waitUntilSettled(tun: TunService) async -> Bool {
@@ -208,6 +306,15 @@ enum TunSmokeHarness {
             case .failed, .off, .needsInstall, .awaitingAuthorization: return false
             case .starting, .stopping: try? await Task.sleep(for: .milliseconds(250))
             }
+        }
+        return false
+    }
+
+    /// 等它离开 on（重开的第一步是关闭）
+    private static func waitUntilLeavesOn(tun: TunService) async -> Bool {
+        for _ in 0..<80 {
+            if tun.phase != .on { return true }
+            try? await Task.sleep(for: .milliseconds(100))
         }
         return false
     }

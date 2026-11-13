@@ -139,6 +139,33 @@ enum TunConfigHarness {
             dnsOff["listen"] as? String == "127.0.0.1:\(injectedDNSListenPort)"
         )
 
+        // 3. TUN + 订阅没写 nameserver（缺失 / 空数组）→ 注入兜底
+        for (name, body) in [("missing", fixtureWithoutNameServer), ("empty", fixtureWithEmptyNameServer)] {
+            let url = directory.appending(path: "profile-dns-\(name).yaml")
+            guard (try? Data(body.utf8).write(to: url)) != nil else {
+                print("FAIL dns-fixture-\(name) 写入失败")
+                failures += 1
+                continue
+            }
+
+            let yaml: String
+            do {
+                yaml = try RuntimeConfigBuilder.yaml(from: url, injected: injectedOn)
+            } catch {
+                print("FAIL dns-fallback-\(name) \(error.localizedDescription)")
+                failures += 1
+                continue
+            }
+
+            let dns = normalized(yaml)?["dns"] as? [String: Any] ?? [:]
+            failures += report(
+                "dns-nameserver-fallback-\(name)",
+                (dns["nameserver"] as? [String]) == RuntimeConfigBuilder.defaultNameServers,
+                "\(String(describing: dns["nameserver"]))"
+            )
+            failures += report("dns-fallback-keeps-fake-ip-\(name)", dns["enhanced-mode"] as? String == "fake-ip")
+        }
+
         return failures
     }
 
@@ -168,6 +195,27 @@ enum TunConfigHarness {
     proxies: []
     rules:
       - MATCH,DIRECT
+    """
+
+    /// 完全没有 dns.nameserver 的订阅（TUN 下必须注入兜底，否则 DNS 直接不可用）
+    private static let fixtureWithoutNameServer = """
+    proxies: []
+    rules:
+      - MATCH,DIRECT
+    dns:
+      enable: true
+      enhanced-mode: fake-ip
+    """
+
+    /// 写了空数组的订阅（等价于没写）
+    private static let fixtureWithEmptyNameServer = """
+    proxies: []
+    rules:
+      - MATCH,DIRECT
+    dns:
+      enable: true
+      enhanced-mode: fake-ip
+      nameserver: []
     """
 
     // MARK: - 工具

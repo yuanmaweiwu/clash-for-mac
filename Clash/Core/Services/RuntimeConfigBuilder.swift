@@ -161,6 +161,9 @@ enum RuntimeConfigBuilder {
     ///
     /// TUN 模式额外强制 `fake-ip`：`dns-hijack: any:53` 把全部 DNS 查询劫持进来，
     /// 没有 fake-ip 就只能逐个真解析，连接建立的延迟会明显变差。
+    ///
+    /// TUN 并且订阅没写 `nameserver`（缺失或空数组）时注入兜底：fake-ip 必须有上游解析器，
+    /// 否则 DNS 直接不可用——TUN 下这个洞的后果是「整个网络都打不开」。
     private static func dnsSection(injected: Injected, existing: [String: Any]?) -> [String: Any] {
         var dns = existing ?? [:]
         dns["enable"] = true
@@ -168,9 +171,17 @@ enum RuntimeConfigBuilder {
         if injected.tunEnabled {
             dns["enhanced-mode"] = "fake-ip"
             dns["fake-ip-range"] = "198.18.0.1/16"
+            let subscriptionServers = dns["nameserver"] as? [String]
+            if subscriptionServers?.isEmpty ?? true {
+                dns["nameserver"] = defaultNameServers
+            }
         }
         return dns
     }
+
+    /// TUN 的 DNS 兜底：一个国内公共 DNS + 一个国际公共 DNS，顺序即优先级。
+    /// 只在订阅没给 `nameserver` 时使用（订阅的 DNS 策略优先）。
+    static let defaultNameServers = ["223.5.5.5", "1.1.1.1"]
 
     /// `tun` 段：**整段替换**，不 merge。
     ///

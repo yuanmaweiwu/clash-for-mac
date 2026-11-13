@@ -125,6 +125,8 @@ final class PanelPreviewModel {
     @ObservationIgnored private var modeTask: Task<Void, Never>?
     @ObservationIgnored private var proxyRefreshTask: Task<Void, Never>?
     @ObservationIgnored private var connectionTask: Task<Void, Never>?
+    /// TUN 的「关 → 换配置 → 重开」串行链（只保留最新意图）
+    @ObservationIgnored private var tunReopenTask: Task<Void, Never>?
 
     init(
         kernel: KernelService? = nil,
@@ -447,9 +449,9 @@ final class PanelPreviewModel {
     /// 端口变了而系统代理还开着的话，代理会指向死端口：先撤代理，起来后按新端口重开。
     func restartKernelForSettings() {
         // TUN 内核由 helper 持有，本 App 既不能 stop 也不能按新设置重建：
-        // 先关 TUN（它会把本地内核拉回来），用户再决定是否重新开启
+        // 先关 → 用新设置重开（失败就停在关闭态，原因由 TUN banner 给）
         if tun.isHelperKernelRunning {
-            Task { [weak self] in await self?.tun.disable() }
+            reopenTunAfterConfigChange()
             return
         }
         enqueueKernelOperation { [weak self] in
@@ -699,6 +701,26 @@ final class PanelPreviewModel {
         (error as? ProfileStoreError)?.userMessage ?? fallback
     }
 
+    /// TUN 开着时换配置（订阅 / 端口 / 日志级别 / LAN）：先关 → 就地按新配置重开。
+    ///
+    /// 为什么不在关闭态就收手：TUN 是用户的显式意图，切个订阅就得重新点一次是坏体验。
+    /// 为什么失败不重开：`TunService.enable()` 自己会在失败时回落本地内核并给 banner；
+    /// 半关状态下重开只会在旧内核上叠一份新配置。
+    private func reopenTunAfterConfigChange() {
+        tunReopenTask?.cancel()
+        tunReopenTask = Task { [weak self] in
+            guard let self else { return }
+            guard self.tun.isHelperKernelRunning else { return }
+
+            await self.tun.disable(restartLocalKernel: false)
+            guard !Task.isCancelled else { return }
+            // 没关干净（stopKernel 失败）就不重开：那说明 root 内核还在接管流量
+            guard !self.tun.isOn, !self.tun.isHelperKernelRunning else { return }
+
+            await self.tun.enable()
+        }
+    }
+
     /// active 变了：先 stop 再 start，让 `KernelService` 按新 active 重建 runtime。
     /// 走同一条串行链，running 时也不会并发 start；内核没在跑（如自动启动失败）时也能救回来。
     private func restartKernelForProfileChange() {
@@ -706,10 +728,11 @@ final class PanelPreviewModel {
             stopKernelForProfileChange()
             return
         }
-        // TUN 内核里跑的是旧正文：关闭 TUN 会按新 active 重建本地内核，
-        // 用户要 TUN 的话再点一次（不能在这里静默重建 root 配置，那需要再走一次授权检查）
+        // TUN 内核里跑的是旧正文：关掉后按新 active 重开。
+        // 只有「订阅确实切换成功」才会走到这里——拉取 / 校验失败时调用方不重启，
+        // TUN 保持原状（旧配置仍然有效），不会出现「用旧配置接管新流量」的半套状态。
         if tun.isHelperKernelRunning {
-            Task { [weak self] in await self?.tun.disable() }
+            reopenTunAfterConfigChange()
             return
         }
         enqueueKernelOperation { [weak self] in

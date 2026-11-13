@@ -41,13 +41,14 @@ struct ClashApp: App {
         let kernel = KernelService(settings: settings)
         // TUN 与面板、退出清理共享同一实例：退出清理必须看得见「TUN 是否开着」
         let tun = TunService(settings: settings, systemProxy: systemProxy, kernel: kernel)
-        _model = State(initialValue: PanelPreviewModel(
+        let model = PanelPreviewModel(
             kernel: kernel,
             systemProxy: systemProxy,
             settings: settings,
             tun: tun,
             autoStartsKernel: smokeMode == nil
-        ))
+        )
+        _model = State(initialValue: model)
         _settings = State(initialValue: settings)
         terminationGuard = AppTerminationGuard(kernel: kernel, systemProxy: systemProxy, tun: tun)
         Self.logger.info("Clash 启动（v0.2 系统代理 + TUN）")
@@ -58,7 +59,8 @@ struct ClashApp: App {
                 mode: smokeMode,
                 systemProxy: systemProxy,
                 kernel: kernel,
-                tun: tun
+                tun: tun,
+                model: model
             )
         }
         #endif

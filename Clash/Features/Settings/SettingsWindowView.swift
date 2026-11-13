@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// 设置窗口（独立 `Window`，单例）：四组「代理 / 订阅 / 启动与日志 / 维护」。
+/// 设置窗口（独立 `Window`，单例）：五组「代理 / 订阅 / 启动与日志 / 特权组件 / 维护」。
 ///
 /// 规范：`docs/02-UI-SPEC.md` §2（token）、§8.7（设置窗口独立且不承载日常操作）。
 /// 组间 20pt、组内行 32pt、**不画横线**，靠留白分组；文字用语义字号，支持 Dynamic Type。
@@ -18,6 +18,8 @@ struct SettingsWindowView: View {
     @State private var maintenanceFailed = false
     @State private var isCleaningUp = false
     @State private var showsCleanupConfirmation = false
+    @State private var showsUninstallConfirmation = false
+    @State private var helper: HelperComponentModel
 
     init(model: PanelPreviewModel, settings: SettingsStore) {
         self.model = model
@@ -25,6 +27,7 @@ struct SettingsWindowView: View {
         let initialChoice = UserAgentChoice.resolve(from: settings.subscriptionUserAgent)
         _portText = State(initialValue: String(settings.mixedPort))
         _uaChoice = State(initialValue: initialChoice)
+        _helper = State(initialValue: HelperComponentModel(tun: model.tun))
     }
 
     var body: some View {
@@ -33,6 +36,7 @@ struct SettingsWindowView: View {
                 proxySection
                 subscriptionSection
                 startupSection
+                helperSection
                 maintenanceSection
 
                 if let error = settings.lastError {
@@ -43,12 +47,21 @@ struct SettingsWindowView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(minWidth: 640, minHeight: 460)
-        .onAppear { syncLoginItemState() }
+        .onAppear {
+            syncLoginItemState()
+            Task { await helper.refresh() }
+        }
         .alert("完全清理？", isPresented: $showsCleanupConfirmation) {
             Button("取消", role: .cancel) {}
             Button("清理", role: .destructive) { runCleanup() }
         } message: {
             Text("将还原系统代理、停止内核，并删除订阅配置、运行配置、内核数据、日志与代理快照。App 本身与设置会保留。此操作不可撤销。")
+        }
+        .alert("卸载特权组件？", isPresented: $showsUninstallConfirmation) {
+            Button("取消", role: .cancel) {}
+            Button("卸载", role: .destructive) { Task { await helper.perform() } }
+        } message: {
+            Text("将停止 TUN、移除管理员组件；系统代理与订阅不受影响。")
         }
     }
 
@@ -241,6 +254,60 @@ struct SettingsWindowView: View {
                 settingLabel("日志级别")
             }
             .frame(minHeight: 32)
+        }
+    }
+
+    // MARK: - 特权组件
+
+    private var helperSection: some View {
+        section("特权组件") {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(helperStatusColor)
+                    .frame(width: 6, height: 6)
+                    .accessibilityHidden(true)
+
+                Text(helper.statusText)
+                    .font(.body)
+                    .foregroundStyle(helper.isStatusWarning ? Theme.warning : Theme.textPrimary)
+
+                Spacer(minLength: 8)
+
+                if helper.isWorking {
+                    ProgressView()
+                        .controlSize(.small)
+                } else if let action = helper.action {
+                    Button(action.title) { handleHelperAction(action) }
+                        .controlSize(.small)
+                }
+            }
+            .frame(minHeight: 32)
+
+            Text(helper.hintText)
+                .font(.caption)
+                .foregroundStyle(Theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let notice = helper.notice {
+                noticeText(notice, isError: helper.noticeIsError)
+            }
+        }
+    }
+
+    private var helperStatusColor: Color {
+        switch helper.state {
+        case .installed: Theme.success
+        case .needsUpdate, .installedNotRunning: Theme.warning
+        case .checking, .notInstalled: Theme.textTertiary
+        }
+    }
+
+    /// 卸载要二次确认（会停 TUN）；安装 / 更新 / 重新安装直接走一次系统授权
+    private func handleHelperAction(_ action: HelperComponentModel.Action) {
+        if action == .uninstall {
+            showsUninstallConfirmation = true
+        } else {
+            Task { await helper.perform() }
         }
     }
 

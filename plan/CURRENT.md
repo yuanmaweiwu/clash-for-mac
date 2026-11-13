@@ -55,13 +55,18 @@
 - [x] 退出清理：TUN 开着时 `stopKernel` 同步确认（1.5s 上限）+ 启动时回收遗留 root 内核
 - [x] 真机验证（2026-11-13）：root mihomo → utun4=198.18.0.1 → `/version` 就绪 → 关闭后
   utun 消失、`128.0/1` 分流路由清空、无残留进程；非法 YAML 被 helper 拒并给中文原因
-- [ ] **geodata 缺口**：helper 运行目录缺 `geoip.metadb`，真订阅（含 `GEOIP,CN`）一启动就去
-  GitHub 下载（90s 超时）。安装脚本已改成从包内拷贝；当前这台机器需一次 root 拷贝或重新授权安装
+- [x] **geodata 已补齐**（真机 `geoip.metadb` 落位），真订阅 TUN 实测：utun4 + `128.0/1` + 直连 204
+- [x] 设置窗口「特权组件」：未安装 / 已安装·版本 N / 需要更新 / 已装未运行 四态 + 安装/更新/重新安装/卸载
+- [x] TUN 自动重开：订阅更新、端口 / 日志级别 / LAN 变更 → 关 → 换配置 → 重开；失败停在关闭态
+- [x] TUN 的 DNS 兜底：订阅没写 `nameserver` 时注入 `223.5.5.5`、`1.1.1.1`
+- [x] 退出预算：TUN 内核等待 1.5s → 2.0s（总预算仍 ≤3s）
+- [ ] 当前机器上的 helper 还是旧格式（无文件日志、无运行时自检）→ 设置里显示「需要更新」，更新后 `helper.log` 才有内容
 
 ## 下一步（按优先级）
 
-1. TUN 补 geodata（一次 root 拷贝，或重新授权安装把新 helper + geodata 一起装上）→ 用真订阅再跑一遍
-   `CLASH_TUN_SMOKE=1`；随后验证 ⌘Q 与 `kill -9` 各一次（后者靠启动时回收遗留 root 内核）
+1. 设置里点「更新组件…」把 helper 升到带文件日志 + 运行时自检的版本；随后 `log show --predicate
+   'subsystem == "com.clash.helper"'` 与 `sudo tail helper.log` 验证双写
+2. 退出路径真机验证：TUN 开着 → ⌘Q（2s 同步 stop）与 `kill -9`（启动时回收）各一次
 2. 真实节点数据：Yams 配置合并 + `profiles/index.json` + 订阅导入（进行中）
 2. `ProxyService`：`/proxies` 策略组与节点、选择、测速、`PATCH /configs` 模式
 3. helper（管理员授权安装）+ 系统代理快照还原

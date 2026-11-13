@@ -25,6 +25,11 @@ struct HelperRuntimeSnapshot: Sendable, Equatable {
         return parts.joined(separator: " ")
     }
 
+    /// 旧 helper（升级前装的那版）只回纯版本号：三个运行时字段全是 nil
+    var isLegacyPayload: Bool {
+        kernelBinaryPresent == nil && runtimeConfigPresent == nil && supportDirectoryPresent == nil
+    }
+
     /// 缺哪些运行时（空 = 齐全或未知）
     var missingComponents: [String] {
         var missing: [String] = []

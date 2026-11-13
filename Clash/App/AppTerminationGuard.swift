@@ -33,7 +33,7 @@ private let terminationLogger = Logger(subsystem: "com.clash.app", category: "te
 /// 清理总预算；超时 `exit(1)`
 private let terminationCleanupBudget: TimeInterval = 3
 /// 主线程等待预算：留 0.2s 余量，保证正常路径的 `exit` 先于硬超时
-private let terminationMainHopTimeout: DispatchTimeInterval = .milliseconds(2800)
+private let terminationMainHopTimeout: DispatchTimeInterval = .milliseconds(2900)
 /// 拦截的信号：`kill` / `launchctl` / 关机注销都会发 `SIGTERM`
 private let terminationHandledSignals: [Int32] = [SIGTERM, SIGINT, SIGHUP]
 /// `App.init` 正常只跑一次，但 SwiftUI 可能重建 App 值；重复装会出现两个 source
@@ -166,10 +166,13 @@ final class AppTerminationGuard {
         systemProxy.disableSynchronouslyForTermination()
 
         // helper 是 launchd 常驻，不会随 App 退出；TUN 的内核还在就会一直接管流量，
-        // 而 App 已经消失 → 用户断网且没有 UI 可关。这里同步停一次（1.5s 上限，
+        // 而 App 已经消失 → 用户断网且没有 UI 可关。这里同步停一次（2s 上限，
         // 超时也算请求已投递，helper 会继续 SIGTERM → 3s → SIGKILL）。
+        //
+        // 预算：系统代理还原 ~0.9s + 这里 2.0s = 2.9s，略小于 3s 硬超时与 2.9s 主线程等待；
+        // 真超时就按「先退出」处理，快照与路由兜底已经存在。
         if tun.isHelperKernelRunning {
-            let confirmed = HelperClient.stopKernelSynchronously(timeout: 1.5)
+            let confirmed = HelperClient.stopKernelSynchronously(timeout: 2.0)
             terminationLogger.notice(
                 "退出前停止 TUN 内核：\(confirmed ? "已确认" : "未确认（请求已投递）", privacy: .public)"
             )
