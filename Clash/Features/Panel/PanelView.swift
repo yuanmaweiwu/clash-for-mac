@@ -154,6 +154,7 @@ struct PanelView: View {
             }
 
             ControlGridView(model: model)
+                .padding(.top, Metrics.sectionGap)
 
             TrafficCardView(
                 hasCurve: model.hasTrafficCurve,
@@ -163,10 +164,10 @@ struct PanelView: View {
                 downSeries: model.downSeries,
                 upSeries: model.upSeries
             )
-            .padding(.top, Metrics.tileGap)
+            .padding(.top, Metrics.sectionGap)
 
             GroupSectionView(model: model)
-                .padding(.top, Metrics.tileGap)
+                .padding(.top, Metrics.sectionGap)
                 .opacity(model.isGroupDisabled ? 0.45 : 1)
                 .disabled(model.isGroupDisabled)
 
@@ -174,7 +175,7 @@ struct PanelView: View {
                 onOpenConnections: { model.openConnections() },
                 onOpenSettings: { model.openSettingsPage() }
             )
-            .padding(.top, Metrics.tileGap)
+            .padding(.top, Space.m)
         }
         .padding(.horizontal, Metrics.panelPadding)
         .padding(.vertical, Metrics.panelPadding)

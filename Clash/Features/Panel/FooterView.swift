@@ -12,13 +12,13 @@ struct FooterView: View {
     let onOpenSettings: () -> Void
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: Space.xs) {
             Text(AppVersion.display)
                 .font(.system(size: 11, weight: .regular).monospacedDigit())
                 .foregroundStyle(Theme.textTertiary)
                 .accessibilityLabel(Text("版本 \(AppVersion.short ?? "未知")"))
 
-            Spacer(minLength: 8)
+            Spacer(minLength: Space.m)
 
             IconButtonView(systemName: "link", label: "连接列表", iconSize: 13) {
                 onOpenConnections()

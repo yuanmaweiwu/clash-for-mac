@@ -26,6 +26,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        #if DEBUG
+        // 截图走查：设了 CLASH_PREVIEW_PAGE 就只摆夹具窗口，不创建状态栏 / 内核
+        if UIPreviewHarness.runIfRequested() { return }
+        #endif
         installMainMenu()
         let environment = AppEnvironment.shared
         statusItemController = StatusItemController(model: environment.model, panel: environment.panel)

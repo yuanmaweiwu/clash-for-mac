@@ -10,17 +10,17 @@ struct StatusStripView: View {
     let upText: String
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Space.s) {
             StatusDotView(status: status)
 
             Text(status.title)
                 .font(Typography.status)
                 .foregroundStyle(Theme.textPrimary)
 
-            Spacer(minLength: 8)
+            Spacer(minLength: Space.m)
 
             if showsRates && status.hasLiveRates {
-                HStack(spacing: 10) {
+                HStack(spacing: Space.m) {
                     RateReadoutView(arrow: "arrow.up", value: upText, tint: Theme.trafficUp)
                     RateReadoutView(arrow: "arrow.down", value: downText, tint: Theme.trafficDown)
                 }

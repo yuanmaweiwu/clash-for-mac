@@ -60,19 +60,19 @@ struct GroupCardView: View {
 
     private var header: some View {
         Button(action: onOpen) {
-            HStack(spacing: 4) {
+            HStack(spacing: Space.xs) {
                 Text(group.name)
                     .font(Typography.title)
                     .foregroundStyle(Theme.textPrimary)
 
-                Spacer(minLength: 6)
+                Spacer(minLength: Space.s)
 
                 Text(headerTrailingText)
                     .font(Typography.caption)
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .frame(maxWidth: 120, alignment: .trailing)
+                    .frame(maxWidth: 132, alignment: .trailing)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(Theme.textTertiary)

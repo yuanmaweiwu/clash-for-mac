@@ -16,10 +16,11 @@ struct NodeRowView: View {
     var pillInsetV: CGFloat?
     let action: () -> Void
 
+    @Environment(\.isPressed) private var isPressed
     @State private var isHovering = false
     @FocusState private var isFocused: Bool
 
-    private var showsPill: Bool { isSelected || isHovering }
+    private var showsPill: Bool { isSelected || isHovering || isPressed }
 
     var body: some View {
         Button(action: action) {
@@ -45,7 +46,7 @@ struct NodeRowView: View {
     }
 
     private var rowContent: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Space.s) {
             LatencyDotView(state: node.delayState)
 
             Text(node.name)
@@ -54,7 +55,7 @@ struct NodeRowView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
 
-            Spacer(minLength: 6)
+            Spacer(minLength: Space.s)
 
             if isTesting {
                 ProgressView()
@@ -74,7 +75,7 @@ struct NodeRowView: View {
         .background {
             if showsPill {
                 RoundedRectangle(cornerRadius: Metrics.radiusRow, style: .continuous)
-                    .fill(isSelected ? Theme.rowSelected : Theme.rowHover)
+                    .fill(isSelected ? Theme.rowSelected : (isPressed ? Theme.cardPressed : Theme.rowHover))
                     .padding(.horizontal, Metrics.pillInsetH)
                     .padding(.vertical, pillInsetV ?? Metrics.pillInsetV)
             }

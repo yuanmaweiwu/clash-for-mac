@@ -12,8 +12,8 @@ import SwiftUI
 @MainActor
 final class PanelWindowController: NSObject, NSWindowDelegate {
     fileprivate static let logger = Logger(subsystem: "com.clash.app", category: "panel")
-    /// 内容高度上限（`docs/02-UI-SPEC.md` §3.2：双卡满态 642，留 14pt 余量）
-    private static let maximumHeight: CGFloat = 656
+    /// 内容高度上限（`docs/02-UI-SPEC.md` §3.2：双卡满态 678，留 2pt 余量）
+    private static let maximumHeight: CGFloat = Metrics.panelHeightMax
     /// 空态最小高（§3.2）
     private static let minimumHeight: CGFloat = 240
     /// 面板与菜单栏的间距

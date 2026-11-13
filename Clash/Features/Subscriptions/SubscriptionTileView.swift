@@ -66,7 +66,7 @@ struct SubscriptionTileView: View {
         HStack(spacing: 4) {
             if let expiry = content.expiryText {
                 Text(expiry)
-                    .font(Typography.micro)
+                    .font(Typography.caption)
                     .foregroundStyle(content.isExpired ? Theme.error : Theme.textSecondary)
                     .lineLimit(1)
             }
@@ -75,7 +75,7 @@ struct SubscriptionTileView: View {
 
             if let quotaText {
                 Text(quotaText)
-                    .font(Typography.numberSmall)
+                    .font(Typography.captionNumber)
                     .foregroundStyle(usageColors(fraction ?? 0).text)
                     .lineLimit(1)
                     .fixedSize()
@@ -108,7 +108,7 @@ struct SubscriptionTileView: View {
 
     private var countBadge: some View {
         Text("\(content.badgeCount)")
-            .font(Typography.numberSmall)
+            .font(Typography.captionNumber)
             .foregroundStyle(Theme.textSecondary)
             .padding(.horizontal, 4)
             .frame(minWidth: 16, minHeight: 14)
@@ -145,7 +145,7 @@ struct SubscriptionTileView: View {
 private func tilePreviewCell(_ title: String, _ content: SubscriptionTileContent) -> some View {
     VStack(alignment: .leading, spacing: 4) {
         Text(title)
-            .font(Typography.micro)
+            .font(Typography.caption)
             .foregroundStyle(Theme.textSecondary)
         SubscriptionTileView(content: content) {}
     }

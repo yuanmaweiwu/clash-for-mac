@@ -13,8 +13,8 @@ struct TrafficCardView: View {
     let upSeries: [Double]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: Space.xs) {
+            HStack(spacing: Space.m) {
                 Text("流量")
                     .font(Typography.section)
                     .foregroundStyle(Theme.textSecondary)
@@ -43,7 +43,7 @@ struct TrafficCardView: View {
             .accessibilityLabel("实时流量")
             .accessibilityValue(accessibilityValue)
         }
-        .padding(Metrics.cardPadding)
+        .padding(Metrics.chartPadding)
         .frame(height: Metrics.chartCardHeight, alignment: .top)
         .background {
             RoundedRectangle(cornerRadius: Metrics.radiusCard, style: .continuous)
@@ -56,7 +56,7 @@ struct TrafficCardView: View {
     }
 
     private func legendDot(_ color: Color, label: LocalizedStringKey) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Space.hair + 2) {
             Circle()
                 .fill(color)
                 .frame(width: 6, height: 6)
