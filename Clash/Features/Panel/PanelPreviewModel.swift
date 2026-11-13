@@ -53,6 +53,20 @@ final class PanelPreviewModel {
     /// 我们是否正在接管系统代理（快照存在且未还原）
     var isSystemProxyOn: Bool { systemProxy.isEnabled }
 
+    /// 连接磁贴实际展示的状态：`.on` / `.off` 以系统代理真实开关为准。
+    ///
+    /// TUN 与系统代理互斥，TUN 开启会在 `TunService` 里直接关掉系统代理；这条路径
+    /// 不经过本模型的 `connectionState`，所以磁贴必须以 `systemProxy.isEnabled` 为准，
+    /// 否则会一直显示「已开启」。过渡 / 失败态保留原值。
+    var connectionTileState: ConnectionState {
+        switch connectionState {
+        case .turningOn, .turningOff, .failed(_):
+            return connectionState
+        case .on, .off:
+            return systemProxy.isEnabled ? .on : .off
+        }
+    }
+
     /// 内核当前模式（`GET /configs` 为准）
     var mode: ProxyMode { proxies.mode }
 
@@ -67,6 +81,10 @@ final class PanelPreviewModel {
     var route: PanelRoute = .root
 
     // MARK: 分组与订阅
+
+    /// 策略组快照是否已过期：内核停止 / 失败时**保留最后一次快照**（面板不塌、不闪），
+    /// 只置这个标记；重新 `running` 并刷新成功后才清掉。
+    private(set) var isGroupDataStale = false
 
     /// 首屏 / 列表用的策略组（不含 `GLOBAL`），来自内核
     var groups: [ProxyGroupModel] { proxies.groups }
@@ -232,19 +250,25 @@ final class PanelPreviewModel {
         case .running:
             proxyRefreshTask?.cancel()
             proxyRefreshTask = Task { [weak self] in
-                await self?.proxies.refresh()
+                guard let self else { return }
+                // 回退判断只在**成功刷新之后**做：刷新前先动路由，只会把用户从
+                // 还在的页面打回首层（内核重启 = 订阅更新 / 开关 TUN 的必经路径）
+                guard await self.proxies.refresh() else { return }
+                guard !Task.isCancelled else { return }
+                self.isGroupDataStale = false
+                self.pruneRouteIfTargetMissing()
             }
             // 内核 running（含重启后新端口 / 新 secret）：重建 `/traffic` 连接
             traffic.start()
         case .stopped, .failed:
-            // 组数据作废：二级页的目标可能已经不在了，先回首层，避免空白面板
+            // 相位变化不再清空策略组、不再重置路由：开关代理 / TUN / 更新订阅都会
+            // 让内核 stop → start，清空只会让面板在开关瞬间塌成空态再长回来。
+            // 保留最后一次快照，标记过期；`running` 后由 refresh 覆盖。
             proxyRefreshTask?.cancel()
-            proxies.clear()
+            isGroupDataStale = true
             traffic.stop()
             connections.stopPolling()
             connections.clear()
-            selectedGroupID = nil
-            route = .root
             if phase == .failed {
                 // 内核异常退出：先撤系统代理，不能让用户对着死内核被代理
                 restoreProxyAfterKernelFailure()
@@ -252,6 +276,19 @@ final class PanelPreviewModel {
         case .starting:
             break
         }
+    }
+
+    /// 路由指向的对象真的没了才回退（例如 `.nodes(id)` 的组在新一次刷新后消失）。
+    ///
+    /// 订阅 / 设置 / 连接列表 / 全部策略组与内核相位无关，一律不动。
+    private func pruneRouteIfTargetMissing() {
+        if let selectedGroupID,
+           !proxies.allGroups.contains(where: { $0.id == selectedGroupID }) {
+            self.selectedGroupID = nil
+        }
+        guard case .nodes(let id) = route else { return }
+        guard !proxies.allGroups.contains(where: { $0.id == id }) else { return }
+        popToRoot()
     }
 
     // MARK: - App 启动 / 内核生命周期
@@ -503,6 +540,10 @@ final class PanelPreviewModel {
 
         await kernel.stop()
         profiles.forgetAllAfterCleanup()
+        // 配置正文已删：策略组快照必须一起作废，否则面板还挂着上一份配置的卡片
+        proxies.clear()
+        isGroupDataStale = false
+        pruneRouteIfTargetMissing()
 
         let fileManager = FileManager.default
         let targets: [(String, URL)] = [
@@ -804,6 +845,12 @@ final class PanelPreviewModel {
 
     /// 库空了：先撤系统代理（撤不干净就保留内核，避免代理指向死端口），再停内核
     private func stopKernelForProfileChange() {
+        // 配置全被删了：快照不再对应任何配置，这里必须清空（这不是「内核查相位变化」，
+        // 而是路由 / 分组指向的对象真的不存在了）
+        proxies.clear()
+        isGroupDataStale = false
+        pruneRouteIfTargetMissing()
+
         if tun.isHelperKernelRunning {
             Task { [weak self] in await self?.tun.disable() }
             return

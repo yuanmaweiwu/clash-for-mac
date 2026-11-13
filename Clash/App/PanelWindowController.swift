@@ -1,5 +1,6 @@
 import AppKit
 import OSLog
+import QuartzCore
 import SwiftUI
 
 /// 面板窗口（`docs/adr/0011`）：自建 `NSPanel` 承载同一份 `PanelView`。
@@ -122,21 +123,44 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
         let oldHeight = panel.frame.height
 
         // 兜底：`NSHostingView` 多数时候已经按内容极值把窗口改好了，没改到时我们自己改
-        if abs(oldHeight - height) > 0.5 {
-            var frame = panel.frame
-            // 顶边不动，只把底边往上/下推
-            frame.origin.y = frame.maxY - height
-            frame.size.height = height
-            panel.setFrame(frame, display: true)
-            Self.logger.debug(
-                "窗口高度 \(oldHeight, format: .fixed(precision: 1), privacy: .public) → \(height, format: .fixed(precision: 1), privacy: .public)（面板自己调整）"
-            )
-            clampToScreen()
+        guard abs(oldHeight - height) > 0.5 else {
+            // 尺寸没变也要补一次：`NSHostingView` 会在 SwiftUI 布局过程中按内容极值
+            // 直接改窗口尺寸，那一次改动不会再驱动一轮完整布局，内容就停在旧尺寸的
+            // 绘制结果上（订阅页 496 → 642 后整块空白的根因）。
+            syncHostingLayout()
+            return
         }
 
-        // 尺寸没变也要补一次：`NSHostingView` 会在 SwiftUI 布局过程中按内容极值
-        // 直接改窗口尺寸，那一次改动不会再驱动一轮完整布局，内容就停在旧尺寸的
-        // 绘制结果上（订阅页 496 → 642 后整块空白的根因）。
+        // 顶边不动，只把底边往上/下推
+        var frame = panel.frame
+        frame.origin.y = frame.maxY - height
+        frame.size.height = height
+
+        // 先把目标位置夹进屏幕：动画结束后再夹会打断正在跑的窗口动画
+        if let visible = (panel.screen ?? NSScreen.main)?.visibleFrame {
+            frame.origin.y = max(frame.origin.y, visible.minY + Self.screenInset)
+        }
+
+        // 高度变化（pin 切换 / 二级页）用动画过渡，避免整块面板瞬间跳高跳矮。
+        // Reduce Motion 下直接到位。
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            panel.setFrame(frame, display: true)
+            clampToScreen()
+        } else {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.18
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().setFrame(frame, display: true)
+            } completionHandler: { [weak self] in
+                Task { @MainActor in self?.clampToScreen() }
+            }
+        }
+
+        Self.logger.debug(
+            "窗口高度 \(oldHeight, format: .fixed(precision: 1), privacy: .public) → \(height, format: .fixed(precision: 1), privacy: .public)"
+        )
+
+        // 布局对齐放在动画启动之后：内容按最终尺寸排一次，动画只负责窗口边框
         syncHostingLayout()
     }
 
@@ -169,7 +193,9 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
     private func contentSize() -> NSSize {
         hostingView.layoutSubtreeIfNeeded()
         let fittingHeight = hostingView.fittingSize.height
-        let height = fittingHeight > 0 ? fittingHeight : Metrics.panelHeight
+        // 测不到极值（过渡帧 / 空树）时沿用当前高度：回落到 642 会让面板瞬间跳高
+        let fallbackHeight = panel.frame.height > 0 ? panel.frame.height : Metrics.panelHeight
+        let height = fittingHeight > 0 ? fittingHeight : fallbackHeight
         return NSSize(
             width: Metrics.panelWidth,
             height: min(max(height, Self.minimumHeight), Self.maximumHeight)

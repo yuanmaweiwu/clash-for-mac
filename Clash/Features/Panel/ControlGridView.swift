@@ -8,7 +8,7 @@ struct ControlGridView: View {
     var body: some View {
         VStack(spacing: Metrics.tileGap) {
             HStack(spacing: Metrics.tileGap) {
-                ConnectionTileView(state: model.connectionState) {
+                ConnectionTileView(state: model.connectionTileState) {
                     model.toggleConnection()
                 }
                 .disabled(model.isConnectionBusy)

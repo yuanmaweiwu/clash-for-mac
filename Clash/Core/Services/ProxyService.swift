@@ -50,19 +50,20 @@ final class ProxyService {
     /// 拉 `/proxies` + `/configs`：策略组、选中项、延迟、模式一起对齐。
     ///
     /// 内核 `running` 后调用；并发调用会被合并（`isRefreshing` 守卫）。
-    func refresh() async {
-        guard !isRefreshing else { return }
-        guard let client = apiClient() else {
-            clear()
-            return
-        }
+    /// - Returns: 是否成功拿到 `/proxies`。调用方据此决定「组消失后回退路由」这类动作。
+    @discardableResult
+    func refresh() async -> Bool {
+        guard !isRefreshing else { return false }
+        guard let client = apiClient() else { return false }
 
         isRefreshing = true
         defer { isRefreshing = false }
 
+        var loaded = false
         do {
             apply(proxies: try await client.proxies())
             lastError = nil
+            loaded = true
         } catch {
             lastError = Self.message(for: error)
         }
@@ -71,6 +72,7 @@ final class ProxyService {
         if let snapshot = try? await client.configs(), let synced = snapshot.proxyMode {
             mode = synced
         }
+        return loaded
     }
 
     /// 内核停止 / 失败：清空组数据，面板回到空态
