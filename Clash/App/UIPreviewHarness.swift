@@ -125,7 +125,10 @@ enum UIPreviewHarness {
             )
 
         default:
-            let model = PanelPreviewModel(autoStartsKernel: false)
+            let model = PanelPreviewModel(
+                settings: previewSettings(environment: environment),
+                autoStartsKernel: false
+            )
             model.applyPreviewGroups()
             if page == "connections" {
                 model.applyPreviewConnections()
@@ -138,6 +141,20 @@ enum UIPreviewHarness {
             }
             return model
         }
+    }
+
+    /// `CLASH_PREVIEW_SETTINGS=custom-fields`：设置页要能看见「自定义 UA / 镜像前缀」两个输入框。
+    /// 用临时文件建一份设置，不读写用户配置。
+    private static func previewSettings(environment: [String: String]) -> SettingsStore? {
+        guard environment["CLASH_PREVIEW_SETTINGS"] == "custom-fields" else { return nil }
+        let url = URL.temporaryDirectory.appending(
+            path: "clash-preview-settings-\(UUID().uuidString).json"
+        )
+        let settings = SettingsStore(fileURL: url)
+        settings.subscriptionUserAgent = "ClashMetaForAndroid/2.10.1"
+        settings.kernelDownloadMode = .custom
+        settings.customMirrorPrefix = "https://gh-proxy.com/"
+        return settings
     }
 
     private static func applyRoute(_ page: String, to model: PanelPreviewModel) {
@@ -181,7 +198,14 @@ enum UIPreviewHarness {
 
     // MARK: - 摆窗与坐标
 
+    /// `CLASH_PREVIEW_INTERACTIVE=1`：夹具窗口接受点击与键盘焦点（用来验证 hover / 聚焦描边），
+    /// 默认不抢 key，截图里不会有焦点环。
+    private static var wantsInteraction: Bool {
+        ProcessInfo.processInfo.environment["CLASH_PREVIEW_INTERACTIVE"] == "1"
+    }
+
     private static func present(_ view: NSView, size: NSSize, name: String, titled: Bool = false) {
+        let interactive = !titled && wantsInteraction
         let window: NSWindow
         if titled {
             // 日志是独立系统窗口：要带标题栏与窗口底色，才能看到真实的窗口观感
@@ -206,6 +230,7 @@ enum UIPreviewHarness {
             panel.hasShadow = false
             panel.level = .floating
             panel.isReleasedWhenClosed = false
+            panel.acceptsKey = interactive
             window = panel
         }
         window.contentView = view
@@ -218,12 +243,20 @@ enum UIPreviewHarness {
             x: visible.minX + screenInset,
             y: visible.maxY - screenInset - frame.height
         ))
-        window.orderFrontRegardless()
+        if interactive {
+            // 交互走查：窗口拿 key，输入框才可能成为第一响应者
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate()
+        } else {
+            window.orderFrontRegardless()
+        }
         windows.append(window)
 
-        // 让 App 回到「非活动」：截图里不会出现系统给首个可聚焦控件画的焦点环。
-        // 面板材质 `state = .active`，配色不随窗口激活状态变化。
-        NSApp.deactivate()
+        if !interactive {
+            // 让 App 回到「非活动」：截图里不会出现系统给首个可聚焦控件画的焦点环。
+            // 面板材质 `state = .active`，配色不随窗口激活状态变化。
+            NSApp.deactivate()
+        }
 
         let screenHeight = screen?.frame.height ?? visible.height
         let windowFrame = window.frame
@@ -235,10 +268,11 @@ enum UIPreviewHarness {
     }
 }
 
-/// 悬浮夹具窗口：不抢 key，截图里不会出现焦点环
+/// 悬浮夹具窗口：默认不抢 key，截图里不会出现焦点环；交互走查时（`CLASH_PREVIEW_INTERACTIVE=1`）才接受点击
 private final class PreviewPanel: NSPanel {
-    override var canBecomeKey: Bool { false }
-    override var canBecomeMain: Bool { false }
+    var acceptsKey = false
+    override var canBecomeKey: Bool { acceptsKey }
+    override var canBecomeMain: Bool { acceptsKey }
 }
 
 /// 日志预览的固定内容：覆盖 info / warning / error 与长行换行
