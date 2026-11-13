@@ -11,9 +11,10 @@ description: "Clash 内核（mihomo）相关工作的唯一约定源：二进制
 ## 1. 二进制与版本策略
 
 - 来源：上游 `MetaCubeX/mihomo` 的 **latest release**（用户已确认「取上游最新」）
-- 上游**不提供** `darwin-universal` 资产 → 脚本分别取 `darwin-arm64-<tag>.gz` 与 `darwin-amd64-<tag>.gz`，用 `lipo -create` 合成通用二进制（排除 `-go1xx` / `-compatible` / `-v2` / `-v3` 变体）
-- 获取脚本：`Scripts/fetch-kernel.sh`（下载 → 解压 → lipo → 写 `Resources/Kernel/VERSION`、`SHA256`）；已实测 v1.19.34 产出 `x86_64 arm64`
-- **二进制不入库**（通用约 115MB）：`.gitignore` 忽略，`VERSION` / `SHA256` 入库；构建前必须先跑脚本
+- **仅 arm64**（Apple Silicon）：脚本取 `mihomo-darwin-arm64-<tag>.gz`（排除 `-go1xx` 变体），**不做** x86_64 / universal
+- 获取脚本：`Scripts/fetch-kernel.sh`（下载 → 解压 → 校验 `lipo -archs == arm64` → 写 `VERSION`、`SHA256`）；已实测 v1.19.34
+- **二进制不入库**（约 57MB）：`.gitignore` 忽略，`VERSION` / `SHA256` 入库；构建前必须先跑脚本
+- 工程侧 `ARCHS = arm64`；运行期检测到 `x86_64` 直接报不支持，不做降级
 - 每次发布前必须记录当时版本与 sha256；升级内核 = 单独一条 commit（`升级 `mihomo` 内核到 vX.Y.Z`）
 - 签名：与应用同 profile、Hardened Runtime；helper spawn 前先校验 `codesign` 与 bundle 路径，不通过直接失败并给错误码
 - GPL-3.0：`Resources/Kernel/LICENSE` 与源码地址随包分发

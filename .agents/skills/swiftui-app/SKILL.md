@@ -25,7 +25,8 @@ description: "本仓库（Clash，SwiftUI macOS 原生应用）总入口与路�
 | 最低 macOS | **macOS 15 Sequoia**（`docs/adr/0002`） | 已定 |
 | Swift / Xcode | Swift 6 语言模式；Xcode 16+（以实机版本为准） | 已定 |
 | 工程形态 | `.xcodeproj` 手写入库；target = App / Helper / Tests（`docs/adr/0003`） | 已定 |
-| 内核 | 自带 `mihomo` 二进制，helper 以子进程管理（`docs/adr/0001`、`0004`） | 已定 |
+| 内核 | 自带 `mihomo` 二进制（**仅 arm64**），helper 以子进程管理（`docs/adr/0001`、`0004`） | 已定 |
+| 架构 | **arm64 only**（Apple Silicon）；不支持 x86_64，不做 universal | 已定 |
 | 配置生成 | 解析原 YAML → 覆盖顶层键 → 写 `runtime/`，**绝不改写用户配置** | 已定 |
 | 持久化 | 设置 JSON（`Codable` + 原子写）+ 配置 YAML 文件；**不用 SwiftData/GRDB** | 已定 |
 | 第三方依赖 | 仅 `Yams`（YAML 解析）；Sparkle 到 v1.0 再接 | 已定 |

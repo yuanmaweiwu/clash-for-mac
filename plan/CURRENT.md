@@ -17,7 +17,7 @@
 - [x] ADR 0001–0005（自带内核 / macOS 15 / 手写 xcodeproj / TUN 与 helper 进 v1 / Yams 定案）
 - [x] 依赖定案：`Yams` 为唯一第三方解析库，Sparkle 到 v1.0；界面中文为主、预留本地化
 - [x] 技能补齐：`core-process`（内核/API/TUN）、`menubar-ui`（状态栏/浮层）
-- [x] 内核获取：`Scripts/fetch-kernel.sh` 取上游 latest + lipo 合成通用二进制；已实测 v1.19.34（x86_64+arm64）
+- [x] 内核获取：`Scripts/fetch-kernel.sh` 取上游 latest arm64；已实测 v1.19.34（arm64，57MB）
 
 ## 进行中
 
@@ -33,7 +33,7 @@
 ## 关键上下文（续作必读）
 
 - 分支 `test`；remote 为内网 Gitea（`http://内网地址:3000/Clash/Clash.git`）
-- 已定：macOS 15+ / Swift 6 / `.xcodeproj` 手写 / 自带 mihomo / v1 含 TUN / 设置 JSON + 配置 YAML
+- 已定：macOS 15+ / **仅 arm64** / Swift 6 / `.xcodeproj` 手写 / 自带 mihomo / v1 含 TUN / 设置 JSON + 配置 YAML
 - 架构要点：**helper（root）是内核与系统写操作的唯一持有者**；App 只通过 XPC + mihomo HTTP/WS 通信
 - 配置原则：用户 YAML 永不改写，注入只进 `runtime/`
 - 构建命令已写入 `.agents/skills/swiftui-app/SKILL.md` §6（工程创建后需实测修正）

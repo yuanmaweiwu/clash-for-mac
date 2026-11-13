@@ -15,10 +15,10 @@
 
 ## v0.1 骨架与内核
 
-- [ ] Xcode 工程：App target（`LSUIElement`）+ Helper target（LaunchDaemon）+ Shared 模块
+- [ ] Xcode 工程：App target（`LSUIElement`）+ Helper target（LaunchDaemon）+ Shared 模块；`ARCHS = arm64`
 - [ ] 菜单栏图标：未运行/运行中两态，点击开浮层
 - [ ] 面板外壳：固定宽度、毛玻璃底、空态文案
-- [ ] 内置 mihomo 二进制随包；版本号展示
+- [ ] 内置 mihomo（arm64）随包 + 由脚本生成；版本号展示
 - [ ] Helper 安装引导（`SMAppService`）+ XPC 心跳
 - [ ] 内核 start/stop，状态机与失败原因
 - [ ] `GET /version` 打通，显示内核版本
