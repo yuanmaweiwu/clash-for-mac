@@ -1,9 +1,12 @@
 import SwiftUI
 
-/// 订阅磁贴（§4.2）：纯导航，四行 = 标题 / 名称 / 用量 / 到期。
+/// 订阅磁贴（§4.2）：纯导航。153×64，内容区 133pt。
 ///
-/// 排版（153×64，内容区 133pt）：13 标题 15.3 + 11 名称 13.0 + 10 用量 11.8 + 9 到期 10.6，
-/// 行距 2 × 3 = 6，合计 56.7pt，上下各留 3.7 —— 固定高度不随内容变。
+/// 排布（用户口径，2026-11）：
+/// - 左上：当前激活的 profile 名（单行尾部截断）；右上：库内条数徽标（> 1 才有）
+/// - 底部：`到期（9pt）` 左、`用量（10pt 等宽）` 右，同一行
+/// - 最下：满宽度 3pt 用量条（左右各 10pt 内边距内）
+/// - 缺 `expire` → 左侧留白，用量照常右对齐；缺用量 → 只留商家名；空库 → 只显示「未添加」
 ///
 /// 用量条是**数据可视化**（§8.5 的例外）：3pt、`surface/track` + `accent`，
 /// 只做辅助判断，数字永远同时给出，不靠颜色或长度单独承载信息。
@@ -12,80 +15,76 @@ struct SubscriptionTileView: View {
     let content: SubscriptionTileContent
     let action: () -> Void
 
-    /// 行距 2pt：四行加起来才塞得进 64pt
-    private static let rowSpacing: CGFloat = 2
+    /// 卡片上下呼吸区：10pt（与左右内边距同值，四边留白一致）
+    private static let verticalInset: CGFloat = Metrics.cardPadding
+    /// 用量行与条之间的间距
+    private static let meterSpacing: CGFloat = 4
 
     var body: some View {
         TileShell(label: "订阅", value: content.accessibilityValue, action: action) {
-            VStack(alignment: .leading, spacing: Self.rowSpacing) {
-                titleRow
+            VStack(alignment: .leading, spacing: 0) {
                 nameRow
 
-                if let quotaText = content.quotaText, let fraction = content.usageFraction {
-                    quotaRow(quotaText, fraction: fraction)
-                }
+                Spacer(minLength: 2)
 
-                if let expiry = content.expiryText {
-                    Text(expiry)
-                        .font(Typography.micro)
-                        .foregroundStyle(content.isExpired ? Theme.error : Theme.textSecondary)
-                        .lineLimit(1)
+                if let quotaText = content.quotaText, let fraction = content.usageFraction {
+                    metaRow(quotaText, fraction: fraction)
+                    meter(fraction, fill: usageColors(fraction).fill)
+                        .padding(.top, Self.meterSpacing)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, Self.verticalInset)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .accessibilityHint(Text("按下打开订阅管理"))
     }
 
-    // MARK: - 四行
+    // MARK: - 行
 
-    /// 第 1 行：标题 + 右上角条数徽标（同一行，避免和密集内容抢位置）
-    private var titleRow: some View {
+    /// 第 1 行：商家名 + 右上角条数徽标（徽标不吃名字的宽度优先级）
+    private var nameRow: some View {
         HStack(spacing: 4) {
-            Text("订阅")
+            Text(content.name ?? "未添加")
                 .font(Typography.body)
-                .foregroundStyle(Theme.textPrimary)
+                .foregroundStyle(content.name == nil ? Theme.textSecondary : Theme.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
             Spacer(minLength: 4)
+
             if content.badgeCount > 1 {
                 countBadge
             }
         }
     }
 
-    /// 第 2 行：当前激活的 profile 名（中间截断，保留首尾便于辨认机场）
-    private var nameRow: some View {
-        HStack(spacing: 3) {
-            Text(content.name ?? "未添加")
-                .font(Typography.caption)
-                .foregroundStyle(Theme.textSecondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Image(systemName: "chevron.right")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(Theme.textTertiary)
-        }
-    }
+    /// 第 2 行：左到期 / 右用量。缺 `expire` 时左侧留白，用量仍然右对齐。
+    private func metaRow(_ quotaText: String, fraction: Double) -> some View {
+        HStack(spacing: 4) {
+            if let expiry = content.expiryText {
+                Text(expiry)
+                    .font(Typography.micro)
+                    .foregroundStyle(content.isExpired ? Theme.error : Theme.textSecondary)
+                    .lineLimit(1)
+            }
 
-    /// 第 3 行：用量数字 + 3pt 条（数字在左，条吃满剩余宽度）
-    private func quotaRow(_ text: String, fraction: Double) -> some View {
-        let colors = usageColors(fraction)
-        return HStack(spacing: 6) {
-            Text(text)
+            Spacer(minLength: 4)
+
+            Text(quotaText)
                 .font(Typography.numberSmall)
-                .foregroundStyle(colors.text)
+                .foregroundStyle(usageColors(fraction).text)
                 .lineLimit(1)
                 .fixedSize()
-
-            meter(fraction, fill: colors.fill)
         }
     }
 
     // MARK: - 用量条与配色
 
-    /// 3pt 用量条：track `surface/track`，fill 按用量转 warning / error
+    /// 满宽度 3pt 用量条：track `surface/track`，fill 按用量转 warning / error，长度按 100% 封顶
     private func meter(_ fraction: Double, fill: Color) -> some View {
         Capsule(style: .continuous)
             .fill(Theme.track)
+            .frame(maxWidth: .infinity)
             .frame(height: Metrics.tileMeterHeight)
             .overlay(alignment: .leading) {
                 Capsule(style: .continuous)
@@ -95,7 +94,7 @@ struct SubscriptionTileView: View {
             .accessibilityHidden(true)
     }
 
-    /// 用量色阶（§4.2）：≥100% `error`，>90% `warning`，其余 `accent`
+    /// 用量色阶（§4.2）：≥100% `error`，>90% `warning`，其余 `accent` / 正文色
     private func usageColors(_ fraction: Double) -> (fill: Color, text: Color) {
         if fraction >= 1 { return (Theme.error, Theme.error) }
         if fraction > 0.9 { return (Theme.warning, Theme.warning) }
@@ -104,8 +103,7 @@ struct SubscriptionTileView: View {
 
     private var countBadge: some View {
         Text("\(content.badgeCount)")
-            .font(.system(size: 10, weight: .medium))
-            .monospacedDigit()
+            .font(Typography.numberSmall)
             .foregroundStyle(Theme.textSecondary)
             .padding(.horizontal, 4)
             .frame(minWidth: 16, minHeight: 14)
@@ -118,7 +116,7 @@ struct SubscriptionTileView: View {
 }
 
 #if DEBUG
-// 五种状态夹具：正常 / 快用尽 / 已过期 / 真实订阅（机场A：100.4/128 GB，无 expire）/ 未导入。
+// 五种状态夹具：正常 / 快用尽 / 已过期 / 真实订阅（机场A：100.8/128 GB，无 expire）/ 未导入。
 // 全部走生产的 `tileContent` 格式化，不是手写的假字符串。
 #Preview("订阅磁贴 · 五种状态") {
     Grid(alignment: .leading, horizontalSpacing: Metrics.tileGap, verticalSpacing: 10) {
@@ -128,7 +126,7 @@ struct SubscriptionTileView: View {
         }
         GridRow {
             tilePreviewCell("已过期", tilePreviewContent(download: 128_000_000_000, expireOffset: -10 * 86_400))
-            tilePreviewCell("机场A · 无到期", tilePreviewContent(download: 107_803_679_130, expireOffset: nil))
+            tilePreviewCell("机场A · 无到期", tilePreviewContent(download: 108_233_273_344, expireOffset: nil))
         }
         GridRow {
             tilePreviewCell("未导入", .empty)

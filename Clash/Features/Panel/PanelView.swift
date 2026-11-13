@@ -171,12 +171,6 @@ struct PanelView: View {
                 .disabled(model.isGroupDisabled)
 
             FooterView(
-                // 底栏时间取自 active 订阅的 updatedAt；没订阅才写「未导入配置」
-                updatedText: model.footerUpdatedText,
-                // v0.2：换成 /connections 的真实连接数
-                connectionCount: nil,
-                kernelVersion: model.kernelVersion,
-                onRefresh: { model.refreshProfile() },
                 onOpenConnections: { model.openConnections() },
                 onOpenSettings: { model.openSettingsPage() }
             )
