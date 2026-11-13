@@ -8,7 +8,7 @@ struct LogRowView: View {
     let line: LogLine
 
     var body: some View {
-        HStack(alignment: .top, spacing: 6) {
+        HStack(alignment: .top, spacing: Space.s) {
             Text(LogWindowMetrics.timeFormatter.string(from: line.date))
                 .font(.system(size: 12).monospaced())
                 .foregroundStyle(Theme.textTertiary)
@@ -24,6 +24,7 @@ struct LogRowView: View {
 
             Text(line.payload)
                 .font(.system(size: 12).monospaced())
+                .lineSpacing(2)
                 .foregroundStyle(Theme.textPrimary)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
@@ -37,10 +38,10 @@ struct LogRowView: View {
 /// 日志窗口的几何与格式化常量
 @MainActor
 enum LogWindowMetrics {
-    /// 工具行（§3.2 状态条同高）
-    static let toolbarHeight: CGFloat = 36
+    /// 工具行：比面板状态条高一档，独立窗口里更稳
+    static let toolbarHeight: CGFloat = 44
     /// 提示条（暂停 / 断连）
-    static let noticeHeight: CGFloat = 20
+    static let noticeHeight: CGFloat = 24
     /// 距底部多少算「贴底」：在此范围内继续自动跟随
     static let tailSnapDistance: CGFloat = 40
     /// `HH:mm:ss` 列宽，保证正文左缘对齐（12pt 等宽 8 字符 ≈ 58pt，留 6pt 空隙）

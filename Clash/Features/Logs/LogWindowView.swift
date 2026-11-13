@@ -47,7 +47,7 @@ struct LogWindowView: View {
     // MARK: - 工具行
 
     private var toolbar: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Space.m) {
             ForEach(LogLine.Level.chips, id: \.self) { level in
                 levelChip(level)
             }
@@ -68,7 +68,7 @@ struct LogWindowView: View {
             }
             .accessibilityHint(Text("把当前显示的日志另存为文本文件"))
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, Space.xl)
         .frame(height: LogWindowMetrics.toolbarHeight)
     }
 
@@ -78,17 +78,17 @@ struct LogWindowView: View {
         return Button {
             store.toggleLevel(level)
         } label: {
-            HStack(spacing: 4) {
+            HStack(spacing: Space.s) {
                 Circle()
                     .fill(LogLevelStyle.color(level))
                     .frame(width: 6, height: 6)
 
                 Text(level.title)
-                    .font(.system(size: 11, weight: isSelected ? .medium : .regular))
+                    .font(Typography.caption)
                     .foregroundStyle(isSelected ? Theme.textPrimary : Theme.textSecondary)
             }
-            .padding(.horizontal, 8)
-            .frame(height: 24)
+            .padding(.horizontal, Space.m)
+            .frame(height: 26)
             .background {
                 RoundedRectangle(cornerRadius: Metrics.radiusRow, style: .continuous)
                     .fill(isSelected ? Theme.rowSelected : Color.clear)
@@ -104,7 +104,7 @@ struct LogWindowView: View {
     // MARK: - 提示条
 
     private func noticeRow(_ text: String, isError: Bool = false, showsSpinner: Bool = false) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: Space.s) {
             if showsSpinner {
                 ProgressView()
                     .controlSize(.mini)
@@ -122,7 +122,7 @@ struct LogWindowView: View {
 
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, Space.xl)
         .frame(height: LogWindowMetrics.noticeHeight)
         .accessibilityElement(children: .combine)
     }
@@ -142,13 +142,13 @@ struct LogWindowView: View {
     private var logList: some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical) {
-                LazyVStack(alignment: .leading, spacing: 2) {
+                LazyVStack(alignment: .leading, spacing: Space.xs) {
                     ForEach(store.visibleLines) { line in
                         LogRowView(line: line)
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.horizontal, Space.xl)
+                .padding(.vertical, Space.l)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .onScrollGeometryChange(for: Bool.self) { geometry in
@@ -175,18 +175,18 @@ struct LogWindowView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: Space.m) {
             Image(systemName: "text.alignleft")
                 .font(.system(size: 24, weight: .regular))
                 .foregroundStyle(Theme.textTertiary)
                 .accessibilityHidden(true)
 
             Text("暂无日志")
-                .font(.system(size: 13))
+                .font(Typography.body)
                 .foregroundStyle(Theme.textSecondary)
 
             Text("内核运行后这里会显示输出")
-                .font(.system(size: 11))
+                .font(Typography.caption)
                 .foregroundStyle(Theme.textTertiary)
         }
         .accessibilityElement(children: .combine)
@@ -240,10 +240,10 @@ private struct ToolbarTextButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 12))
+                .font(Typography.body)
                 .foregroundStyle(isHovering ? Theme.textPrimary : Theme.textSecondary)
-                .padding(.horizontal, 8)
-                .frame(height: 28)
+                .padding(.horizontal, Space.m)
+                .frame(height: Metrics.hitTarget)
                 .contentShape(Rectangle())
         }
         .buttonStyle(PressableButtonStyle())
