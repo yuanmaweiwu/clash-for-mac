@@ -97,7 +97,12 @@ struct PanelView: View {
 
     private var rootContent: some View {
         VStack(spacing: 0) {
-            StatusStripView(status: model.status, downText: model.downRateText, upText: model.upRateText)
+            StatusStripView(
+                status: model.status,
+                showsRates: model.showsLiveTraffic,
+                downText: model.downRateText,
+                upText: model.upRateText
+            )
 
             // 顶部 banner：插在状态条正下方，占固定高度，不把面板撑高（§7）
             if let message = model.errorMessage {
@@ -114,7 +119,7 @@ struct PanelView: View {
             ControlGridView(model: model)
 
             TrafficCardView(
-                status: model.status,
+                showsRates: model.showsLiveTraffic,
                 downRate: model.downRate,
                 upRate: model.upRate,
                 downSeries: model.downSeries,
@@ -128,8 +133,10 @@ struct PanelView: View {
                 .disabled(model.isGroupDisabled)
 
             FooterView(
-                updatedText: model.status.hasLiveRates ? model.updatedText : "未更新",
-                connectionCount: model.connectionCount,
+                // v0.1 没导入真实配置、也没接管流量：底栏不宣称「N 分钟前更新」
+                updatedText: model.showsLiveTraffic ? model.updatedText : "未导入配置",
+                // v0.2：换成 /connections 的真实连接数
+                connectionCount: nil,
                 onRefresh: { model.refreshProfile() }
             )
             .padding(.top, Metrics.tileGap)
@@ -162,7 +169,6 @@ private func panelPreviewModel(pinnedFailure: Bool = false, empty: Bool = false)
     if pinnedFailure {
         for index in model.groups.indices { model.groups[index].isPinned = true }
         model.previewFailure()
-        model.systemProxyOn = false
     }
     return model
 }

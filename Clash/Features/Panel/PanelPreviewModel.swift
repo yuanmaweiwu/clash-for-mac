@@ -7,6 +7,20 @@ import Observation
 ///
 /// 视图只和本模型打交道；内核状态在本模型里做一次转发，
 /// 避免 View 直接依赖 `KernelService`。
+///
+/// ## 仍是假数据的字段（下一轮接真实订阅 / 流量）
+///
+/// - `groups` / `activeGroupID` / `isPinned`：策略组与节点（`makeGroups()`，节点延迟是写死的）
+/// - `subscriptions` / `activeSubscriptionID` / `updatingSubscriptionID`：订阅库（`makeSubscriptions()`）
+/// - 节点测速（`testAllNodes` → `finishSpeedTest`）：只改本地数字，没有真的打内核
+/// - 订阅更新 / 重命名 / 删除：只在内存里改，不读写任何文件
+/// - `updatedText` / `refreshProfile()`：底栏「N 分钟前更新」（v0.1 底栏固定显示「未导入配置」）
+/// - `mode`：只改本地状态，还没写进内核配置
+///
+/// **已经是真的**：内核生命周期（`phase` / `lastError`），来自 `KernelService`。
+///
+/// **明确不做假的**：系统代理与 TUN（ADR-0007 决定 v0.1 不接管流量），
+/// 因此没有流量数字、没有波形、没有 TUN 开关态。
 @MainActor
 @Observable
 final class PanelPreviewModel {
@@ -16,9 +30,12 @@ final class PanelPreviewModel {
     /// 真实内核生命周期；`phase` / `errorMessage` 都从这里转发
     @ObservationIgnored private let kernel: KernelService
 
-    var systemProxyOn = true
+    /// v0.1 没有系统代理（ADR-0007）：恒为 `false`，且刻意声明成 `let`。
+    ///
+    /// 没有写入口 ⇒ `status` 在 `running` 时永远走 `guard` 分支返回「已就绪」，
+    /// 「代理中」在 v0.1 结构上不可达。v0.2 接入系统代理后再改成可写状态。
+    let systemProxyOn = false
     var mode: ProxyMode = .rule
-    private(set) var tun: TunState = .on
 
     /// 内核启动失败时的用户文案；真实来源是 `KernelError.userMessage`
     var errorMessage: String? { kernel.lastError?.userMessage }
@@ -43,16 +60,14 @@ final class PanelPreviewModel {
     /// 测速完成后的「刚刚更新」短暂提示
     private(set) var speedResultFlash = false
 
-    var connectionCount = 12
+    /// 底栏「N 分钟前更新」：仍是假数据，且 v0.1 不展示（底栏固定显示「未导入配置」）
     var updatedText = "2 分钟前更新"
-
     private(set) var downRate = DemoTraffic.initialDownRate
     private(set) var upRate = DemoTraffic.initialUpRate
     private(set) var downSeries = DemoTraffic.downSeries
     private(set) var upSeries = DemoTraffic.upSeries
 
     @ObservationIgnored private var transitionTask: Task<Void, Never>?
-    @ObservationIgnored private var tunTask: Task<Void, Never>?
     @ObservationIgnored private var feedTask: Task<Void, Never>?
     @ObservationIgnored private var subscriptionTask: Task<Void, Never>?
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
@@ -79,6 +94,10 @@ final class PanelPreviewModel {
     /// 启动 / 停止过程中：连接磁贴不可再点
     var isKernelBusy: Bool { kernel.isTransitioning }
 
+    /// 状态条文案（§3.3）：v0.1 只有「未运行 / 启动中 / 已就绪 / 启动失败」四种。
+    ///
+    /// `systemProxyOn` 恒为 `false`，所以 `running` 一定返回 `.ready`（已就绪）；
+    /// 「代理中」/「直连」要等 v0.2 系统代理接上之后才可能出现。
     var status: DemoStatus {
         switch phase {
         case .stopped:
@@ -92,6 +111,9 @@ final class PanelPreviewModel {
             return mode == .direct ? .direct : .proxying
         }
     }
+
+    /// 是否真的有流量可以展示：v0.1 没接管流量的通道，一律不显示数字与波形（§4.5 空态）。
+    var showsLiveTraffic: Bool { systemProxyOn && status.hasLiveRates }
 
     var downRateText: String { DemoTraffic.format(rate: downRate) }
     var upRateText: String { DemoTraffic.format(rate: upRate) }
@@ -131,9 +153,7 @@ final class PanelPreviewModel {
         transitionTask = Task { [weak self] in
             guard let self else { return }
             await self.kernel.start()
-            if self.kernel.phase == .running {
-                self.systemProxyOn = true
-            }
+            // v0.1 不设置系统代理：内核起来了只是「已就绪」，不是「代理中」
         }
     }
 
@@ -151,34 +171,9 @@ final class PanelPreviewModel {
     }
 
     // MARK: - TUN 磁贴
-
-    func toggleTun() {
-        switch tun {
-        case .off:
-            tun = .requiresAuth
-            scheduleTunGrant()
-        case .requiresAuth:
-            tun = .waitingAuth
-            scheduleTunGrant()
-        case .waitingAuth:
-            break
-        case .on:
-            tunTask?.cancel()
-            tun = .off
-        case .authFailed:
-            tun = .requiresAuth
-            scheduleTunGrant()
-        }
-    }
-
-    private func scheduleTunGrant() {
-        tunTask?.cancel()
-        tunTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(1.2))
-            guard let self, !Task.isCancelled else { return }
-            self.tun = .on
-        }
-    }
+    //
+    // v0.1 没有 helper / root 权限（ADR-0007），TUN 不可用，也不做假开关：
+    // 磁贴恒为灰态「需要管理员组件」，点击只解释原因（见 `ControlGridView`）。
 
     // MARK: - 导航
 
@@ -347,8 +342,10 @@ final class PanelPreviewModel {
 
     // MARK: - 流量（1Hz 假数据）
 
+    /// v0.1 没接管流量，不跑假数据源：速率与曲线一律走空态。
+    /// v0.2 接/`traffic` 后，把这里换成真实采样再打开。
     private func startTrafficFeed() {
-        guard feedTask == nil else { return }
+        guard systemProxyOn, feedTask == nil else { return }
         feedTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))

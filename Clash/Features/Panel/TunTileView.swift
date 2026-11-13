@@ -1,9 +1,12 @@
 import SwiftUI
 
-/// TUN 磁贴：已关闭 → 需要授权 →（等待授权）→ 已开启，全部本地模拟（§4.2）。
+/// TUN 磁贴：v0.1 **不可用**（ADR-0007：无 root / 无 helper）。
+///
+/// 恒为灰态 + 副标题「需要管理员组件」，点击只解释原因，不做假开关。
+/// v0.2 接入 helper 后再恢复「需要授权 → 等待授权 → 已开启 → 授权失败」五态（§4.2，
+/// 枚举见 `Core/Models/TunState.swift`）。
 @MainActor
 struct TunTileView: View {
-    let state: TunState
     let action: () -> Void
 
     var body: some View {
@@ -16,65 +19,27 @@ struct TunTileView: View {
                         .foregroundStyle(Theme.textPrimary)
                     Text(subtitle)
                         .font(Typography.caption)
-                        .foregroundStyle(subtitleColor)
+                        .foregroundStyle(Theme.textSecondary)
                 }
                 Spacer(minLength: 0)
             }
         }
+        .accessibilityHint("按下查看不可用原因")
     }
 
-    private var subtitle: String {
-        switch state {
-        case .off: "已关闭"
-        case .requiresAuth: "需要授权"
-        case .waitingAuth: "等待授权"
-        case .on: "已开启"
-        case .authFailed: "授权失败"
-        }
-    }
+    /// 不可用原因即副标题，不再有「已开启 / 已关闭」这类开关文案
+    private var subtitle: String { "需要管理员组件" }
 
-    private var subtitleColor: Color {
-        switch state {
-        case .requiresAuth: Theme.warning
-        case .authFailed: Theme.error
-        case .on: Theme.textPrimary
-        case .off, .waitingAuth: Theme.textSecondary
-        }
-    }
-
-    private var seatColor: Color {
-        switch state {
-        case .on: Theme.success.opacity(0.16)
-        case .requiresAuth: Theme.warning.opacity(0.16)
-        case .authFailed: Theme.error.opacity(0.14)
-        case .off, .waitingAuth: Theme.rowHover
-        }
-    }
-
-    private var iconColor: Color {
-        switch state {
-        case .on: Theme.success
-        case .requiresAuth: Theme.warning
-        case .authFailed: Theme.error
-        case .off, .waitingAuth: Theme.textSecondary
-        }
-    }
-
+    /// 图标座灰：不用 success / warning 等状态色，避免读成「已开启」
     private var iconSeat: some View {
         ZStack {
             Circle()
-                .fill(seatColor)
+                .fill(Theme.rowHover)
                 .frame(width: 28, height: 28)
 
-            if state == .waitingAuth {
-                ProgressView()
-                    .controlSize(.small)
-                    .scaleEffect(0.7)
-            } else {
-                Image(systemName: "shield.lefthalf.filled")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(iconColor)
-            }
+            Image(systemName: "shield.lefthalf.filled")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Theme.textTertiary)
         }
     }
 }

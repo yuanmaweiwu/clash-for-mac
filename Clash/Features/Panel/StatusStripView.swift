@@ -4,6 +4,8 @@ import SwiftUI
 @MainActor
 struct StatusStripView: View {
     let status: DemoStatus
+    /// 是否展示实时速率；v0.1 未接管流量，恒为 false → 速率位显示「—」
+    let showsRates: Bool
     let downText: String
     let upText: String
 
@@ -17,7 +19,7 @@ struct StatusStripView: View {
 
             Spacer(minLength: 8)
 
-            if status.hasLiveRates {
+            if showsRates && status.hasLiveRates {
                 HStack(spacing: 10) {
                     RateReadoutView(arrow: "arrow.up", value: upText, tint: Theme.trafficUp)
                     RateReadoutView(arrow: "arrow.down", value: downText, tint: Theme.trafficDown)
@@ -33,6 +35,10 @@ struct StatusStripView: View {
         .overlay(alignment: .bottom) { HairlineView() }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("状态")
-        .accessibilityValue(status.hasLiveRates ? "\(status.title)，上传 \(upText)，下载 \(downText)" : status.title)
+        .accessibilityValue(
+            showsRates && status.hasLiveRates
+                ? "\(status.title)，上传 \(upText)，下载 \(downText)"
+                : status.title
+        )
     }
 }

@@ -2,6 +2,9 @@
 import Foundation
 
 /// 面板状态条的六种演示状态（对齐 `docs/02-UI-SPEC.md` §3.3）。
+///
+/// v0.1 只会出现 `idle` / `starting` / `ready` / `failed`（ADR-0007：无系统代理）；
+/// `proxying` / `direct` 要等 v0.2 接管流量后才会被算出来。
 enum DemoStatus: String, CaseIterable, Identifiable, Sendable {
     case idle
     case starting
@@ -29,14 +32,6 @@ enum DemoStatus: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .ready, .proxying, .direct: true
         case .idle, .starting, .failed: false
-        }
-    }
-
-    /// 连接磁贴是否为「开」
-    var isConnected: Bool {
-        switch self {
-        case .proxying, .direct: true
-        case .idle, .starting, .ready, .failed: false
         }
     }
 }

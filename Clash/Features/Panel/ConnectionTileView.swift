@@ -1,13 +1,18 @@
+// TODO(v0.2): 恢复为系统代理总开关，届时磁贴语义改回「已开启/已关闭」
 import SwiftUI
 
-/// 连接磁贴：28pt 圆形图标座 + 标题 / 副标题；点击在 未运行 → 启动中 → 代理中 ↔ 已就绪 之间走（§4.2）。
+/// 连接磁贴：28pt 圆形图标座 + 标题 / 副标题。
+///
+/// v0.1 它其实是**内核启停**（ADR-0007：没有系统代理），
+/// 所以副标题只说内核状态（已停止 / 启动中… / 内核已运行 / 启动失败），
+/// 不用「已开启 / 已关闭」这种代理语义，也不给「开态」的强调色。
 @MainActor
 struct ConnectionTileView: View {
     let status: DemoStatus
     let action: () -> Void
 
     var body: some View {
-        TileShell(border: borderColor, label: "连接", value: subtitle, action: action) {
+        TileShell(label: "连接", value: subtitle, action: action) {
             HStack(spacing: 8) {
                 iconSeat
                 VStack(alignment: .leading, spacing: 2) {
@@ -21,34 +26,34 @@ struct ConnectionTileView: View {
                 Spacer(minLength: 0)
             }
         }
-        .accessibilityHint(status.isConnected ? "按下关闭代理" : "按下开启代理")
+        .accessibilityHint(isKernelRunning ? "按下停止内核" : "按下启动内核")
     }
 
-    private var isOn: Bool { status.isConnected }
+    private var isKernelRunning: Bool {
+        switch status {
+        case .ready, .proxying, .direct: true
+        case .idle, .starting, .failed: false
+        }
+    }
 
     private var subtitle: String {
         switch status {
-        case .proxying, .direct: "已开启"
-        case .starting: "正在启动"
+        case .idle: "已停止"
+        case .starting: "启动中…"
+        case .ready, .proxying, .direct: "内核已运行"
         case .failed: "启动失败"
-        case .idle, .ready: "已关闭"
         }
     }
 
     private var subtitleColor: Color {
         switch status {
-        case .proxying, .direct: Theme.textPrimary
         case .failed: Theme.error
-        case .idle, .ready, .starting: Theme.textSecondary
+        case .idle, .starting, .ready, .proxying, .direct: Theme.textSecondary
         }
     }
 
     private var borderColor: Color? {
-        switch status {
-        case .proxying, .direct: Theme.accentStroke
-        case .failed: Theme.errorStroke
-        case .idle, .ready, .starting: nil
-        }
+        status == .failed ? Theme.errorStroke : nil
     }
 
     @ViewBuilder
@@ -70,16 +75,12 @@ struct ConnectionTileView: View {
             default:
                 Image(systemName: "power")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(isOn ? Theme.textOnAccent : Theme.textSecondary)
+                    .foregroundStyle(isKernelRunning ? Theme.textPrimary : Theme.textSecondary)
             }
         }
     }
 
     private var seatColor: Color {
-        switch status {
-        case .proxying, .direct: Theme.accent
-        case .failed: Theme.error.opacity(0.14)
-        case .idle, .ready, .starting: Theme.rowHover
-        }
+        status == .failed ? Theme.error.opacity(0.14) : Theme.rowHover
     }
 }

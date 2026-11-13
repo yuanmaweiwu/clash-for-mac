@@ -4,7 +4,8 @@ import SwiftUI
 @MainActor
 struct FooterView: View {
     let updatedText: String
-    let connectionCount: Int
+    /// 连接数；v0.1 没接 `/connections`，传 nil → 显示「—」，不编造数字
+    let connectionCount: Int?
     let onRefresh: () -> Void
 
     @Environment(\.openSettings) private var openSettings
@@ -28,11 +29,11 @@ struct FooterView: View {
                         detail: "连接列表与规则命中详情还没接入内核，这里先只验证入口。"
                     )
                 }
-                Text("\(connectionCount)")
+                Text(connectionCount.map { "\($0)" } ?? "—")
                     .font(Typography.number)
-                    .foregroundStyle(Theme.textSecondary)
+                    .foregroundStyle(connectionCount == nil ? Theme.textTertiary : Theme.textSecondary)
                     .padding(.trailing, 4)
-                    .accessibilityLabel(Text("连接数 \(connectionCount)"))
+                    .accessibilityLabel(connectionCountLabel)
             }
 
             IconButtonView(systemName: "text.alignleft", label: "日志", iconSize: 12) {
@@ -47,5 +48,10 @@ struct FooterView: View {
             }
         }
         .frame(height: Metrics.footerHeight)
+    }
+
+    private var connectionCountLabel: Text {
+        guard let connectionCount else { return Text("连接数未知") }
+        return Text("连接数 \(connectionCount)")
     }
 }

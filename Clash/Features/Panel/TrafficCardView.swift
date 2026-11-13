@@ -3,7 +3,8 @@ import SwiftUI
 /// 曲线卡 80pt：标题行 16 + 间距 4 + 绘制区 40，内边距 10（§3.2 / §4.5）。
 @MainActor
 struct TrafficCardView: View {
-    let status: DemoStatus
+    /// 是否真的有流量可画；v0.1 未接管流量 → 空态（虚线 + 「暂无流量」，数值位「—」）
+    let showsRates: Bool
     let downRate: Double
     let upRate: Double
     let downSeries: [Double]
@@ -27,7 +28,7 @@ struct TrafficCardView: View {
             .frame(height: 16)
 
             Group {
-                if status.hasLiveRates {
+                if showsRates {
                     TrafficChartView(downSeries: downSeries, upSeries: upSeries)
                 } else {
                     NoTrafficChartView()
@@ -37,7 +38,7 @@ struct TrafficCardView: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("实时流量")
             .accessibilityValue(
-                status.hasLiveRates
+                showsRates
                     ? "下载 \(DemoTraffic.spoken(rate: downRate))，上传 \(DemoTraffic.spoken(rate: upRate))"
                     : "暂无流量"
             )
@@ -71,7 +72,7 @@ struct TrafficCardView: View {
             Image(systemName: arrow)
                 .font(.system(size: 8, weight: .semibold))
                 .foregroundStyle(tint)
-            Text(status.hasLiveRates ? DemoTraffic.format(rate: value) : "—")
+            Text(showsRates ? DemoTraffic.format(rate: value) : "—")
                 .font(Typography.number)
                 .foregroundStyle(Theme.textSecondary)
         }
