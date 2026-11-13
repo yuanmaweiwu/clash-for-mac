@@ -11,9 +11,9 @@ struct ConnectionTileView: View {
 
     var body: some View {
         TileShell(border: borderColor, label: "连接", value: state.subtitle, action: action) {
-            HStack(spacing: 8) {
+            HStack(spacing: Space.m) {
                 iconSeat
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: Space.hair) {
                     Text("连接")
                         .font(Typography.body)
                         .foregroundStyle(Theme.textPrimary)
@@ -51,7 +51,7 @@ struct ConnectionTileView: View {
         ZStack {
             Circle()
                 .fill(seatColor)
-                .frame(width: 28, height: 28)
+                .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
 
             switch state {
             case .turningOn, .turningOff:

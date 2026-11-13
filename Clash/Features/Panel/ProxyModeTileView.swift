@@ -8,7 +8,7 @@ struct ProxyModeTileView: View {
 
     var body: some View {
         TilePanel {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Space.xs) {
                 Text("代理模式")
                     .font(Typography.caption)
                     .foregroundStyle(Theme.textSecondary)

@@ -14,7 +14,7 @@ struct EmptyGroupView: View {
     var showsImportActions = true
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: Space.m) {
             Image(systemName: "tray")
                 .font(.system(size: 24, weight: .regular))
                 .foregroundStyle(Theme.textTertiary)
@@ -25,12 +25,12 @@ struct EmptyGroupView: View {
                 .multilineTextAlignment(.center)
 
             if showsImportActions {
-                HStack(spacing: Metrics.tileGap) {
+                HStack(spacing: Space.l) {
                     Text("导入订阅")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Theme.textOnAccent)
-                        .padding(.horizontal, 12)
-                        .frame(height: 28)
+                        .padding(.horizontal, Space.l)
+                        .frame(height: Metrics.hitTarget)
                         .background {
                             RoundedRectangle(cornerRadius: Metrics.radiusRow, style: .continuous)
                                 .fill(Theme.accent)
@@ -40,7 +40,7 @@ struct EmptyGroupView: View {
                         .font(Typography.caption)
                         .foregroundStyle(Theme.accent)
                 }
-                .padding(.top, 2)
+                .padding(.top, Space.hair)
             }
         }
         .frame(maxWidth: .infinity)

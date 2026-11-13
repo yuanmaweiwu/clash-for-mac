@@ -46,10 +46,10 @@ for col in 0..<3 {
     draw(titles[col], at: NSPoint(x: inset + (cell.width + gap) * CGFloat(col), y: headerY), size: 15, bold: true)
 }
 
+var imageTop = height - inset - headerHeight - rowLabelHeight
 for row in 0..<2 {
-    let rowTop = height - inset - headerHeight - (rowLabelHeight + cell.height) * CGFloat(row) - gap * CGFloat(row == 0 ? 0 : 1)
-    let imageY = rowTop - cell.height
-    draw(rows[row], at: NSPoint(x: inset, y: rowTop - 20), size: 13, bold: false)
+    draw(rows[row], at: NSPoint(x: inset, y: imageTop + 6), size: 13, bold: false)
+    let imageY = imageTop - cell.height
     for col in 0..<3 {
         let x = inset + (cell.width + gap) * CGFloat(col)
         images[row * 3 + col].draw(
@@ -57,6 +57,7 @@ for row in 0..<2 {
             from: .zero, operation: .sourceOver, fraction: 1
         )
     }
+    imageTop = imageY - gap - rowLabelHeight
 }
 
 NSGraphicsContext.restoreGraphicsState()

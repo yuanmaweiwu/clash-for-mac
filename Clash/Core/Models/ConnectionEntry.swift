@@ -92,3 +92,19 @@ struct ConnectionEntry: Identifiable, Decodable, Sendable, Equatable {
         return try? Date(raw, strategy: fractional)
     }
 }
+
+#if DEBUG
+extension ConnectionEntry {
+    /// 预览夹具：直接构造一条连接（截图走查用，不参与解码）
+    init(previewHost: String, processName: String?, rule: String, node: String?, upload: Int64, download: Int64) {
+        self.id = UUID().uuidString
+        self.host = previewHost
+        self.processName = processName
+        self.rule = rule
+        self.chains = [node].compactMap { $0 } + ["机场A"]
+        self.upload = upload
+        self.download = download
+        self.start = .now.addingTimeInterval(-180)
+    }
+}
+#endif

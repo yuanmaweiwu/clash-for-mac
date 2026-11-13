@@ -12,7 +12,7 @@ struct ErrorBannerView: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 6) {
+            HStack(spacing: Space.s) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Theme.error)
@@ -22,7 +22,7 @@ struct ErrorBannerView: View {
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
 
-                Spacer(minLength: 4)
+                Spacer(minLength: Space.xs)
 
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .semibold))

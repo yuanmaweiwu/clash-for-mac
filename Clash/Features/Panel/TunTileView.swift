@@ -13,9 +13,9 @@ struct TunTileView: View {
 
     var body: some View {
         TileShell(border: borderColor, label: "TUN", value: state.subtitle, action: action) {
-            HStack(spacing: 8) {
+            HStack(spacing: Space.m) {
                 iconSeat
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: Space.hair) {
                     Text("TUN")
                         .font(Typography.body)
                         .foregroundStyle(Theme.textPrimary)
@@ -52,7 +52,7 @@ struct TunTileView: View {
         ZStack {
             Circle()
                 .fill(seatColor)
-                .frame(width: 28, height: 28)
+                .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
 
             if state.isProgressing {
                 ProgressView()

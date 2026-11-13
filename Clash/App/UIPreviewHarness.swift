@@ -52,6 +52,7 @@ enum UIPreviewHarness {
         hosting.layoutSubtreeIfNeeded()
 
         // 首层取内容自然高度；二级页本身就锁到最大高
+        print("CLASH_PREVIEW_FIT \(Int(hosting.fittingSize.height)) groups=\(model.groups.count) subs=\(model.subscriptions.count) load=\(model.subscriptionPanelState)")
         let isRoot = (model.route == .root)
         let height = isRoot
             ? min(max(hosting.fittingSize.height, 240), Metrics.panelHeight)
@@ -110,9 +111,29 @@ enum UIPreviewHarness {
                 autoStartsKernel: false
             )
 
+        case "subscriptions-empty":
+            let directory = URL.temporaryDirectory.appending(
+                path: "clash-preview-no-subs-\(UUID().uuidString)",
+                directoryHint: .isDirectory
+            )
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            return PanelPreviewModel(
+                profileStore: ProfileStore(directory: directory),
+                systemProxy: SystemProxyService(
+                    snapshotURL: directory.appending(path: "systemproxy-snapshot.json")
+                ),
+                autoStartsKernel: false
+            )
+
         default:
             let model = PanelPreviewModel(autoStartsKernel: false)
             model.applyPreviewGroups()
+            if page == "connections" {
+                model.applyPreviewConnections()
+            }
+            if page == "root-failed" {
+                model.previewFailure()
+            }
             if environment["CLASH_PREVIEW_PINNED"] != "0", page != "root-single" {
                 model.pinAllPreviewGroups()
             }

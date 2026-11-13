@@ -9,6 +9,7 @@ struct SegmentBarView: View {
     @Namespace private var pill
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var isFocused: Bool
+    @State private var hoveredMode: ProxyMode?
 
     private var selectionAnimation: Animation {
         reduceMotion
@@ -49,7 +50,7 @@ struct SegmentBarView: View {
                 segmentButton(for: mode)
             }
         }
-        .padding(4)
+        .padding(Space.xs)
         .frame(height: Metrics.segmentHeight)
         .background {
             RoundedRectangle(cornerRadius: Metrics.radiusTrack, style: .continuous)
@@ -78,12 +79,19 @@ struct SegmentBarView: View {
     }
 
     private func segmentLabel(for mode: ProxyMode) -> some View {
-        Text(mode.title)
-            .font(.system(size: 11, weight: mode == selection ? .medium : .regular))
-            .foregroundStyle(mode == selection ? Theme.textPrimary : Theme.textSecondary)
+        let isSelected = mode == selection
+        let isHovered = hoveredMode == mode
+
+        return Text(mode.title)
+            .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+            .foregroundStyle(isSelected || isHovered ? Theme.textPrimary : Theme.textSecondary)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
             .background { selectedBackground(for: mode) }
+            .onHover { hovering in
+                hoveredMode = hovering ? mode : (hoveredMode == mode ? nil : hoveredMode)
+            }
+            .animation(.easeOut(duration: 0.12), value: isHovered)
     }
 
     @ViewBuilder
@@ -98,10 +106,10 @@ struct SegmentBarView: View {
     }
 
     private var selectedPill: some View {
-        RoundedRectangle(cornerRadius: Metrics.radiusRow, style: .continuous)
+        RoundedRectangle(cornerRadius: Metrics.radiusControl, style: .continuous)
             .fill(Theme.opaque)
             .overlay {
-                RoundedRectangle(cornerRadius: Metrics.radiusRow, style: .continuous)
+                RoundedRectangle(cornerRadius: Metrics.radiusControl, style: .continuous)
                     .strokeBorder(Theme.hairline, lineWidth: Metrics.hairline)
             }
     }

@@ -24,7 +24,7 @@ PIDS=()
 
 cleanup() {
   for pid in "${PIDS[@]:-}"; do
-    [[ -n "${pid:-}" ]] && kill "$pid" 2>/dev/null || true
+    [[ -n "${pid:-}" ]] && kill -9 "$pid" 2>/dev/null || true
   done
   rm -f "$LOG"
 }
@@ -37,11 +37,12 @@ if [[ -n "$APPEARANCE" ]]; then ENV_ARGS+=(CLASH_PREVIEW_APPEARANCE="$APPEARANCE
 mkdir -p "$(dirname "$OUT")"
 
 # 等前一次夹具退干净，避免两个窗口叠在一起
-for _ in $(seq 1 20); do
+for _ in $(seq 1 40); do
   pgrep -f 'Build/Products/Debug/Clash.app/Contents/MacOS/Clash' >/dev/null || break
-  pkill -f 'Build/Products/Debug/Clash.app/Contents/MacOS/Clash' 2>/dev/null || true
-  sleep 0.2
+  pkill -9 -f 'Build/Products/Debug/Clash.app/Contents/MacOS/Clash' 2>/dev/null || true
+  sleep 0.15
 done
+sleep 0.3
 
 env "${ENV_ARGS[@]}" "$APP/Contents/MacOS/Clash" >"$LOG" 2>&1 &
 PIDS+=("$!")

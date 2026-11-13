@@ -976,6 +976,11 @@ final class PanelPreviewModel {
     func pinAllPreviewGroups() {
         proxies.previewPinAllGroups()
     }
+
+    /// Preview 夹具：摆出几张活动连接（不请求内核）
+    func applyPreviewConnections() {
+        connections.applyPreviewConnections()
+    }
     #endif
 }
 

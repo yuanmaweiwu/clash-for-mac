@@ -154,3 +154,18 @@ final class ConnectionService {
         return apiError.userMessage
     }
 }
+
+#if DEBUG
+extension ConnectionService {
+    /// 预览夹具：不请求内核，摆几条连接（截图走查用）
+    func applyPreviewConnections() {
+        entries = [
+            ConnectionEntry(previewHost: "www.google.com", processName: "Safari", rule: "DomainSuffix(google.com)", node: "香港 01", upload: 24_576, download: 1_258_291),
+            ConnectionEntry(previewHost: "api.github.com", processName: "Xcode", rule: "DomainSuffix(github.com)", node: "日本 02", upload: 8_192, download: 348_160),
+            ConnectionEntry(previewHost: "cdn.apple.com", processName: "nsurlsessiond", rule: "DomainSuffix(apple.com)", node: "新加坡 04", upload: 65_536, download: 3_355_443),
+            ConnectionEntry(previewHost: "8.8.8.8:53", processName: "mDNSResponder", rule: "MATCH", node: nil, upload: 1_024, download: 2_048),
+        ]
+        lastError = nil
+    }
+}
+#endif
