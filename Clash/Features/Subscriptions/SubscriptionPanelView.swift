@@ -86,31 +86,31 @@ struct SubscriptionPanelView: View {
     }
 
     private var breadcrumb: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: Space.xs) {
             IconButtonView(systemName: "chevron.left", label: "返回", iconSize: 12) {
                 onBack()
             }
 
             Text("订阅")
-                .font(Typography.title)
+                .font(Typography.pageTitle)
                 .foregroundStyle(Theme.textPrimary)
 
-            Spacer(minLength: 6)
+            Spacer(minLength: Space.s)
 
             IconButtonView(systemName: "plus", label: "添加订阅", iconSize: 12) {
                 model.openSubscriptionNewPage()
             }
         }
-        .frame(height: Metrics.cardHeaderHeight)
+        .frame(height: Metrics.breadcrumbHeight)
     }
 
     private var footer: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Space.s) {
             Text("共 \(model.subscriptions.count) 条订阅")
                 .font(Typography.caption)
                 .foregroundStyle(Theme.textSecondary)
 
-            Spacer(minLength: 6)
+            Spacer(minLength: Space.s)
 
             if let active = model.activeSubscription {
                 Text(isUpdating(active) ? "正在更新「\(active.name)」" : "当前激活 \(active.name)")

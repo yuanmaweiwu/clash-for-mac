@@ -16,11 +16,11 @@ struct SubscriptionStateView: View {
     var onRetry: () -> Void = {}
 
     var body: some View {
-        VStack(spacing: Metrics.cardPadding) {
+        VStack(spacing: Space.l) {
             switch kind {
             case .loading:
                 ProgressView()
-                    .controlSize(.small)
+                    .controlSize(.regular)
 
                 Text("正在读取订阅…")
                     .font(Typography.caption)
@@ -42,11 +42,11 @@ struct SubscriptionStateView: View {
                     .foregroundStyle(Theme.textSecondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 24)
+                    .padding(.horizontal, Space.xxl + Space.xs)
 
                 Button("重试", action: onRetry)
                     .buttonStyle(.bordered)
-                    .controlSize(.small)
+                    .controlSize(.regular)
                     .font(.system(size: 11, weight: .medium))
                     .accessibilityHint(Text("重新读取订阅库"))
             }

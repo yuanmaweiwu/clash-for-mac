@@ -7,7 +7,7 @@ struct EmptySubscriptionView: View {
     let onImportYAML: () -> Void
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: Space.m) {
             Image(systemName: "tray")
                 .font(.system(size: 24, weight: .regular))
                 .foregroundStyle(Theme.textTertiary)
@@ -16,10 +16,10 @@ struct EmptySubscriptionView: View {
                 .font(Typography.body)
                 .foregroundStyle(Theme.textSecondary)
 
-            HStack(spacing: Metrics.tileGap) {
+            HStack(spacing: Space.l) {
                 Button("导入订阅", action: onImportURL)
                     .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
+                    .controlSize(.regular)
                     .font(.system(size: 11, weight: .medium))
 
                 Button("选择 YAML", action: onImportYAML)
@@ -27,10 +27,10 @@ struct EmptySubscriptionView: View {
                     .font(Typography.caption)
                     .foregroundStyle(Theme.accent)
             }
-            .padding(.top, 2)
+            .padding(.top, Space.xs)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 120)
+        .frame(height: Metrics.emptyGroupCardHeight)
         .background {
             RoundedRectangle(cornerRadius: Metrics.radiusCard, style: .continuous)
                 .fill(Theme.card)

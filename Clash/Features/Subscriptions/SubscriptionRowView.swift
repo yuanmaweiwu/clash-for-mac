@@ -38,7 +38,7 @@ struct SubscriptionRowView: View {
 
             if isActive { activeBar }
         }
-        .frame(height: 48)
+        .frame(height: Metrics.listRowHeight)
         .background { rowBackground }
         .onHover { isHovering = $0 }
         .animation(.easeInOut(duration: 0.14), value: isHovering)
@@ -47,13 +47,13 @@ struct SubscriptionRowView: View {
     }
 
     private var rowBody: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Space.m) {
             Image(systemName: profile.sourceIconName)
                 .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(Theme.textTertiary)
                 .frame(width: 16)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Space.hair) {
                 Text(profile.name)
                     .font(isActive || isHighlighted ? Typography.title : Typography.body)
                     .foregroundStyle(Theme.textPrimary)
@@ -66,10 +66,10 @@ struct SubscriptionRowView: View {
                     .lineLimit(1)
             }
 
-            Spacer(minLength: 6)
+            Spacer(minLength: Space.s)
 
             // 行尾：上槽放状态 / 下图右对齐到期文本，与第二行同基线
-            VStack(alignment: .trailing, spacing: 2) {
+            VStack(alignment: .trailing, spacing: Space.hair) {
                 statusIcon
                     .frame(width: 16, height: 16)
 
@@ -83,9 +83,9 @@ struct SubscriptionRowView: View {
                 }
             }
         }
-        .padding(.leading, 14)
-        .padding(.trailing, 36)
-        .frame(height: 48)
+        .padding(.leading, Metrics.cardPadding)
+        .padding(.trailing, 40)
+        .frame(height: Metrics.listRowHeight)
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
     }
@@ -125,7 +125,7 @@ struct SubscriptionRowView: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .padding(.trailing, 6)
+        .padding(.trailing, Space.s)
         .opacity(showsHover ? 1 : 0)
         .allowsHitTesting(showsHover)
         .accessibilityLabel(Text("订阅操作"))
@@ -134,8 +134,8 @@ struct SubscriptionRowView: View {
     private var activeBar: some View {
         RoundedRectangle(cornerRadius: 1.5, style: .continuous)
             .fill(Theme.accent)
-            .frame(width: 3, height: 22)
-            .padding(.leading, 6)
+            .frame(width: 3, height: 24)
+            .padding(.leading, 5)
             .accessibilityHidden(true)
     }
 
