@@ -3,11 +3,10 @@ import OSLog
 
 /// 定位本轮启动要用的用户配置（`docs/01-ARCHITECTURE.md` §4）。
 ///
-/// v0.2 前期还没有 `profiles/index.json`（下一轮），所以只有两条来源：
-/// 1. `CLASH_PROFILE` 环境变量（**仅 DEBUG**，打包版忽略）——开发期指向任意文件
-/// 2. `profiles/` 下恰好一份 `*.yaml` —— 唯一候选直接使用
+/// 唯一来源：`profiles/index.json` 的 `activeProfileID` → `profiles/<id>.yaml`。
+/// 「目录里恰好一份就用它」的启发式已删除：多份配置并存时只有 active 生效。
 ///
-/// 多份配置时返回 `nil`（启动内置空配置），等 `index.json` 决定 active 后再改这里。
+/// `CLASH_PROFILE` 环境变量仍保留为 **DEBUG** 覆盖（优先级最高），指向任意文件。
 enum ProfileLocator {
 
     static let environmentKey = "CLASH_PROFILE"
@@ -16,7 +15,8 @@ enum ProfileLocator {
 
     static func locate(
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        profilesDirectory: URL = AppPaths.profilesDirectory
+        profilesDirectory: URL = AppPaths.profilesDirectory,
+        indexURL: URL? = nil
     ) -> URL? {
         #if DEBUG
         if let path = environment[environmentKey]?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -29,31 +29,29 @@ enum ProfileLocator {
         }
         #endif
 
-        let candidates = yamlFiles(in: profilesDirectory)
-        guard candidates.count == 1 else {
-            if candidates.count > 1 {
-                logger.notice("profiles 下有多份配置（\(candidates.count)），暂不自动选择，等 index.json")
-            }
+        let index = indexURL ?? profilesDirectory.appending(path: "index.json")
+        guard FileManager.default.fileExists(atPath: index.path) else { return nil }
+
+        let parsed: ProfileIndex
+        do {
+            parsed = try ProfileIndexFile.load(from: index)
+        } catch {
+            logger.error("index.json 读取失败，本轮用内置空配置：\(error.localizedDescription, privacy: .public)")
             return nil
         }
-        return candidates[0]
+
+        guard let id = parsed.activeProfileID, !id.isEmpty else { return nil }
+
+        let candidate = profilesDirectory.appending(path: "\(id).yaml")
+        guard FileManager.default.fileExists(atPath: candidate.path) else {
+            logger.error("active 配置文件缺失：id=\(id, privacy: .public)")
+            return nil
+        }
+        return candidate
     }
 
     /// 启动日志用：只打文件名，不打完整路径 / 订阅 URL
     static func displayName(for profileURL: URL?) -> String {
         profileURL?.lastPathComponent ?? "内置空配置"
-    }
-
-    private static func yamlFiles(in directory: URL) -> [URL] {
-        let contents = (try? FileManager.default.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        )) ?? []
-
-        return contents
-            .filter { ["yaml", "yml"].contains($0.pathExtension.lowercased()) }
-            .filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) ?? false }
-            .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 }

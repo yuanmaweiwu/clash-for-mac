@@ -147,6 +147,8 @@ struct PanelView: View {
     }
 }
 
+#if DEBUG
+// Preview 夹具用到 DEBUG-only 的模型方法，整套只在 Debug 编译（Release 不加载概览）
 #Preview("首层 · 单卡") {
     PanelView(model: PanelPreviewModel())
 }
@@ -162,10 +164,13 @@ struct PanelView: View {
 /// Preview 夹具：直接摆出评审批次里的几种面板形态。
 @MainActor
 private func panelPreviewModel(pinnedFailure: Bool = false, empty: Bool = false) -> PanelPreviewModel {
-    let model = PanelPreviewModel()
-    if empty {
-        model.subscriptions = []
-    } else {
+    // 用到的是公开 init，预览不读真实 `profiles/index.json`
+    let directory = URL.temporaryDirectory.appending(
+        path: "clash-preview-\(empty ? "empty" : "default")",
+        directoryHint: .isDirectory
+    )
+    let model = PanelPreviewModel(profileStore: ProfileStore(directory: directory))
+    if !empty {
         model.applyPreviewGroups()
     }
     if pinnedFailure {
@@ -174,3 +179,4 @@ private func panelPreviewModel(pinnedFailure: Bool = false, empty: Bool = false)
     }
     return model
 }
+#endif

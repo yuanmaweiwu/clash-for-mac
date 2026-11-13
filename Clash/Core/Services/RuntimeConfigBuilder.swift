@@ -36,6 +36,18 @@ enum RuntimeConfigBuilder {
         return AppPaths.runtimeConfigURL
     }
 
+    /// 用**尚未入库**的配置正文生成一份运行配置，写到指定路径。
+    ///
+    /// 订阅导入 / 更新时先用它生成临时 runtime，再交给 `mihomo -t` 校验（`ProfileValidator`）；
+    /// 绝不覆盖正在使用的 `runtime/runtime.yaml`。
+    @discardableResult
+    static func build(yamlText: String, injected: Injected, to destination: URL) throws -> URL {
+        let root = try makeRoot(yamlText: yamlText, injected: injected)
+        let yaml = try dump(root)
+        try writeAtomically(yaml, to: destination)
+        return destination
+    }
+
     /// 32 字节随机数转 hex；`SecRandomCopyBytes` 不可用时退回两个 UUID
     static func makeSecret() -> String {
         var bytes = [UInt8](repeating: 0, count: 32)
@@ -61,6 +73,10 @@ enum RuntimeConfigBuilder {
             throw KernelError.configInvalid(detail: "读取配置失败：\(error.localizedDescription)")
         }
 
+        return try makeRoot(yamlText: text, injected: injected)
+    }
+
+    private static func makeRoot(yamlText text: String, injected: Injected) throws -> [String: Any] {
         let loaded: Any?
         do {
             loaded = try Yams.load(yaml: text)

@@ -6,6 +6,7 @@ struct SubscriptionEditForm: View {
     let title: String
     let placeholder: String
     let confirmTitle: String
+    let hint: String?
     let onConfirm: (String) -> Void
     let onCancel: () -> Void
 
@@ -15,6 +16,7 @@ struct SubscriptionEditForm: View {
         title: String,
         placeholder: String,
         confirmTitle: String,
+        hint: String? = nil,
         initialText: String,
         onConfirm: @escaping (String) -> Void,
         onCancel: @escaping () -> Void
@@ -22,6 +24,7 @@ struct SubscriptionEditForm: View {
         self.title = title
         self.placeholder = placeholder
         self.confirmTitle = confirmTitle
+        self.hint = hint
         self.onConfirm = onConfirm
         self.onCancel = onCancel
         _text = State(initialValue: initialText)
@@ -41,9 +44,12 @@ struct SubscriptionEditForm: View {
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 12))
 
-            Text("v0.1 演示：暂不联网，只写入本地示例数据")
-                .font(.system(size: 10))
-                .foregroundStyle(Theme.textTertiary)
+            if let hint {
+                Text(hint)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(2)
+            }
 
             Spacer(minLength: 0)
 

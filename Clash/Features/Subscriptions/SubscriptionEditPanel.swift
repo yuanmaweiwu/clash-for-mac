@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// 极简输入面板：导入订阅（URL）/ 重命名。
-/// v0.1 只写面板假数据，不联网；真实订阅库由 v0.2 的订阅服务接。
+/// 只负责收文本；下载、校验、入库都在 `ProfileStore`。
 @MainActor
 enum SubscriptionEditPanel {
     enum Mode {
@@ -16,6 +16,7 @@ enum SubscriptionEditPanel {
         let title: String
         let placeholder: String
         let confirmTitle: String
+        let hint: String?
         let initialText: String
 
         switch mode {
@@ -23,11 +24,13 @@ enum SubscriptionEditPanel {
             title = "导入订阅"
             placeholder = "订阅链接（https://…）"
             confirmTitle = "导入"
+            hint = "导入前会用内核校验配置；失败不会留下半截文件"
             initialText = ""
         case .rename(let current):
             title = "重命名订阅"
             placeholder = "订阅名称"
             confirmTitle = "保存"
+            hint = nil
             initialText = current
         }
 
@@ -44,6 +47,7 @@ enum SubscriptionEditPanel {
                 title: title,
                 placeholder: placeholder,
                 confirmTitle: confirmTitle,
+                hint: hint,
                 initialText: initialText,
                 onConfirm: { [weak panel] text in
                     onSubmit(text)

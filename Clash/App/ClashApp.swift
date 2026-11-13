@@ -13,6 +13,10 @@ struct ClashApp: App {
     @State private var model = PanelPreviewModel()
 
     init() {
+        #if DEBUG
+        // CLI 自检入口（`CLASH_PROFILE_HARNESS=<目录>`），正常启动不受影响
+        ProfileStoreHarness.runIfRequested()
+        #endif
         Self.logger.info("Clash 启动（v0.1 面板）")
     }
 

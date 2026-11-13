@@ -1,24 +1,18 @@
-// TODO(v0.2): 订阅库 / 流量仍是本地假数据；内核生命周期、策略组与模式已接真
+// TODO(v0.3): 流量仍是空态；内核、策略组、模式与订阅库都已接真
 import CoreGraphics
 import Foundation
 import Observation
 
-/// v0.1 面板模型：**内核与策略组是真的**（`KernelService` / `ProxyService`），订阅与流量仍是本地假数据。
+/// 面板模型：内核生命周期 / 策略组 / 订阅库全部来自真实服务。
 ///
-/// 视图只和本模型打交道；内核状态、策略组、节点、模式都在本模型里转发一次，
-/// 避免 View 直接依赖 `KernelService` / `ProxyService`。
-///
-/// ## 仍是假数据的字段（下一轮接真实订阅 / 流量）
-///
-/// - `subscriptions` / `activeSubscriptionID` / `updatingSubscriptionID`：订阅库（`makeSubscriptions()`）
-/// - 订阅更新 / 重命名 / 删除：只在内存里改，不读写任何文件
-/// - `updatedText` / `refreshProfile()`：底栏「N 分钟前更新」（v0.1 底栏固定显示「未导入配置」）
-/// - 流量速率与曲线：v0.1 没接管流量，恒走空态
+/// 视图只和本模型打交道；内核状态、策略组、节点、模式、订阅都在本模型里转发一次，
+/// 避免 View 直接依赖 `KernelService` / `ProxyService` / `ProfileStore`。
 ///
 /// **已经是真的**：
 /// - 内核生命周期（`phase` / `lastError`），来自 `KernelService`
 /// - 策略组 / 节点 / 延迟 / 选中项 / 模式，来自 `ProxyService`（`GET /proxies`、`GET /configs`）
-/// - 选节点（`PUT /proxies/{group}`）、批量测速（`GET /group/{name}/delay`）、切模式（`PATCH /configs`）
+/// - 订阅库（列表 / 激活 / 导入 / 更新 / 重命名 / 删除），来自 `ProfileStore`
+///   （`profiles/index.json` + `profiles/<id>.yaml`）
 ///
 /// **明确不做假的**：系统代理与 TUN（ADR-0007 决定 v0.1 不接管流量），
 /// 因此没有流量数字、没有波形、没有 TUN 开关态。
@@ -32,6 +26,8 @@ final class PanelPreviewModel {
     @ObservationIgnored private let kernel: KernelService
     /// 真实策略组 / 节点 / 模式
     @ObservationIgnored private let proxies: ProxyService
+    /// 真实订阅库（`profiles/index.json`）
+    @ObservationIgnored private let profiles: ProfileStore
 
     /// v0.1 没有系统代理（ADR-0007）：恒为 `false`，且刻意声明成 `let`。
     ///
@@ -62,9 +58,11 @@ final class PanelPreviewModel {
     var activeGroupID: String? { selectedGroupID ?? groups.first?.name }
     @ObservationIgnored private var selectedGroupID: String?
 
-    var subscriptions: [SubscriptionProfile]
-    var activeSubscriptionID: UUID?
-    private(set) var updatingSubscriptionID: UUID?
+    var subscriptions: [ProfileEntry] { profiles.entries }
+    var activeSubscriptionID: String? { profiles.activeProfileID }
+    /// 正在更新 / 导入的那一条（行里显示「更新中」）
+    private(set) var updatingProfileID: String?
+    private(set) var isImportingProfile = false
     private(set) var subscriptionNotice: String?
     private(set) var speedNotice: String?
     /// 测速完成后的「刚刚更新」短暂提示
@@ -88,12 +86,10 @@ final class PanelPreviewModel {
     @ObservationIgnored private var modeTask: Task<Void, Never>?
     @ObservationIgnored private var proxyRefreshTask: Task<Void, Never>?
 
-    init(kernel: KernelService = KernelService()) {
+    init(kernel: KernelService = KernelService(), profileStore: ProfileStore = ProfileStore()) {
         self.kernel = kernel
+        self.profiles = profileStore
         self.proxies = ProxyService(kernel: kernel)
-        let profiles = Self.makeSubscriptions()
-        subscriptions = profiles
-        activeSubscriptionID = profiles.first?.id
 
         // 内核一就绪就拉真实策略组；停止 / 失败即清空
         kernel.onPhaseChange = { [weak self] phase in
@@ -146,14 +142,14 @@ final class PanelPreviewModel {
         proxies.hasLoaded && kernel.hasProfile ? "当前配置没有策略组" : "还没有配置"
     }
 
-    var activeSubscription: SubscriptionProfile? {
-        guard let id = activeSubscriptionID else { return nil }
-        return subscriptions.first { $0.id == id }
-    }
+    var activeSubscription: ProfileEntry? { profiles.activeProfile }
 
     var subscriptionTileSubtitle: String? {
         guard let active = activeSubscription else { return nil }
-        return active.updateFailed ? "\(active.name) · 更新失败" : active.name
+        var text = active.name
+        if active.isUpdateFailed { text += " · 更新失败" }
+        if active.isExpired { text += " · 已过期" }
+        return text
     }
 
     var subscriptionBadgeCount: Int { subscriptions.count }
@@ -253,78 +249,133 @@ final class PanelPreviewModel {
         proxies.togglePin(group: groupID)
     }
 
-    // MARK: - 订阅库
+    // MARK: - 订阅库（真实 `profiles/index.json`）
 
-    func activateSubscription(_ id: UUID) {
-        guard subscriptions.contains(where: { $0.id == id }) else { return }
-        activeSubscriptionID = id
+    /// 一次只跑一个订阅写操作：索引是共享状态，避免更新中被删 / 被切换
+    private var isProfileBusy: Bool { updatingProfileID != nil || isImportingProfile }
+
+    func activateSubscription(_ id: String) {
+        guard !isProfileBusy else { return }
+        do {
+            guard try profiles.activate(id: id) == .switched else { return }
+            // 切换 = 换 active + 重建 runtime + 重载；v0.3 用 stop → start 等效
+            restartKernelForProfileChange()
+        } catch {
+            showNotice(profileErrorMessage(error, fallback: "切换失败"))
+        }
     }
 
-    func updateSubscription(_ id: UUID) {
-        guard updatingSubscriptionID == nil,
-              let index = subscriptions.firstIndex(where: { $0.id == id }) else { return }
+    func updateSubscription(_ id: String) {
+        guard !isProfileBusy, profiles.entry(id: id) != nil else { return }
+        updatingProfileID = id
 
-        let alwaysFails = subscriptions[index].alwaysFailsUpdate
-        updatingSubscriptionID = id
-
-        subscriptionTask?.cancel()
         subscriptionTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(1.2))
-            guard let self, !Task.isCancelled else { return }
-            self.updatingSubscriptionID = nil
+            guard let self else { return }
+            defer { self.updatingProfileID = nil }
 
-            guard let index = self.subscriptions.firstIndex(where: { $0.id == id }) else { return }
-            if alwaysFails {
-                self.subscriptions[index].updateFailed = true
-            } else {
-                self.subscriptions[index].updateFailed = false
-                self.subscriptions[index].updatedText = "刚刚更新"
+            do {
+                try await self.profiles.update(id: id)
+                // 更新的正是当前配置：内核在跑就重启以加载新内容
+                if id == self.profiles.activeProfileID {
+                    self.restartKernelForProfileChange()
+                }
+            } catch {
+                self.showNotice("\(self.profileErrorMessage(error, fallback: "更新失败")), 继续使用旧配置")
             }
         }
     }
 
-    func renameSubscription(_ id: UUID, to newName: String) {
-        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty,
-              let index = subscriptions.firstIndex(where: { $0.id == id }) else { return }
-        subscriptions[index].name = trimmed
-    }
-
-    func deleteSubscription(_ id: UUID) {
-        guard let index = subscriptions.firstIndex(where: { $0.id == id }) else { return }
-        let removed = subscriptions[index]
-        let wasActive = activeSubscriptionID == id
-
-        subscriptions.remove(at: index)
-        if updatingSubscriptionID == id { updatingSubscriptionID = nil }
-
-        if wasActive {
-            activeSubscriptionID = subscriptions.first?.id
-            showNotice("已删除「\(removed.name)」，将停止内核")
+    func renameSubscription(_ id: String, to newName: String) {
+        guard !isProfileBusy else { return }
+        do {
+            try profiles.rename(id: id, to: newName)
+        } catch {
+            showNotice(profileErrorMessage(error, fallback: "重命名失败"))
         }
     }
 
-    func addSubscription(url: String) {
-        let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        appendSubscription(name: "新订阅 \(subscriptions.count + 1)", source: .url)
+    func deleteSubscription(_ id: String) {
+        guard !isProfileBusy, let removed = profiles.entry(id: id) else { return }
+        do {
+            switch try profiles.delete(id: id) {
+            case .cleared:
+                showNotice("已删除「\(removed.name)」，将停止内核")
+                stopKernelForProfileChange()
+            case .switched:
+                let next = activeSubscription?.name ?? "另一条"
+                showNotice("已删除「\(removed.name)」，已切换到「\(next)」")
+                restartKernelForProfileChange()
+            case .none:
+                break
+            }
+        } catch {
+            showNotice(profileErrorMessage(error, fallback: "删除失败"))
+        }
     }
 
-    func addLocalSubscription() {
-        appendSubscription(name: "本地 规则集 \(subscriptions.count + 1)", source: .local)
+    func importSubscription(urlString: String) {
+        guard !isProfileBusy else { return }
+        isImportingProfile = true
+
+        subscriptionTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.isImportingProfile = false }
+
+            do {
+                let entry = try await self.profiles.importURL(urlString)
+                // 首次导入会自动激活：内核若在跑（用的是内置空配置）就重启一次
+                if entry.id == self.profiles.activeProfileID {
+                    self.restartKernelForProfileChange()
+                }
+            } catch {
+                self.showNotice(profileErrorMessage(error, fallback: "导入失败"))
+            }
+        }
     }
 
-    private func appendSubscription(name: String, source: SubscriptionSource) {
-        let profile = SubscriptionProfile(
-            name: name,
-            source: source,
-            updatedText: "刚刚更新",
-            quotaText: nil,
-            expiryText: nil,
-            updateFailed: false
-        )
-        subscriptions.append(profile)
-        if activeSubscriptionID == nil { activeSubscriptionID = profile.id }
+    /// UI 层（`NSOpenPanel`）选完文件后把 URL 交给 store
+    func importLocalSubscription(fileURL: URL) {
+        guard !isProfileBusy else { return }
+        isImportingProfile = true
+
+        subscriptionTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.isImportingProfile = false }
+
+            do {
+                let entry = try await self.profiles.importFile(at: fileURL)
+                if entry.id == self.profiles.activeProfileID {
+                    self.restartKernelForProfileChange()
+                }
+            } catch {
+                self.showNotice(profileErrorMessage(error, fallback: "导入失败"))
+            }
+        }
+    }
+
+    private func profileErrorMessage(_ error: Error, fallback: String) -> String {
+        (error as? ProfileStoreError)?.userMessage ?? fallback
+    }
+
+    /// active 变了：内核在跑就 stop → start，让 `KernelService` 按新 active 重建 runtime
+    private func restartKernelForProfileChange() {
+        guard kernel.phase == .running else { return }
+        transitionTask?.cancel()
+        transitionTask = Task { [weak self] in
+            guard let self else { return }
+            await self.kernel.stop()
+            guard !Task.isCancelled else { return }
+            await self.kernel.start()
+        }
+    }
+
+    /// 库空了：停内核，避免继续跑已删除的配置
+    private func stopKernelForProfileChange() {
+        guard kernel.phase == .running else { return }
+        transitionTask?.cancel()
+        transitionTask = Task { [weak self] in
+            await self?.kernel.stop()
+        }
     }
 
     private func showNotice(_ text: String) {
@@ -413,38 +464,6 @@ final class PanelPreviewModel {
 
     func refreshProfile() {
         updatedText = "刚刚更新"
-    }
-
-    // MARK: - 假数据（订阅库）
-
-    static func makeSubscriptions() -> [SubscriptionProfile] {
-        [
-            SubscriptionProfile(
-                name: "机场 A",
-                source: .url,
-                updatedText: "3 小时前更新",
-                quotaText: "12.3/100 GB",
-                expiryText: "12/3 到期",
-                updateFailed: false
-            ),
-            SubscriptionProfile(
-                name: "备用 机场 B",
-                source: .url,
-                updatedText: "1 天前更新",
-                quotaText: nil,
-                expiryText: nil,
-                updateFailed: true,
-                alwaysFailsUpdate: true
-            ),
-            SubscriptionProfile(
-                name: "本地 规则集",
-                source: .local,
-                updatedText: "5 天前更新",
-                quotaText: nil,
-                expiryText: nil,
-                updateFailed: false
-            )
-        ]
     }
 
     #if DEBUG

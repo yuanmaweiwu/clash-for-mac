@@ -22,6 +22,11 @@ enum AppPaths {
         name: "profiles"
     )
 
+    /// `profiles/index.json`：订阅库索引（唯一索引，只有元数据）
+    static var profilesIndexURL: URL {
+        profilesDirectory.appending(path: "index.json")
+    }
+
     /// `kernel/`：内核共享工作目录（`-d`），geoip.metadb、cache.db 落在这里
     static let kernelDirectory = ensure(
         supportDirectory.appending(path: "kernel", directoryHint: .isDirectory),

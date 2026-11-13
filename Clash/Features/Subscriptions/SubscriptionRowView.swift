@@ -3,12 +3,13 @@ import SwiftUI
 /// 订阅库的一行 48pt：来源图标 + 名称 + 第二行说明；行尾是状态图标与到期文本（§4.8）。
 @MainActor
 struct SubscriptionRowView: View {
-    let profile: SubscriptionProfile
+    let profile: ProfileEntry
     let isActive: Bool
     let isUpdating: Bool
     let onActivate: () -> Void
     let onUpdate: () -> Void
     let onRename: () -> Void
+    let onCopyLink: () -> Void
     let onDelete: () -> Void
 
     @State private var isHovering = false
@@ -44,7 +45,7 @@ struct SubscriptionRowView: View {
 
     private var rowBody: some View {
         HStack(spacing: 8) {
-            Image(systemName: profile.source == .url ? "link" : "doc.text")
+            Image(systemName: profile.sourceIconName)
                 .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(Theme.textTertiary)
                 .frame(width: 16)
@@ -92,7 +93,7 @@ struct SubscriptionRowView: View {
             ProgressView()
                 .controlSize(.mini)
                 .scaleEffect(0.7)
-        } else if profile.updateFailed {
+        } else if profile.isUpdateFailed {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Theme.warning)
@@ -107,6 +108,9 @@ struct SubscriptionRowView: View {
             Button("切换为当前") { onActivate() }
                 .disabled(isActive)
             Button("重命名…") { onRename() }
+            if profile.source.kind == .url {
+                Button("复制链接") { onCopyLink() }
+            }
             Button(isActive ? "删除（将停止内核）" : "删除", role: .destructive) { onDelete() }
         } label: {
             Image(systemName: "ellipsis")
