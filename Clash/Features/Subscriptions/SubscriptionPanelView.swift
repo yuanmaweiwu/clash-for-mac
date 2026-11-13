@@ -64,7 +64,7 @@ struct SubscriptionPanelView: View {
                         }
                     }
                 }
-                .scrollIndicators(.hidden)
+                .scrollIndicators(.never)
                 .onAppear {
                     // 导入成功时页面才被推回来：那时 `onChange` 已经错过，这里补一次定位
                     guard let id = model.recentlyImportedProfileID else { return }

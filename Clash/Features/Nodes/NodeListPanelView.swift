@@ -31,7 +31,7 @@ struct NodeListPanelView: View {
                 .id(group.listOrderKey)
                 .transition(.opacity)
             }
-            .scrollIndicators(.hidden)
+            .scrollIndicators(.never)
             .allowsHitTesting(!isTesting)
             .animation(.easeInOut(duration: 0.18), value: group.listOrderKey)
 

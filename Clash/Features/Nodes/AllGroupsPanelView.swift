@@ -22,7 +22,7 @@ struct AllGroupsPanelView: View {
                     }
                 }
             }
-            .scrollIndicators(.hidden)
+            .scrollIndicators(.never)
 
             footer
         }

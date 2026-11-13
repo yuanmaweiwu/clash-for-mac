@@ -71,7 +71,7 @@ struct ConnectionsPanelView: View {
                     }
                 }
             }
-            .scrollIndicators(.hidden)
+            .scrollIndicators(.never)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }

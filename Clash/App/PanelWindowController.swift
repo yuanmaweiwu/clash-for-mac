@@ -87,22 +87,34 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
     // MARK: - 显隐
 
     func show(relativeTo button: NSStatusBarButton?) {
-        guard let button, let buttonWindow = button.window else { return }
-
+        // 锚点取不到时不要静默 return：⌘, / 菜单唤起时若按钮还没进窗口，
+        // 面板会"消失"或落到别处。这里退回屏幕右上角，保证位置可预期。
         let size = contentSize()
-        let buttonFrame = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
-        // 图标下方居中、距菜单栏 4pt
-        var origin = NSPoint(
-            x: buttonFrame.midX - size.width / 2,
-            y: buttonFrame.minY - Self.topGap - size.height
-        )
-        if let visible = (buttonWindow.screen ?? NSScreen.main)?.visibleFrame {
+        let screen = button?.window?.screen ?? NSScreen.main
+        var origin: NSPoint
+        if let button, let buttonWindow = button.window {
+            let buttonFrame = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
+            // 图标下方居中、距菜单栏 4pt
+            origin = NSPoint(
+                x: buttonFrame.midX - size.width / 2,
+                y: buttonFrame.minY - Self.topGap - size.height
+            )
+        } else {
+            let visible = screen?.visibleFrame ?? .zero
+            origin = NSPoint(
+                x: visible.maxX - size.width - Self.screenInset,
+                y: visible.maxY - Self.topGap - size.height
+            )
+            Self.logger.notice("状态栏锚点不可用，面板退回屏幕右上角")
+        }
+        if let visible = screen?.visibleFrame {
             let minX = visible.minX + Self.screenInset
             let maxX = visible.maxX - Self.screenInset - size.width
             origin.x = min(max(origin.x, minX), max(minX, maxX))
             origin.y = max(origin.y, visible.minY + Self.screenInset)
         }
 
+        Self.logger.notice("面板定位 x=\(origin.x, privacy: .public) y=\(origin.y, privacy: .public) 尺寸=\(size.width, privacy: .public)×\(size.height, privacy: .public) 屏幕=\(screen?.localizedName ?? "nil", privacy: .public)")
         panel.setFrame(NSRect(origin: origin, size: size), display: true)
         panel.makeKeyAndOrderFront(nil)
         // 面板刚显示时也补一次：路由可能是在隐藏状态下改的（⌘, / 菜单），
