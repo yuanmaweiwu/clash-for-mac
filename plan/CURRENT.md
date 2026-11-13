@@ -47,7 +47,8 @@
 - [ ] 流量 WS（速率与曲线仍是 `—`）
 - [ ] 连接列表与日志窗口
 - [x] 设置窗口（端口 / UA / 日志级别 / 开机自启 / 关代理保留内核 / 完全清理），`settings.json` 原子写 + 损坏备份；端口与级别的变更提示重启内核
-- [ ] TUN（需 helper，一次管理员授权）
+- [x] 特权 helper + XPC（`ping` / `startKernel` / `stopKernel` / `kernelState`）+ 安装/卸载脚本（本轮未安装、未接 TUN）
+- [ ] TUN 接入（helper 启动内核 + `runtime.yaml` 的生产者要先定）
 
 ## 下一步（按优先级）
 
