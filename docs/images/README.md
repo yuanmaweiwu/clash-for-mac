@@ -4,10 +4,10 @@
 
 | 文件 | 内容 |
 |---|---|
-| `hero.png` | 菜单栏 + 展开的面板（用于 README 顶部） |
-| `panel-idle.png` | 内核未运行（340 × 496） |
-| `panel-ready.png` | 内核已运行、未接管流量（340 × 496） |
-| `panel-nodes.png` | 真实策略组与节点（340 × 496） |
+| `hero.png` | 菜单栏 + 展开的面板（README 顶部） |
+| `panel.png` | 面板：系统代理接管中，带实时流量（340 × 496） |
+| `panel-subscriptions.png` | 订阅管理（假数据「示例机场」） |
+| `panel-settings.png` | 设置窗口（640 × 520） |
 
 ## 规则（重要）
 
