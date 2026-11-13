@@ -16,6 +16,7 @@ enum RuntimeConfigBuilder {
     /// 本次启动要注入的值。端口与 secret 由 `KernelService` 决定并复用给 API 客户端。
     struct Injected: Sendable {
         var mixedPort: Int = RuntimeConfigBuilder.defaultMixedPort
+        var allowLAN: Bool = false
         var controllerPort: Int
         var dnsPort: Int
         var secret: String
@@ -116,8 +117,14 @@ enum RuntimeConfigBuilder {
         root.removeValue(forKey: "port")
         root.removeValue(forKey: "socks-port")
 
-        root["allow-lan"] = false
-        root["bind-address"] = "127.0.0.1"
+        root["allow-lan"] = injected.allowLAN
+        // `bind-address: 127.0.0.1` 与 `allow-lan: false` 配套；开了局域网访问就必须放开监听地址，
+        // 否则局域网客户端连不上（控制端口仍固定 127.0.0.1，不受影响）
+        if injected.allowLAN {
+            root.removeValue(forKey: "bind-address")
+        } else {
+            root["bind-address"] = "127.0.0.1"
+        }
 
         if let mode = root["mode"] as? String, !mode.isEmpty {
             root["mode"] = mode

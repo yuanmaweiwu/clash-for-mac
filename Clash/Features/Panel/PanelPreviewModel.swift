@@ -39,6 +39,8 @@ final class PanelPreviewModel {
     @ObservationIgnored private let connections: ConnectionService
     /// 日志窗口的缓冲与 `/logs` WS（窗口打开才连，关窗即停）
     @ObservationIgnored let logStore: LogStore
+    /// 应用设置（端口 / UA / 日志级别 / 关代理是否保留内核）
+    @ObservationIgnored let settings: SettingsStore
 
     /// 连接磁贴的五态（§4.2）；开 / 关成功与否都以读回校验为准
     private(set) var connectionState: ConnectionState = .off
@@ -122,22 +124,28 @@ final class PanelPreviewModel {
     @ObservationIgnored private var connectionTask: Task<Void, Never>?
 
     init(
-        kernel: KernelService = KernelService(),
-        profileStore: ProfileStore = ProfileStore(),
+        kernel: KernelService? = nil,
+        profileStore: ProfileStore? = nil,
         systemProxy: SystemProxyService = SystemProxyService(),
+        settings: SettingsStore? = nil,
         autoStartsKernel: Bool = true
     ) {
-        self.kernel = kernel
-        self.profiles = profileStore
+        // 设置只允许一份实例：内核注入端口 / 模型读端口 / 设置窗口写端口必须是同一个对象
+        let resolvedSettings = settings ?? kernel?.settings ?? SettingsStore()
+        let resolvedKernel = kernel ?? KernelService(settings: resolvedSettings)
+
+        self.settings = resolvedSettings
+        self.kernel = resolvedKernel
+        self.profiles = profileStore ?? ProfileStore(settings: resolvedSettings)
         self.systemProxy = systemProxy
-        self.proxies = ProxyService(kernel: kernel)
-        self.traffic = TrafficService(kernel: kernel)
-        self.connections = ConnectionService(kernel: kernel)
-        self.logStore = LogStore(kernel: kernel)
+        self.proxies = ProxyService(kernel: resolvedKernel)
+        self.traffic = TrafficService(kernel: resolvedKernel)
+        self.connections = ConnectionService(kernel: resolvedKernel)
+        self.logStore = LogStore(kernel: resolvedKernel)
         self.connectionState = systemProxy.isEnabled ? .on : .off
 
         // 内核一就绪就拉真实策略组；停止 / 失败即清空
-        kernel.onPhaseChange = { [weak self] phase in
+        resolvedKernel.onPhaseChange = { [weak self] phase in
             self?.handleKernelPhase(phase)
         }
 
@@ -328,7 +336,7 @@ final class PanelPreviewModel {
             }
 
             do {
-                try await self.systemProxy.enable(port: RuntimeConfigBuilder.defaultMixedPort)
+                try await self.systemProxy.enable(port: self.settings.mixedPort)
                 guard !Task.isCancelled else { return }
                 self.connectionState = .on
                 self.connectionError = nil
@@ -338,8 +346,8 @@ final class PanelPreviewModel {
         }
     }
 
-    /// 关闭：只还原系统代理，**不停内核**——节点继续可见可选（架构 §4）。
-    /// 顺序上仍先撤代理；内核留到 App 退出 / 订阅删空时再停。
+    /// 关闭：先还原系统代理；`keepKernelOnProxyOff` 为 false 时额外停内核。
+    /// 默认保留内核——关代理后节点仍可见可选（架构 §4）。
     private func turnOffProxy() {
         connectionTask?.cancel()
         connectionState = .turningOff
@@ -355,6 +363,12 @@ final class PanelPreviewModel {
             }
             guard !Task.isCancelled else { return }
             self.connectionState = .off
+
+            guard !self.settings.keepKernelOnProxyOff else { return }
+            guard self.kernel.phase == .running, !self.kernel.isTransitioning else { return }
+            self.enqueueKernelOperation { [weak self] in
+                await self?.kernel.stop()
+            }
         }
     }
 
@@ -384,6 +398,93 @@ final class PanelPreviewModel {
     private func failConnection(_ stage: ConnectionState.Stage, message: String) {
         connectionState = .failed(stage)
         connectionError = message
+    }
+
+    // MARK: - 设置联动（端口 / 日志级别 / 完全清理）
+
+    /// 本次运行实际注入的端口 / 日志级别 / 局域网访问（`KernelService` 记录）
+    var kernelActiveMixedPort: Int? { kernel.activeMixedPort }
+    var kernelActiveLogLevel: String? { kernel.activeLogLevel }
+    var kernelActiveAllowLAN: Bool? { kernel.activeAllowLAN }
+
+    /// 设置里的值已改但内核还在用旧值：设置窗口据此提示「需要重启内核生效」
+    var needsKernelRestartForSettings: Bool {
+        guard phase == .running else { return false }
+        return kernel.activeMixedPort != settings.mixedPort
+            || kernel.activeLogLevel != settings.logLevel.cliValue
+            || kernel.activeAllowLAN != settings.allowLAN
+    }
+
+    /// 重启中（stop → start 或代理由重开）：设置窗口的「立即重启」禁用
+    var isApplyingSettings: Bool { kernel.isTransitioning || connectionState.isBusy }
+
+    /// 「立即重启」：按新设置重建 runtime 并重启内核。
+    ///
+    /// 端口变了而系统代理还开着的话，代理会指向死端口：先撤代理，起来后按新端口重开。
+    func restartKernelForSettings() {
+        enqueueKernelOperation { [weak self] in
+            guard let self else { return }
+            let wasProxied = self.isSystemProxyOn
+            if wasProxied {
+                do {
+                    try await self.systemProxy.disable()
+                    self.connectionState = .off
+                } catch {
+                    self.failConnection(.disable, error: error)
+                    return
+                }
+            }
+
+            await self.kernel.stop()
+            guard self.hasConfiguredProfile else { return }
+            await self.kernel.start()
+
+            guard wasProxied, self.kernel.phase == .running else { return }
+            do {
+                try await self.systemProxy.enable(port: self.settings.mixedPort)
+                self.connectionState = .on
+                self.connectionError = nil
+            } catch {
+                self.failConnection(.enable, error: error)
+            }
+        }
+    }
+
+    /// 「完全清理…」：还原系统代理 → 停内核 → 删 `profiles/` `runtime/` `kernel/` `logs/` 与代理快照。
+    /// **不删 App 本身**，也不动 `settings.json`（否则窗口里的偏好会突然回默认）。
+    /// - Returns: `nil` 表示成功；否则是给用户看的中文失败原因。
+    func performFullCleanup() async -> String? {
+        if isSystemProxyOn {
+            do {
+                try await systemProxy.disable()
+                connectionState = .off
+            } catch {
+                let message = systemProxy.lastError?.userMessage ?? "还原系统代理失败"
+                return "\(message)，已中止清理"
+            }
+        }
+
+        await kernel.stop()
+        profiles.forgetAllAfterCleanup()
+
+        let fileManager = FileManager.default
+        let targets: [(String, URL)] = [
+            ("profiles", AppPaths.profilesDirectory),
+            ("runtime", AppPaths.runtimeDirectory),
+            ("kernel", AppPaths.kernelDirectory),
+            ("logs", AppPaths.logsDirectory),
+            ("代理快照", AppPaths.systemProxySnapshotURL)
+        ]
+        for (name, url) in targets where fileManager.fileExists(atPath: url.path) {
+            do {
+                try fileManager.removeItem(at: url)
+            } catch {
+                return "删除\(name)失败：\(error.localizedDescription)"
+            }
+        }
+
+        connectionState = .off
+        return nil
     }
 
     // MARK: - 代理模式

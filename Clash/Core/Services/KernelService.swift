@@ -21,6 +21,10 @@ final class KernelService {
     private(set) var port: Int?
     /// 本次运行的 API secret；只在内存持有，不写日志
     private(set) var secret: String?
+    /// 本次运行实际注入的 mixed-port / log-level / allow-lan：设置窗口据此判断「需要重启内核生效」
+    private(set) var activeMixedPort: Int?
+    private(set) var activeLogLevel: String?
+    private(set) var activeAllowLAN: Bool?
     /// 本轮启动是否用了用户配置（false = 内置空配置），空态文案据此区分
     private(set) var hasProfile = false
     /// 启动 / 停止过程中：UI 应禁用连接磁贴
@@ -35,9 +39,12 @@ final class KernelService {
     @ObservationIgnored private var runner: KernelRunner?
     @ObservationIgnored private var client: ClashAPIClient?
     @ObservationIgnored private var userInitiatedStop = false
+    /// 设置来源：端口 / 日志级别 / 局域网访问都从这里取，`KernelService` 不再写死 7890
+    @ObservationIgnored let settings: SettingsStore
 
-    init(runner: KernelRunner? = nil) {
+    init(runner: KernelRunner? = nil, settings: SettingsStore = SettingsStore()) {
         self.runner = runner
+        self.settings = settings
         runner?.onExit = { [weak self] code in
             self?.handleUnexpectedExit(code: code)
         }
@@ -73,7 +80,7 @@ final class KernelService {
             await OrphanKernelReaper.reapOrphans(matching: binaryURL)
 
             // 清完孤儿仍被占 → 是别的程序占着（或孤儿杀不掉）：报 portInUse，不硬起
-            let mixedPort = RuntimeConfigBuilder.defaultMixedPort
+            let mixedPort = settings.mixedPort
             guard PortAllocator.isAvailable(port: mixedPort) else {
                 Self.logger.error("mixed-port \(mixedPort) 已被占用，拒绝启动内核")
                 throw KernelError.portInUse
@@ -86,9 +93,11 @@ final class KernelService {
             hasProfile = profileURL != nil
             let injected = RuntimeConfigBuilder.Injected(
                 mixedPort: mixedPort,
+                allowLAN: settings.allowLAN,
                 controllerPort: ports[0],
                 dnsPort: ports[1],
-                secret: RuntimeConfigBuilder.makeSecret()
+                secret: RuntimeConfigBuilder.makeSecret(),
+                logLevel: settings.logLevel.cliValue
             )
             let runtimeURL = try RuntimeConfigBuilder.build(from: profileURL, injected: injected)
             Self.logger.notice("使用配置 profile=\(ProfileLocator.displayName(for: profileURL), privacy: .public)")
@@ -112,6 +121,9 @@ final class KernelService {
             Self.logger.notice("内核进程已拉起 pid=\(pid) controller=127.0.0.1:\(injected.controllerPort)")
 
             kernelVersion = try await waitUntilReady(client: client, runner: runner)
+            activeMixedPort = injected.mixedPort
+            activeLogLevel = injected.logLevel
+            activeAllowLAN = injected.allowLAN
             setPhase(.running)
             Self.logger.notice("内核就绪 version=\(self.kernelVersion ?? "?", privacy: .public)")
         } catch {
@@ -135,6 +147,9 @@ final class KernelService {
         await runner?.stop()
         client = nil
         kernelVersion = nil
+        activeMixedPort = nil
+        activeLogLevel = nil
+        activeAllowLAN = nil
         setPhase(.stopped)
         Self.logger.notice("内核已停止")
     }
@@ -156,6 +171,9 @@ final class KernelService {
             await runner.stop()
         }
         client = nil
+        activeMixedPort = nil
+        activeLogLevel = nil
+        activeAllowLAN = nil
         setPhase(.failed)
         lastError = kernelError
 
@@ -170,6 +188,9 @@ final class KernelService {
 
         client = nil
         kernelVersion = nil
+        activeMixedPort = nil
+        activeLogLevel = nil
+        activeAllowLAN = nil
         setPhase(.failed)
         lastError = .crashed(code: code)
 

@@ -38,6 +38,8 @@ final class ProfileStore {
     @ObservationIgnored private let directory: URL
     @ObservationIgnored private let indexURL: URL
     @ObservationIgnored private let now: () -> Date
+    /// 订阅 UA 的唯一来源（ADR-0006）；nil 时退回默认 `mihomo/<内核版本>`
+    @ObservationIgnored private let settings: SettingsStore?
 
     private static let logger = Logger(subsystem: "com.clash.app", category: "profiles")
     private static let defaultAutoUpdateHours = 24
@@ -47,14 +49,17 @@ final class ProfileStore {
     /// - Parameters:
     ///   - directory: `profiles/` 目录（自检 harness 用临时目录）
     ///   - now: 注入时钟，测试可固定时间
+    ///   - settings: 设置来源；设置里的 UA 非空时作为首选（仍保留 422 换 UA 重试）
     init(
         directory: URL = AppPaths.profilesDirectory,
         indexURL: URL? = nil,
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        settings: SettingsStore? = nil
     ) {
         self.directory = directory
         self.indexURL = indexURL ?? directory.appending(path: "index.json")
         self.now = now
+        self.settings = settings
         load()
     }
 
@@ -169,7 +174,7 @@ final class ProfileStore {
             return try await update(id: existing.id)
         }
 
-        let download = try await SubscriptionFetcher.fetch(url: url)
+        let download = try await fetchSubscription(url: url)
         try ensureYAMLMapping(download.text)
         try await ProfileValidator.validate(yamlText: download.text)
 
@@ -231,7 +236,7 @@ final class ProfileStore {
                 guard let raw = entry.source.url, let url = URL(string: raw) else {
                     throw ProfileStoreError.invalidURL
                 }
-                let result = try await SubscriptionFetcher.fetch(url: url)
+                let result = try await fetchSubscription(url: url)
                 data = result.data
                 download = result
             }
@@ -264,8 +269,16 @@ final class ProfileStore {
         }
     }
 
-    // MARK: - 切换 / 重命名 / 删除
+    // MARK: - 完全清理
 
+    /// 「完全清理…」删掉 `profiles/` 后调用：内存归零，**不写盘**
+    /// （目录已被删，下次保存时会自动重建；此刻写回只会立刻造出一个空索引）
+    func forgetAllAfterCleanup() {
+        entries = []
+        activeProfileID = nil
+    }
+
+    // MARK: - 切换 / 重命名 / 删除
     @discardableResult
     func activate(id: String) throws -> ProfileActivationChange {
         guard entry(id: id) != nil else { throw ProfileStoreError.notFound }
@@ -329,6 +342,20 @@ final class ProfileStore {
     }
 
     // MARK: - 内部工具
+
+    /// 订阅拉取：UA 首选来自设置（非空）或默认 `mihomo/<版本>`；
+    /// 被拒（422 / 403 / 非 YAML）时 `SubscriptionFetcher` 仍换下一个预设重试一次（ADR-0006）。
+    private func fetchSubscription(url: URL) async throws -> SubscriptionDownload {
+        let preferred = settings?.effectiveSubscriptionUserAgent ?? SubscriptionUserAgent.defaultUserAgent
+        let fallback: String? = preferred == SubscriptionUserAgent.defaultUserAgent
+            ? SubscriptionUserAgent.fallbackUserAgent
+            : SubscriptionUserAgent.defaultUserAgent
+        return try await SubscriptionFetcher.fetch(
+            url: url,
+            userAgent: preferred,
+            fallbackUserAgent: fallback
+        )
+    }
 
     /// 成功拉取后的索引字段更新：改名不动（重命名是用户的显式操作）
     private func apply(_ download: SubscriptionDownload, to entry: inout ProfileEntry) {

@@ -16,6 +16,11 @@ enum AppPaths {
         return ensure(base.appending(path: "Clash", directoryHint: .isDirectory), name: "根目录")
     }()
 
+    /// `settings.json`：应用设置（原子写 0600，见 `SettingsStore`）
+    static var settingsURL: URL {
+        supportDirectory.appending(path: "settings.json")
+    }
+
     /// `profiles/`：用户配置原样保存
     static let profilesDirectory = ensure(
         supportDirectory.appending(path: "profiles", directoryHint: .isDirectory),

@@ -1,3 +1,4 @@
+import AppKit
 import OSLog
 import SwiftUI
 
@@ -11,6 +12,8 @@ struct ClashApp: App {
     private static let logger = Logger(subsystem: "com.clash.app", category: "app")
 
     @State private var model: PanelPreviewModel
+    /// 设置窗口与面板共用同一份设置
+    @State private var settings: SettingsStore
 
     /// 退出清理：`applicationWillTerminate` 与 `SIGTERM` / `SIGINT` / `SIGHUP` 共用一份实现
     private let terminationGuard: AppTerminationGuard
@@ -21,11 +24,20 @@ struct ClashApp: App {
         ProfileStoreHarness.runIfRequested()
         SystemProxyHarness.runIfRequested()
         LogStoreHarness.runIfRequested()
+        SettingsHarness.runIfRequested()
+        KernelSettingsHarness.runIfRequested()
         #endif
+        // 设置只建一份：内核注入端口 / 面板开代理 / 设置窗口写偏好都指向同一实例
+        let settings = SettingsStore()
         // 服务先于 model / guard 建好：两者共享同一实例，退出清理才看得见真实状态
         let systemProxy = SystemProxyService()
-        let kernel = KernelService()
-        _model = State(initialValue: PanelPreviewModel(kernel: kernel, systemProxy: systemProxy))
+        let kernel = KernelService(settings: settings)
+        _model = State(initialValue: PanelPreviewModel(
+            kernel: kernel,
+            systemProxy: systemProxy,
+            settings: settings
+        ))
+        _settings = State(initialValue: settings)
         terminationGuard = AppTerminationGuard(kernel: kernel, systemProxy: systemProxy)
         Self.logger.info("Clash 启动（v0.2 系统代理）")
     }
@@ -39,6 +51,9 @@ struct ClashApp: App {
                 .accessibilityLabel(phaseAccessibilityLabel)
         }
         .menuBarExtraStyle(.window)
+        .commands {
+            SettingsCommands()
+        }
 
         // 日志窗口：单例（`Window` 重复 openWindow 只聚焦已有窗口），不是二级面板
         Window("日志", id: AppWindow.logsID) {
@@ -47,9 +62,13 @@ struct ClashApp: App {
         .defaultSize(width: 760, height: 520)
         .defaultPosition(.center)
 
-        Settings {
-            SettingsPlaceholderView()
+        // 设置窗口：独立单例窗口（`docs/02-UI-SPEC.md` §8.7），不承载日常操作
+        Window("设置", id: AppWindow.settingsID) {
+            SettingsWindowView(model: model, settings: settings)
         }
+        .defaultSize(width: 640, height: 520)
+        .windowResizability(.contentMinSize)
+        .defaultPosition(.center)
     }
 
     /// 图标语义只有一个：**是否正在接管流量**（§4.1）。
@@ -66,4 +85,21 @@ struct ClashApp: App {
 /// 独立窗口的 id（`openWindow(id:)` 与 `Window(id:)` 必须一致）
 enum AppWindow {
     static let logsID = "logs"
+    static let settingsID = "settings"
+}
+
+/// ⌘, 打开设置：`Window` 场景不会自动生成「设置…」菜单项，这里自己补一条
+@MainActor
+private struct SettingsCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button("设置…") {
+                openWindow(id: AppWindow.settingsID)
+                NSApp.activate(ignoringOtherApps: true)
+            }
+            .keyboardShortcut(",", modifiers: .command)
+        }
+    }
 }
