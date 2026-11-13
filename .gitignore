@@ -2,9 +2,11 @@
 xcuserdata/
 DerivedData/
 
-# 内核二进制不再入库、也不进包：运行时下载到 ~/Library/Application Support/Clash/kernel/
-# （此规则只防历史残留；VERSION / SHA256 入库）
+# 内核二进制不再入库、也不进包（下载包）：运行时下载到 ~/Library/Application Support/Clash/kernel/
+# （此规则只防历史残留；VERSION / SHA256-<arch> 入库）
 Resources/Kernel/mihomo
+# 双架构暂存：Scripts/fetch-kernel.sh 下载的一份，供 CLASH_BUNDLE_KERNEL=1 打包，不入库
+Resources/Kernel/.stage/
 
 # 本地运行配置与日志
 Resources/Kernel/runtime/

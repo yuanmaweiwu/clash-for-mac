@@ -1,6 +1,9 @@
 # 第三方组件与许可
 
-本项目的客户端代码以 [MIT](./LICENSE) 发布。第三方组件与分发方式如下，各自保留其原始许可（内核与 geodata 改为运行时下载，见 ADR-0012）。
+本项目的客户端代码以 [MIT](./LICENSE) 发布。第三方组件与分发方式如下，各自保留其原始许可。
+
+内核与 geodata 有**两种分发方式**（ADR-0012 与 ADR-0001 补充）：
+普通包运行时下载（不承担分发义务），`-kernel` 变体随包分发（承担 GPL-3.0 分发义务，包内附许可全文与源码地址）。
 
 ## 运行时组件（首次使用时下载，不随包分发）
 
@@ -11,6 +14,14 @@
 | Yams | 5.4.0 | **MIT** | https://github.com/jpsim/Yams | 静态链接进 App（唯一 Swift 依赖） |
 
 许可全文见 [`Clash/Resources/Licenses/`](Clash/Resources/Licenses/)：`GPL-3.0.txt`、`yams-MIT.txt`。
+
+### 内置内核变体（`-kernel` 包）
+
+`Clash-<版本>-<arch>-kernel` 把 mihomo 与 geodata 一起打进 `Contents/Resources/Kernel/`，因此：
+
+- 属于 **GPL-3.0 分发**：包内必须带 `GPL-3.0.txt`（`Clash/Resources/Licenses/`）与本文件里的对应源码地址
+- 架构必须与包一致：arm64 包装 arm64 内核、x86_64 包装 amd64 内核；运行期仍校验 `SHA256-<arch>`
+- 版本与普通包共用 `Resources/Kernel/VERSION`
 
 ### GPL-3.0 合规说明
 

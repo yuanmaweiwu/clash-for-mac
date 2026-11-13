@@ -61,6 +61,12 @@ enum AppPaths {
         kernelDirectory.appending(path: "mihomo")
     }
 
+    /// 已安装内核的版本号（`kernel/VERSION`）：下载 / 内置拷出 / 升级后都会写，
+    /// 设置页的「当前版本」优先读它，缺失才回退到包内 `Resources/Kernel/VERSION`
+    static var kernelVersionURL: URL {
+        kernelDirectory.appending(path: "VERSION")
+    }
+
     /// GeoIP 数据库（`GEOIP,` 规则必需）
     static var geoIPDatabaseURL: URL {
         kernelDirectory.appending(path: "geoip.metadb")

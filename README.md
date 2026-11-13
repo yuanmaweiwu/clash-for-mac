@@ -7,7 +7,7 @@
 ## 它是什么
 
 - **纯状态栏应用**：`LSUIElement`，没有 Dock 图标，不占桌面
-- **内核运行时下载**：首次需要内核时自动下载 [mihomo](https://github.com/MetaCubeX/mihomo)（arm64，约 20MB gz）并校验 SHA256；不随包分发，不依赖你已装的任何客户端
+- **内核运行时下载**：首次需要内核时自动下载 [mihomo](https://github.com/MetaCubeX/mihomo)（按机器架构取 arm64 / amd64，约 20MB gz）并校验 SHA256；默认不随包分发，另提供「内置内核」变体给下载不动的网络
 - **原生 SwiftUI**：面板用 `NSVisualEffectView` 材质，跟随系统深浅色、Reduce Motion、VoiceOver
 - **两种接管方式**：系统代理（HTTP/HTTPS，一键开关）或 TUN（接管全部流量，需要一次管理员授权）
 - **多订阅**：订阅库多条并存，单条激活，各条独立定时更新，显示到期与用量
@@ -27,8 +27,19 @@
 ## 系统要求
 
 - macOS 15 Sequoia 及以上
-- Apple Silicon（arm64）；**不支持 Intel**
+- Apple Silicon（arm64）与 Intel（x86_64）都支持
 - 自用构建，未签名、未公证（见「已知限制」）
+
+### 四种包怎么选
+
+| 你的情况 | 下载这个 |
+|---|---|
+| Apple Silicon（M 系列） | `Clash-<版本>-arm64.dmg` |
+| Intel Mac | `Clash-<版本>-x86_64.dmg` |
+| 网络下不动内核（或想装完即用） | 上面两条再加 `-kernel`，例如 `Clash-<版本>-arm64-kernel.dmg` |
+
+一句决策树：**Intel 选 `x86_64`；网络下不动内核选带 `-kernel` 的那份**。
+`-kernel` 版体积多约 25MB（压缩后），首次启动不需要联网取内核。
 
 ## 构建与运行
 
@@ -63,8 +74,8 @@ Scripts/dev-app.sh           # 构建并启动；菜单栏出现图标
 ## 已知限制
 
 - **未签名、未公证**：首次打开需要在「系统设置 → 隐私与安全性」里允许；组件升级要再输一次管理员密码
-- **仅 arm64**：Intel Mac 不支持
-- **首次需要联网下载内核**：约 20MB；GitHub 不可达时可在设置里选自动镜像（直连 → gh-proxy.com → ghproxy.net）或自定义前缀，内容始终经 SHA256 校验
+- **首次需要联网下载内核**（普通包）：约 20MB；GitHub 不可达时可在设置里选自动镜像（直连 → gh-proxy.com → ghproxy.net）或自定义前缀，内容始终经 SHA256 校验。确实下不动就用 `-kernel` 包
+- **内置内核包承担 GPL 分发义务**：`-kernel` 变体随包分发 mihomo 与 geodata（GPL-3.0），因此包内附许可全文与源码地址；普通包只在运行时下载，见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)
 - **无自动更新**：Sparkle 依赖签名，v1 改为手动下载新版
 - **TUN 与其它客户端冲突**：检测到别家 TUN/VPN 已接管路由时会拒绝启动并提示
 - 规则编辑器未做，只读展示
@@ -75,7 +86,7 @@ Scripts/dev-app.sh           # 构建并启动；菜单栏出现图标
 Clash/            App、Features（Panel/Nodes/Subscriptions/Connections/Logs/Settings）、Core（API/Services/Storage）、UI（Tokens/Components）
 Helper/           特权组件（LaunchDaemon + XPC，只有 4 个白名单方法）
 Shared/           App 与 Helper 共用的 XPC 协议与 DTO
-Resources/Kernel/ 仅 VERSION + SHA256（版本与校验依据）；内核实际下载到 ~/Library/Application Support/Clash/kernel/
+Resources/Kernel/  VERSION + SHA256-arm64 / SHA256-amd64（版本与校验依据）；内核实际下载到 ~/Library/Application Support/Clash/kernel/
 docs/             产品、架构、UI 规范、ADR
 Prototype/        设计验证用的可交互原型（正式工程不用它）
 ```
@@ -88,6 +99,14 @@ Scripts/dev-app.sh            # 构建 + 启动（无 Dock 图标，看菜单栏
 Scripts/dev-app.sh --kill     # 结束实例
 Scripts/check-system-proxy.sh # 系统代理快照/还原自检
 Scripts/check-profile-store.sh# 订阅库导入/更新/删除自检
+
+# 双架构 Release（默认 arm64 + x86_64 通用二进制）
+xcodebuild -project Clash.xcodeproj -scheme Clash -configuration Release build
+
+# 「内置内核」变体：先把两种架构的内核拉到 Resources/Kernel/.stage/
+Scripts/fetch-kernel.sh
+CLASH_BUNDLE_KERNEL=1 xcodebuild -project Clash.xcodeproj -scheme Clash \
+  -configuration Release ARCHS=arm64 ONLY_ACTIVE_ARCH=NO build
 ```
 
 约定与技能见 [`AGENTS.md`](AGENTS.md) 与 [`.agents/skills/`](.agents/skills/)；决策记录见 [`docs/adr/`](docs/adr/)。

@@ -15,10 +15,18 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # 4 个包：arm64 / arm64+内置内核 / x86_64 / x86_64+内置内核
+  # 内置内核变体（bundle_kernel=true）给下载不到内核的网络用，体积 +56MB（压缩后约 +25MB）
   build:
+    name: ${{ matrix.arch }}${{ matrix.bundle_kernel && '-kernel' || '' }}
     # 必须是 macOS runner：xcodebuild 无法在 Linux 上跑
     runs-on: macos-15
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x86_64]
+        bundle_kernel: [false, true]
 
     steps:
       - name: Checkout
@@ -50,12 +58,13 @@ jobs:
           xcodebuild -version
           swift --version
 
+      # 缓存按架构分开：不同 job 的捆绑内核来自不同的 .stage/mihomo-<arch>
       - name: Restore kernel cache
         id: kernel-cache
         uses: actions/cache@v4
         with:
           path: Resources/Kernel
-          key: mihomo-${{ runner.arch }}-${{ hashFiles('Resources/Kernel/VERSION') }}
+          key: mihomo-${{ matrix.arch }}-${{ hashFiles('Resources/Kernel/VERSION') }}-v2
 
       - name: Fetch kernel and geodata
         if: steps.kernel-cache.outputs.cache-hit != 'true'
@@ -75,14 +84,20 @@ jobs:
           plutil -replace CFBundleVersion -string "${{ steps.version.outputs.build }}" Clash/App/Info.plist
           plutil -p Clash/App/Info.plist | grep -E 'CFBundleShortVersionString|CFBundleVersion'
 
-      - name: Build (Release, ad-hoc)
+      - name: Build (Release, ${{ matrix.arch }})
+        env:
+          # 构建期开关：1 = 把 .stage/mihomo-<arch> 与 geodata 打进 Contents/Resources/Kernel/
+          CLASH_BUNDLE_KERNEL: ${{ matrix.bundle_kernel && '1' || '0' }}
         run: |
           set -euo pipefail
+          echo "CLASH_BUNDLE_KERNEL=$CLASH_BUNDLE_KERNEL"
           xcodebuild \
             -project Clash.xcodeproj \
             -scheme Clash \
             -configuration Release \
-            -destination 'platform=macOS,arch=arm64' \
+            ARCHS="${{ matrix.arch }}" \
+            ONLY_ACTIVE_ARCH=NO \
+            -destination 'platform=macOS' \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=YES \
@@ -90,22 +105,45 @@ jobs:
 
       - name: Verify bundle
         id: bundle
+        env:
+          EXPECT_KERNEL: ${{ matrix.bundle_kernel && '1' || '0' }}
         run: |
           set -euo pipefail
           APP="$(/usr/bin/find ~/Library/Developer/Xcode/DerivedData -maxdepth 5 -type d -name Clash.app -path '*/Build/Products/Release/*' | head -1)"
           [[ -n "$APP" ]] || { echo "找不到 Release 产物"; exit 1; }
           codesign --verify --deep --strict --verbose=2 "$APP"
-          lipo -archs "$APP/Contents/MacOS/Clash"
+
+          MAIN_ARCHS="$(lipo -archs "$APP/Contents/MacOS/Clash")"
+          HELPER_ARCHS="$(lipo -archs "$APP/Contents/Library/PrivilegedHelperTools/com.clash.helper")"
+          echo "app=$MAIN_ARCHS helper=$HELPER_ARCHS"
+          [[ "$MAIN_ARCHS" == "${{ matrix.arch }}" ]] || { echo "App 架构不符：$MAIN_ARCHS"; exit 1; }
+          [[ "$HELPER_ARCHS" == "${{ matrix.arch }}" ]] || { echo "helper 架构不符：$HELPER_ARCHS"; exit 1; }
+
+          echo "=== 内核目录 ==="
+          ls -la "$APP/Contents/Resources/Kernel/"
+          if [[ "$EXPECT_KERNEL" == "1" ]]; then
+            KERNEL="$APP/Contents/Resources/Kernel/mihomo"
+            [[ -x "$KERNEL" ]] || { echo "内置变体缺少内核"; exit 1; }
+            KERNEL_ARCHS="$(lipo -archs "$KERNEL")"
+            EXPECT="${{ matrix.arch }}"
+            [[ "$KERNEL_ARCHS" == "$EXPECT" ]] || { echo "内置内核架构不符：$KERNEL_ARCHS"; exit 1; }
+            echo "内置内核对：$KERNEL_ARCHS"
+          else
+            [[ ! -e "$APP/Contents/Resources/Kernel/mihomo" ]] || { echo "下载包不应带内核"; exit 1; }
+            echo "下载包：包内无内核（符合预期）"
+          fi
+          plutil -p "$APP/Contents/Info.plist" | grep -E 'CFBundle|LSUIElement|LSMinimumSystemVersion'
           echo "app=$APP" >> "$GITHUB_OUTPUT"
-          echo "=== Info.plist ==="; plutil -p "$APP/Contents/Info.plist" | grep -E 'CFBundle|LSUIElement|LSMinimumSystemVersion'
-          echo "=== 内核 ==="; ls -la "$APP/Contents/Resources/Kernel/" || true
 
       - name: Package zip and dmg
+        env:
+          # 产物命名：Clash-<ver>-arm64[-kernel].zip / .dmg
+          SUFFIX: ${{ matrix.bundle_kernel && '-kernel' || '' }}
         run: |
           set -euo pipefail
           APP="${{ steps.bundle.outputs.app }}"
           mkdir -p dist
-          NAME="Clash-${{ steps.version.outputs.version }}-arm64"
+          NAME="Clash-${{ steps.version.outputs.version }}-${{ matrix.arch }}${SUFFIX}"
           ditto -c -k --sequesterRsrc --keepParent "$APP" "dist/${NAME}.zip"
           STAGE="$(mktemp -d)"
           cp -R "$APP" "$STAGE/"
@@ -113,29 +151,64 @@ jobs:
           hdiutil create -volname "Clash ${{ steps.version.outputs.version }}" \
             -srcfolder "$STAGE" -ov -format UDZO "dist/${NAME}.dmg" >/dev/null
           rm -rf "$STAGE"
-          shasum -a 256 dist/* > "dist/${NAME}.sha256"
+          shasum -a 256 "dist/${NAME}.zip" "dist/${NAME}.dmg" > "dist/${NAME}.sha256"
           ls -lah dist
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Clash-${{ steps.version.outputs.version }}-arm64
+          name: Clash-${{ steps.version.outputs.version }}-${{ matrix.arch }}${{ matrix.bundle_kernel && '-kernel' || '' }}
           path: dist/*
           if-no-files-found: error
 
-      # 未签名、未公证：产物在别的机器上首次打开需要在「系统设置 → 隐私与安全性」允许
-      # 若将来拿到 Developer ID，可在此加 codesign + notarytool 步骤，并去掉 ad-hoc 参数
+  # 单独一个 job 发 Release：4 个 matrix job 并发直接发版会互相覆盖
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-15
+    steps:
+      - name: Resolve version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: Clash-*
+          path: dist
+          merge-multiple: true
+
+      - name: Compose release body
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          ls -lah dist
+          {
+            echo "macOS 状态栏 Clash 客户端（macOS 15+，Apple Silicon 与 Intel 各一份）。"
+            echo
+            echo "**怎么选**：Apple Silicon 选 \`arm64\`，Intel Mac 选 \`x86_64\`；"
+            echo "网络下不动内核（或想装完即用）选带 \`-kernel\` 的那份，其余选普通版。"
+            echo
+            echo "| 文件 | 架构 | 内置内核 | 说明 |"
+            echo "|---|---|---|---|"
+            echo "| \`Clash-${VERSION}-arm64.dmg\` / \`.zip\` | arm64 | 否 | Apple Silicon，首次使用下载内核（约 20MB） |"
+            echo "| \`Clash-${VERSION}-arm64-kernel.dmg\` / \`.zip\` | arm64 | 是 | Apple Silicon，装完即用；体积 +56MB |"
+            echo "| \`Clash-${VERSION}-x86_64.dmg\` / \`.zip\` | x86_64 | 否 | Intel Mac，首次使用下载内核 |"
+            echo "| \`Clash-${VERSION}-x86_64-kernel.dmg\` / \`.zip\` | x86_64 | 是 | Intel Mac，装完即用；体积 +56MB |"
+            echo
+            echo "每个产物同名附 \`.sha256\`（\`shasum -a 256 -c Clash-...sha256\`）。"
+            echo
+            echo "**安装**：打开 \`.dmg\` → 拖进「应用程序」→ 首次打开若被拦截，去「系统设置 → 隐私与安全性」点「仍要打开」。"
+            echo "TUN 模式需要一次管理员授权安装特权组件。"
+            echo
+            echo "本构建为 ad-hoc 签名、未公证。"
+          } > release-body.md
+
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           name: Clash ${{ steps.version.outputs.version }}
-          generate_release_notes: true
-          body: |
-            macOS 状态栏 Clash 客户端（Apple Silicon，macOS 15+）。
-
-            **安装**：下载 `.dmg` → 拖进「应用程序」→ 首次打开若被拦截，去「系统设置 → 隐私与安全性」点「仍要打开」。
-
-            本构建为 ad-hoc 签名、未公证；TUN 模式需要一次管理员授权安装特权组件。
+          body_path: release-body.md
           files: dist/*
           fail_on_unmatched_files: true

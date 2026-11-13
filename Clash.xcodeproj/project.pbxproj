@@ -219,7 +219,12 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -eu\n\n# ADR-0012：内核与 geodata 改为运行时下载，包内只保留版本与校验依据\nSRC_DIR=\"$SRCROOT/Resources/Kernel\"\nDEST_DIR=\"$BUILT_PRODUCTS_DIR/$CONTENTS_FOLDER_PATH/Resources/Kernel\"\n\n# 清掉旧构建可能残留的二进制 / geodata，保证包内只剩元数据\nrm -rf \"$DEST_DIR\"\nmkdir -p \"$DEST_DIR\"\nfor name in VERSION SHA256; do\n  if [ ! -f \"$SRC_DIR/$name\" ]; then\n    echo \"error: 缺少 $SRC_DIR/$name\"\n    exit 1\n  fi\n  ditto \"$SRC_DIR/$name\" \"$DEST_DIR/$name\"\ndone\necho \"Copied kernel metadata: $DEST_DIR\"\n";
+			shellScript = "set -eu
+
+# 逻辑在 Scripts/copy-kernel-resources.sh（可独立调试）：
+# 默认只拷 VERSION / SHA256-<arch>；CLASH_BUNDLE_KERNEL=1 时连内核与 geodata 一起打进包
+/bin/sh \"$SRCROOT/Scripts/copy-kernel-resources.sh\"
+";
 		};
 		1A2B3C4D5E6F7A8B9C0D003B /* Copy helper */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -335,7 +340,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
-				ARCHS = arm64;
+				ARCHS = (
+					arm64,
+					x86_64,
+				);
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
@@ -368,6 +376,7 @@
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
+				ONLY_ACTIVE_ARCH = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
