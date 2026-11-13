@@ -11,7 +11,8 @@ struct GroupSectionView: View {
             if model.groups.isEmpty {
                 EmptyGroupView(
                     title: model.emptyGroupTitle,
-                    showsImportActions: model.showsEmptyGroupImportActions
+                    showsImportActions: model.showsEmptyGroupImportActions,
+                    onImport: { model.openSubscriptionNewPage() }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -29,11 +30,11 @@ struct GroupSectionView: View {
                                     model.selectNode(groupID: group.id, nodeID: nodeID)
                                 }
                             )
-                            .padding(.top, index == 0 ? 0 : Metrics.tileGap)
+                            .padding(.top, index == 0 ? 0 : Space.l)
                         }
                     }
                 }
-                .scrollIndicators(.hidden)
+                .scrollIndicators(.never)
             }
         }
         .frame(height: model.groupSectionHeight, alignment: .top)

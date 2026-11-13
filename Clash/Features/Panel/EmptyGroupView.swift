@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 空态占位卡 120pt：`tray` + 一句说明（§7）。
+/// 空态占位卡 132pt：`tray` + 一句说明（§7）。
 ///
 /// 两种形态：
 /// - 没导入订阅：`body` 文案 + 「导入订阅」按钮（v1 只支持链接导入，不再提供本地 YAML）
@@ -12,6 +12,8 @@ struct EmptyGroupView: View {
     var title = "还没有配置"
     /// 是否展示「导入订阅」：只有真的没导入订阅时才展示
     var showsImportActions = true
+    /// 「导入订阅」的去处：直接进添加订阅页（走系统 prominent 按钮，键盘可达）
+    var onImport: () -> Void = {}
 
     var body: some View {
         VStack(spacing: Space.m) {
@@ -25,22 +27,14 @@ struct EmptyGroupView: View {
                 .multilineTextAlignment(.center)
 
             if showsImportActions {
-                HStack(spacing: Space.l) {
-                    Text("导入订阅")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.textOnAccent)
-                        .padding(.horizontal, Space.l)
-                        .frame(height: Metrics.hitTarget)
-                        .background {
-                            RoundedRectangle(cornerRadius: Metrics.radiusRow, style: .continuous)
-                                .fill(Theme.accent)
-                        }
-                }
-                .padding(.top, Space.hair)
+                Button("导入订阅", action: onImport)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
+                    .padding(.top, Space.xs)
             }
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 120)
+        .frame(height: Metrics.emptyGroupCardHeight)
         .background {
             RoundedRectangle(cornerRadius: Metrics.radiusCard, style: .continuous)
                 .fill(Theme.card)
