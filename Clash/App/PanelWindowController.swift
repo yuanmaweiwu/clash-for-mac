@@ -1,0 +1,201 @@
+import AppKit
+import SwiftUI
+
+/// 面板窗口（`docs/adr/0011`）：自建 `NSPanel` 承载同一份 `PanelView`。
+///
+/// 系统原先由 `MenuBarExtra` 负责的尺寸、定位、失焦关闭都在这里补齐：
+/// - 宽固定 340，高取内容 `fittingSize`（上限 656）
+/// - 锚点对齐状态栏图标中心、距菜单栏 4pt，超出屏幕左右边界夹取
+/// - 失焦（点外部 / 切 App）即收；`Esc` 由面板内容自己处理
+@MainActor
+final class PanelWindowController: NSObject, NSWindowDelegate {
+    /// 内容高度上限（`docs/02-UI-SPEC.md` §3.2：双卡满态 642，留 14pt 余量）
+    private static let maximumHeight: CGFloat = 656
+    /// 空态最小高（§3.2）
+    private static let minimumHeight: CGFloat = 240
+    /// 面板与菜单栏的间距
+    private static let topGap: CGFloat = 4
+    /// 夹取到屏幕边界时留的余量
+    private static let screenInset: CGFloat = 8
+    /// 同一次点击里「失焦关闭」与「按钮 action」的先后判定窗口
+    private static let resignCoalesceInterval: TimeInterval = 0.3
+
+    private let panel: PanelWindow
+    private var hostingView: PanelHostingView<AnyView>!
+
+    /// 面板显隐变化（状态栏按钮高亮恢复普通态）
+    var onVisibilityChange: ((Bool) -> Void)?
+    /// 最近一次失焦关闭的时间
+    private var lastResignAt = Date.distantPast
+
+    var isVisible: Bool { panel.isVisible }
+
+    /// 面板刚因为这次点击失焦关掉（点状态栏图标时 `resignKey` 会先于按钮 action）
+    var isVisibleRecently: Bool {
+        Date().timeIntervalSince(lastResignAt) < Self.resignCoalesceInterval
+    }
+
+    init(model: PanelPreviewModel) {
+        panel = PanelWindow(
+            contentRect: NSRect(
+                x: 0,
+                y: 0,
+                width: Metrics.panelWidth,
+                height: Metrics.panelHeight
+            ),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+
+        super.init()
+
+        configureWindow()
+
+        let hosting = PanelHostingView(rootView: AnyView(
+            PanelView(model: model, onClose: { [weak self] in self?.hide() })
+        ))
+        hosting.onContentSizeChange = { [weak self] _ in
+            // 内容变高变矮（pin 切换 / 二级页）：窗口跟着改，保持顶边不动
+            DispatchQueue.main.async {
+                self?.resizeToFitContent()
+            }
+        }
+        panel.contentView = hosting
+        hostingView = hosting
+    }
+
+    private func configureWindow() {
+        panel.delegate = self
+        panel.isFloatingPanel = true
+        panel.level = .popUpMenu
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        // 失焦关闭由 `windowDidResignKey` 管；`hidesOnDeactivate` 保持关闭，
+        // 否则切换 Space / 全屏时面板会被系统额外隐藏一次
+        panel.hidesOnDeactivate = false
+        panel.isReleasedWhenClosed = false
+        panel.isMovableByWindowBackground = false
+        panel.animationBehavior = .utilityWindow
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+    }
+
+    // MARK: - 显隐
+
+    func show(relativeTo button: NSStatusBarButton?) {
+        guard let button, let buttonWindow = button.window else { return }
+
+        let size = contentSize()
+        let buttonFrame = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil))
+        // 图标下方居中、距菜单栏 4pt
+        var origin = NSPoint(
+            x: buttonFrame.midX - size.width / 2,
+            y: buttonFrame.minY - Self.topGap - size.height
+        )
+        if let visible = (buttonWindow.screen ?? NSScreen.main)?.visibleFrame {
+            let minX = visible.minX + Self.screenInset
+            let maxX = visible.maxX - Self.screenInset - size.width
+            origin.x = min(max(origin.x, minX), max(minX, maxX))
+            origin.y = max(origin.y, visible.minY + Self.screenInset)
+        }
+
+        panel.setFrame(NSRect(origin: origin, size: size), display: true)
+        panel.makeKeyAndOrderFront(nil)
+        onVisibilityChange?(true)
+    }
+
+    func hide() {
+        guard panel.isVisible else { return }
+        panel.orderOut(nil)
+        onVisibilityChange?(false)
+    }
+
+    private func resizeToFitContent() {
+        guard panel.isVisible else { return }
+        let height = contentSize().height
+        guard abs(panel.frame.height - height) > 0.5 else { return }
+        var frame = panel.frame
+        // 顶边不动，只把底边往上/下推
+        frame.origin.y = frame.maxY - height
+        frame.size.height = height
+        panel.setFrame(frame, display: true)
+        clampToScreen()
+    }
+
+    /// 屏幕边缘 / 分辨率变化后仍要保证整块面板可见
+    private func clampToScreen() {
+        guard let visible = panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame else { return }
+        var frame = panel.frame
+        let minX = visible.minX + Self.screenInset
+        let maxX = visible.maxX - Self.screenInset - frame.width
+        frame.origin.x = min(max(frame.origin.x, minX), max(minX, maxX))
+        frame.origin.y = max(frame.origin.y, visible.minY + Self.screenInset)
+        if frame != panel.frame {
+            panel.setFrame(frame, display: true)
+        }
+    }
+
+    private func contentSize() -> NSSize {
+        hostingView.layoutSubtreeIfNeeded()
+        let fittingHeight = hostingView.fittingSize.height
+        let height = fittingHeight > 0 ? fittingHeight : Metrics.panelHeight
+        return NSSize(
+            width: Metrics.panelWidth,
+            height: min(max(height, Self.minimumHeight), Self.maximumHeight)
+        )
+    }
+
+    // MARK: - NSWindowDelegate
+
+    /// 点面板外部（别的 App / 桌面）就收起来
+    func windowDidResignKey(_ notification: Notification) {
+        lastResignAt = Date()
+        hide()
+    }
+
+    /// 面板内容自己 `window.close()`（例如打开日志窗口后）也要恢复按钮普通态
+    func windowWillClose(_ notification: Notification) {
+        lastResignAt = Date()
+        onVisibilityChange?(false)
+    }
+}
+
+/// 无边框浮层面板：`nonactivatingPanel` 不抢 App 激活，但仍要能成为 key 窗口，
+/// 否则 Esc、⌘Q 与面板内的键盘交互都收不到。
+private final class PanelWindow: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+
+    /// LSUIElement 应用没有可见主菜单：⌘Q / ⌘, 在这里兜一层，保证面板聚焦时可用
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        guard modifiers == .command, let key = event.charactersIgnoringModifiers?.lowercased() else {
+            return super.performKeyEquivalent(with: event)
+        }
+        switch key {
+        case "q":
+            NSApp.terminate(nil)
+            return true
+        case ",":
+            AppEnvironment.shared.showSettingsPage()
+            return true
+        default:
+            return super.performKeyEquivalent(with: event)
+        }
+    }
+}
+
+/// 内容尺寸变化回调：`NSPanel` 没有 `MenuBarExtra` 的自动调整，只能自己跟
+private final class PanelHostingView<Content: View>: NSHostingView<Content> {
+    var onContentSizeChange: ((CGSize) -> Void)?
+    private var lastReportedSize = CGSize.zero
+
+    override func layout() {
+        super.layout()
+        let size = fittingSize
+        guard size != lastReportedSize else { return }
+        lastReportedSize = size
+        onContentSizeChange?(size)
+    }
+}
