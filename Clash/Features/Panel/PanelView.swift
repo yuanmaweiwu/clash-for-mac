@@ -54,7 +54,7 @@ struct PanelView: View {
         }
         .onExitCommand {
             if model.route != .root {
-                model.popToRoot()
+                model.popRoute()
             } else {
                 onClose()
             }
@@ -92,26 +92,38 @@ struct PanelView: View {
             if let group = model.allGroups.first(where: { $0.id == id }) {
                 pushedContent {
                     NodeListPanelView(model: model, group: group) {
-                        model.popToRoot()
+                        model.popRoute()
                     }
                 }
             }
         case .allGroups:
             pushedContent {
                 AllGroupsPanelView(model: model) {
-                    model.popToRoot()
+                    model.popRoute()
                 }
             }
         case .subscriptions:
             pushedContent {
                 SubscriptionPanelView(model: model) {
-                    model.popToRoot()
+                    model.popRoute()
+                }
+            }
+        case .subscriptionNew:
+            pushedContent {
+                SubscriptionNewPanelView(model: model) {
+                    model.popRoute()
                 }
             }
         case .connections:
             pushedContent {
                 ConnectionsPanelView(model: model) {
-                    model.popToRoot()
+                    model.popRoute()
+                }
+            }
+        case .settings:
+            pushedContent {
+                SettingsPanelView(model: model, settings: model.settings) {
+                    model.popRoute()
                 }
             }
         }
@@ -167,7 +179,8 @@ struct PanelView: View {
                 kernelVersion: model.kernelVersion,
                 onRefresh: { model.refreshProfile() },
                 onOpenConnections: { model.openConnections() },
-                onOpenLogs: { openLogs() }
+                onOpenLogs: { openLogs() },
+                onOpenSettings: { model.openSettingsPage() }
             )
             .padding(.top, Metrics.tileGap)
         }
@@ -175,14 +188,14 @@ struct PanelView: View {
         .padding(.vertical, Metrics.panelPadding)
     }
 
-    /// 底栏「日志」/ 失败 banner：打开独立日志窗口（单例，重复点击只聚焦），并收起菜单栏浮层
+    /// 底栏「日志」/ 失败 banner：打开独立日志窗口（单例，重复点击只聚焦），并收起面板浮层
     private func openLogs() {
         openWindow(id: AppWindow.logsID)
         // LSUIElement 应用不会自动到前台，窗口不激活的话用户看不到刚打开的日志
         NSApp.activate(ignoringOtherApps: true)
 
-        // `PopoverCloser` 按 keyWindow 关，此时 key 已是日志窗口，找不到浮层；
-        // `MenuBarExtra` 的浮层是 `.popUpMenu` 级别的 NSPanel（状态栏图标窗口是 `.statusBar`，不会被误关）
+        // 面板自己 `.close()` 时看不见（此时 key 已是日志窗口），这里按层级关掉浮层：
+        // 面板是 `.popUpMenu` 级别的 NSPanel，状态栏图标窗口是 `.statusBar`，不会被误关
         for window in NSApp.windows where window.isVisible && window.level == .popUpMenu {
             window.close()
         }

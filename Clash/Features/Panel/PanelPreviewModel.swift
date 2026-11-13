@@ -81,6 +81,10 @@ final class PanelPreviewModel {
     /// 正在更新 / 导入的那一条（行里显示「更新中」）
     private(set) var updatingProfileID: String?
     private(set) var isImportingProfile = false
+    /// 「添加订阅」页的失败文案：留在页内（输入框下的红字），不弹窗、不进 banner
+    private(set) var importError: String?
+    /// 刚导入成功的那一条：回到订阅列表时短暂高亮，让用户看见结果
+    private(set) var recentlyImportedProfileID: String?
     private(set) var subscriptionNotice: String?
     private(set) var speedNotice: String?
     /// 测速完成后的「刚刚更新」短暂提示
@@ -117,6 +121,7 @@ final class PanelPreviewModel {
     /// 串行链代号：新指令让旧指令让位，保证「只保留最新意图」
     @ObservationIgnored private var kernelTaskID = 0
     @ObservationIgnored private var subscriptionTask: Task<Void, Never>?
+    @ObservationIgnored private var importHighlightTask: Task<Void, Never>?
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
     @ObservationIgnored private var speedTask: Task<Void, Never>?
     @ObservationIgnored private var speedNoticeTask: Task<Void, Never>?
@@ -566,9 +571,29 @@ final class PanelPreviewModel {
     func openAllGroups() { route = .allGroups }
     func openSubscriptions() { route = .subscriptions }
     func openConnections() { route = .connections }
+
+    /// 设置页（`docs/02-UI-SPEC.md` §4.9）：只改路由，保证 App 层（⚙ / ⌘, / 菜单项）
+    /// 与面板内推入是同一个入口；面板是否已经叫出来由 App 层负责。
+    func openSettingsPage() { route = .settings }
+
+    /// 添加订阅页（§4.10）：进入时清掉上一次的失败文案
+    func openSubscriptionNewPage() {
+        importError = nil
+        route = .subscriptionNew
+    }
+
     func popToRoot() {
         connections.stopPolling()
         route = .root
+    }
+
+    /// 返回上一层：添加订阅退回订阅列表，其余二级页退回首层
+    func popRoute() {
+        if route == .subscriptionNew {
+            route = .subscriptions
+        } else {
+            popToRoot()
+        }
     }
 
     func pushGroup(_ id: String) { route = .nodes(id) }
@@ -660,6 +685,7 @@ final class PanelPreviewModel {
     func importSubscription(urlString: String) {
         guard !isProfileBusy else { return }
         isImportingProfile = true
+        importError = nil
 
         subscriptionTask = Task { [weak self] in
             guard let self else { return }
@@ -667,12 +693,13 @@ final class PanelPreviewModel {
 
             do {
                 let entry = try await self.profiles.importURL(urlString)
+                self.finishImport(entry)
                 // 首次导入会自动激活：内核若在跑（用的是内置空配置）就重启一次
                 if entry.id == self.profiles.activeProfileID {
                     self.restartKernelForProfileChange()
                 }
             } catch {
-                self.showNotice(profileErrorMessage(error, fallback: "导入失败"))
+                self.failImport(error)
             }
         }
     }
@@ -681,6 +708,7 @@ final class PanelPreviewModel {
     func importLocalSubscription(fileURL: URL) {
         guard !isProfileBusy else { return }
         isImportingProfile = true
+        importError = nil
 
         subscriptionTask = Task { [weak self] in
             guard let self else { return }
@@ -688,12 +716,40 @@ final class PanelPreviewModel {
 
             do {
                 let entry = try await self.profiles.importFile(at: fileURL)
+                self.finishImport(entry)
                 if entry.id == self.profiles.activeProfileID {
                     self.restartKernelForProfileChange()
                 }
             } catch {
-                self.showNotice(profileErrorMessage(error, fallback: "导入失败"))
+                self.failImport(error)
             }
+        }
+    }
+
+    /// 导入成功：回到订阅列表（若还在添加页）并短暂高亮新项
+    private func finishImport(_ entry: ProfileEntry) {
+        importError = nil
+        recentlyImportedProfileID = entry.id
+
+        importHighlightTask?.cancel()
+        importHighlightTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2.5))
+            guard let self, !Task.isCancelled else { return }
+            self.recentlyImportedProfileID = nil
+        }
+
+        if route == .subscriptionNew {
+            route = .subscriptions
+        }
+    }
+
+    /// 导入失败：添加页内红字；从列表页发起时仍走原来的 3s 提示条
+    private func failImport(_ error: Error) {
+        let message = profileErrorMessage(error, fallback: "导入失败")
+        importError = message
+
+        if route != .subscriptionNew {
+            showNotice(message)
         }
     }
 

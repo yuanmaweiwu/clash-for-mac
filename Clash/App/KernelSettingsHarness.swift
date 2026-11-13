@@ -1,5 +1,7 @@
 #if DEBUG
+import AppKit
 import Foundation
+import SwiftUI
 
 /// 设置 → 内核的联动自检（仅 DEBUG）：`CLASH_KERNEL_HARNESS=<mode>` 时在 UI 起来前跑并退出。
 ///
@@ -9,6 +11,8 @@ import Foundation
 /// - `keep-kernel-off`：`keepKernelOnProxyOff=false` 时关代理必须一并停内核
 /// - `corrupt`：把真实 `settings.json` 改坏 → 启动后回默认并生成 `settings.corrupt-*.json`，
 ///   验证完把原文件写回去
+/// - `panel-pages`：设置页 / 添加订阅页的路由与导入状态（临时目录，不联网）
+/// - `settings-port-restart`：改端口 → 「需要重启内核生效」→ 立即重启 → `runtime.yaml` 端口变化
 @MainActor
 enum KernelSettingsHarness {
 
@@ -44,9 +48,157 @@ enum KernelSettingsHarness {
         case "keep-kernel-off": return await runKeepKernelOff()
         case "corrupt": return await runCorruptRealFile()
         case "login": return await runLoginItem()
+        case "panel-pages": return await runPanelPages()
+        case "settings-port-restart": return await runSettingsPortRestart()
         default:
             print("FAIL unknown-mode \(mode)")
             return 1
+        }
+    }
+
+    // MARK: - 面板内两个新页面（路由 / 导入态）
+
+    private static func runPanelPages() async -> Int {
+        var failures = 0
+        let root = FileManager.default.temporaryDirectory
+            .appending(path: "clash-panel-harness-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let settings = SettingsStore(fileURL: root.appending(path: "settings.json"))
+        let store = ProfileStore(directory: root.appending(path: "profiles"))
+        let model = PanelPreviewModel(profileStore: store, settings: settings, autoStartsKernel: false)
+
+        // 1. 设置页：推入 / 返回
+        model.openSettingsPage()
+        failures += report("route-settings", model.route == .settings, "route=\(model.route)")
+        model.popRoute()
+        failures += report("route-settings-back", model.route == .root, "route=\(model.route)")
+
+        // 2. 添加订阅：订阅页 → 添加页；Esc 逐层退（popRoute 同路径）
+        model.openSubscriptions()
+        model.openSubscriptionNewPage()
+        failures += report("route-subscription-new", model.route == .subscriptionNew, "route=\(model.route)")
+
+        // 坏 URL：错误留在页内，不跳转
+        model.importSubscription(urlString: "不是链接")
+        await waitUntil(timeout: 30) { !model.isImportingProfile }
+        failures += report(
+            "import-error-shown",
+            model.importError != nil,
+            "error=\(model.importError ?? "-")"
+        )
+        failures += report(
+            "import-error-stays-on-page",
+            model.route == .subscriptionNew,
+            "route=\(model.route)"
+        )
+
+        model.popRoute()
+        failures += report(
+            "route-subscription-new-back",
+            model.route == .subscriptions,
+            "route=\(model.route)"
+        )
+
+        // 3. 本地 YAML 成功：回订阅列表 + 高亮新项
+        model.openSubscriptionNewPage()
+        let yamlURL = root.appending(path: "harness.yaml")
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try? """
+        mixed-port: 7890
+        proxies: []
+        proxy-groups: []
+        rules:
+          - MATCH,DIRECT
+        """.write(to: yamlURL, atomically: true, encoding: .utf8)
+
+        model.importLocalSubscription(fileURL: yamlURL)
+        await waitUntil(timeout: 120) { !model.isImportingProfile }
+        failures += report(
+            "local-import-succeeds",
+            store.entries.count == 1,
+            "count=\(store.entries.count) err=\(model.importError ?? "-")"
+        )
+        failures += report(
+            "local-import-returns-to-list",
+            model.route == .subscriptions,
+            "route=\(model.route)"
+        )
+        failures += report(
+            "local-import-highlighted",
+            model.recentlyImportedProfileID == store.entries.first?.id,
+            "highlight=\(model.recentlyImportedProfileID ?? "-")"
+        )
+
+        // 4. 两个页面能真的布出来（316 = 340 面板宽减左右 12pt；高度 618 与其它二级页一致）
+        let settingsView = NSHostingView(
+            rootView: SettingsPanelView(model: model, settings: settings, onBack: {})
+        )
+        settingsView.frame = NSRect(x: 0, y: 0, width: 316, height: 618)
+        settingsView.layoutSubtreeIfNeeded()
+        failures += report(
+            "settings-view-layout",
+            settingsView.fittingSize.width == 316 && settingsView.fittingSize.height == 618,
+            "fitting=\(settingsView.fittingSize)"
+        )
+
+        model.openSubscriptionNewPage()
+        let newView = NSHostingView(rootView: SubscriptionNewPanelView(model: model, onBack: {}))
+        newView.frame = NSRect(x: 0, y: 0, width: 316, height: 618)
+        newView.layoutSubtreeIfNeeded()
+        failures += report(
+            "subscription-new-view-layout",
+            newView.fittingSize.width == 316 && newView.fittingSize.height == 618,
+            "fitting=\(newView.fittingSize)"
+        )
+
+        try? FileManager.default.removeItem(at: root)
+        return failures
+    }
+
+    // MARK: - 端口改动 → 需要重启 → 立即重启
+
+    private static func runSettingsPortRestart() async -> Int {
+        var failures = 0
+        let settings = SettingsStore()
+        let original = settings.mixedPort
+        print("NOTE original port=\(original)")
+
+        let kernel = KernelService(settings: settings)
+        let model = PanelPreviewModel(kernel: kernel, settings: settings, autoStartsKernel: false)
+
+        await kernel.start()
+        failures += report(
+            "kernel-running",
+            kernel.phase == .running,
+            "phase=\(kernel.phase) err=\(kernel.lastError?.userMessage ?? "-")"
+        )
+        failures += report("no-restart-needed-before", !model.needsKernelRestartForSettings)
+
+        let newPort = 17891
+        settings.mixedPort = newPort
+        failures += report("restart-needed-after-port-change", model.needsKernelRestartForSettings)
+
+        model.restartKernelForSettings()
+        await waitUntil(timeout: 90) { !model.isApplyingSettings && kernel.activeMixedPort == newPort }
+        failures += report("restart-applied", kernel.activeMixedPort == newPort, "active=\(kernel.activeMixedPort ?? -1)")
+
+        let runtime = (try? String(contentsOf: AppPaths.runtimeConfigURL, encoding: .utf8)) ?? ""
+        failures += report("runtime-mixed-port", runtime.contains("mixed-port: \(newPort)"))
+
+        // 还原：端口写回原值并再重启一次，别把测试痕迹留在真实设置里
+        settings.mixedPort = original
+        model.restartKernelForSettings()
+        await waitUntil(timeout: 90) { !model.isApplyingSettings && kernel.activeMixedPort == original }
+        failures += report("restored-port", kernel.activeMixedPort == original, "active=\(kernel.activeMixedPort ?? -1)")
+
+        await kernel.stop()
+        return failures
+    }
+
+    /// 等一个条件成立（主线程不阻塞：harness 已经在 MainActor 的 Task 里）
+    private static func waitUntil(timeout: TimeInterval, _ condition: () -> Bool) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() && Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(100))
         }
     }
 

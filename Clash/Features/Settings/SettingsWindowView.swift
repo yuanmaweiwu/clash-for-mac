@@ -448,33 +448,6 @@ struct SettingsWindowView: View {
     }
 }
 
-/// UA 选项：与 ADR-0006 的三个预设 + 自定义一一对应（空串 = 默认 `mihomo/<版本>`）
-enum UserAgentChoice: String, CaseIterable, Identifiable, Hashable {
-    case systemDefault
-    case clashVerge
-    case clashMeta
-    case custom
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .systemDefault: "默认 mihomo/\(SubscriptionUserAgent.bundledKernelVersion)"
-        case .clashVerge: "clash-verge"
-        case .clashMeta: "ClashMetaForAndroid"
-        case .custom: "自定义"
-        }
-    }
-
-    static func resolve(from value: String) -> UserAgentChoice {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return .systemDefault }
-        if trimmed == SubscriptionUserAgent.presets[0] { return .clashVerge }
-        if trimmed == SubscriptionUserAgent.presets[1] { return .clashMeta }
-        return .custom
-    }
-}
-
 #if DEBUG
 #Preview("设置窗口") {
     let settings = SettingsStore(fileURL: URL.temporaryDirectory.appending(path: "clash-preview-settings.json"))

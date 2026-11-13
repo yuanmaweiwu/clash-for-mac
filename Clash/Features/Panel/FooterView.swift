@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 
 /// 底部行 32pt：左「N 分钟前更新 + 刷新」，右 连接数 / 日志 / 设置（§3.2）。
@@ -14,8 +13,8 @@ struct FooterView: View {
     let onOpenConnections: () -> Void
     /// 底栏「日志」图标：打开独立日志窗口
     let onOpenLogs: () -> Void
-
-    @Environment(\.openWindow) private var openWindow
+    /// 底栏「设置」图标：推入面板内设置页（不再开独立窗口）
+    let onOpenSettings: () -> Void
 
     var body: some View {
         HStack(spacing: 0) {
@@ -51,16 +50,10 @@ struct FooterView: View {
             }
 
             IconButtonView(systemName: "gearshape", label: "设置", iconSize: 12) {
-                openSettingsWindow()
+                onOpenSettings()
             }
         }
         .frame(height: Metrics.footerHeight)
-    }
-
-    /// 打开设置窗口（单例），并把 App 带到前台——LSUIElement 应用否则看不到新窗口
-    private func openSettingsWindow() {
-        openWindow(id: AppWindow.settingsID)
-        NSApp.activate(ignoringOtherApps: true)
     }
 
     private var connectionCountLabel: Text {        guard let connectionCount else { return Text("连接数未知") }

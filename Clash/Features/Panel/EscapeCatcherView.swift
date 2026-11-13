@@ -19,7 +19,7 @@ final class EscapeCatcherView: NSView {
             let handled = MainActor.assumeIsolated { () -> Bool in
                 guard let self, self.window?.isKeyWindow == true else { return false }
                 if let model = self.model, model.route != .root {
-                    model.popToRoot()
+                    model.popRoute()
                 } else {
                     self.onEscape?()
                 }

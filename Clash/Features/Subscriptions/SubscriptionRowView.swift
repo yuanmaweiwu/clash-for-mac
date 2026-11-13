@@ -5,6 +5,8 @@ import SwiftUI
 struct SubscriptionRowView: View {
     let profile: ProfileEntry
     let isActive: Bool
+    /// 刚导入成功：短暂高亮，让用户看见结果（2.5s 后由模型清掉）
+    var isHighlighted: Bool = false
     let isUpdating: Bool
     let onActivate: () -> Void
     let onUpdate: () -> Void
@@ -41,6 +43,7 @@ struct SubscriptionRowView: View {
         .onHover { isHovering = $0 }
         .animation(.easeInOut(duration: 0.14), value: isHovering)
         .animation(.easeInOut(duration: 0.18), value: isActive)
+        .animation(.easeInOut(duration: 0.18), value: isHighlighted)
     }
 
     private var rowBody: some View {
@@ -52,7 +55,7 @@ struct SubscriptionRowView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(profile.name)
-                    .font(isActive ? Typography.title : Typography.body)
+                    .font(isActive || isHighlighted ? Typography.title : Typography.body)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -138,9 +141,9 @@ struct SubscriptionRowView: View {
 
     @ViewBuilder
     private var rowBackground: some View {
-        if isActive || showsHover {
+        if isActive || isHighlighted || showsHover {
             RoundedRectangle(cornerRadius: Metrics.radiusRow, style: .continuous)
-                .fill(isActive ? Theme.rowSelected : Theme.rowHover)
+                .fill(isActive || isHighlighted ? Theme.rowSelected : Theme.rowHover)
                 .padding(.horizontal, Metrics.pillInsetH)
                 .padding(.vertical, Metrics.listPillInsetV)
         }

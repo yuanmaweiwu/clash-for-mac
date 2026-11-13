@@ -19,32 +19,47 @@ struct SubscriptionPanelView: View {
 
             if model.subscriptions.isEmpty {
                 EmptySubscriptionView(
-                    onImportURL: { showURLImport() },
+                    onImportURL: { model.openSubscriptionNewPage() },
                     onImportYAML: { chooseYAMLFile() }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollView(.vertical) {
-                    LazyVStack(spacing: 0) {
-                        ForEach(model.subscriptions) { profile in
-                            SubscriptionRowView(
-                                profile: profile,
-                                isActive: profile.id == model.activeSubscriptionID,
-                                isUpdating: profile.id == model.updatingProfileID,
-                                onActivate: { model.activateSubscription(profile.id) },
-                                onUpdate: { model.updateSubscription(profile.id) },
-                                onRename: {
-                                    SubscriptionEditPanel.show(mode: .rename(current: profile.name)) { name in
-                                        model.renameSubscription(profile.id, to: name)
-                                    }
-                                },
-                                onCopyLink: { copyLink(of: profile) },
-                                onDelete: { model.deleteSubscription(profile.id) }
-                            )
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical) {
+                        LazyVStack(spacing: 0) {
+                            ForEach(model.subscriptions) { profile in
+                                SubscriptionRowView(
+                                    profile: profile,
+                                    isActive: profile.id == model.activeSubscriptionID,
+                                    isHighlighted: profile.id == model.recentlyImportedProfileID,
+                                    isUpdating: profile.id == model.updatingProfileID,
+                                    onActivate: { model.activateSubscription(profile.id) },
+                                    onUpdate: { model.updateSubscription(profile.id) },
+                                    onRename: {
+                                        SubscriptionEditPanel.showRename(current: profile.name) { name in
+                                            model.renameSubscription(profile.id, to: name)
+                                        }
+                                    },
+                                    onCopyLink: { copyLink(of: profile) },
+                                    onDelete: { model.deleteSubscription(profile.id) }
+                                )
+                                .id(profile.id)
+                            }
+                        }
+                    }
+                    .scrollIndicators(.hidden)
+                    .onAppear {
+                        // 导入成功时页面才被推回来：那时 `onChange` 已经错过，这里补一次定位
+                        guard let id = model.recentlyImportedProfileID else { return }
+                        proxy.scrollTo(id, anchor: .center)
+                    }
+                    .onChange(of: model.recentlyImportedProfileID) { _, id in
+                        guard let id else { return }
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            proxy.scrollTo(id, anchor: .center)
                         }
                     }
                 }
-                .scrollIndicators(.hidden)
 
                 footer
             }
@@ -67,20 +82,9 @@ struct SubscriptionPanelView: View {
 
             Spacer(minLength: 6)
 
-            Menu {
-                Button("导入订阅…") { showURLImport() }
-                Button("选择 YAML…") { chooseYAMLFile() }
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.textSecondary)
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
+            IconButtonView(systemName: "plus", label: "添加订阅", iconSize: 12) {
+                model.openSubscriptionNewPage()
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .accessibilityLabel(Text("添加订阅"))
         }
         .frame(height: Metrics.cardHeaderHeight)
     }
@@ -106,12 +110,6 @@ struct SubscriptionPanelView: View {
 
     private func isUpdating(_ profile: ProfileEntry) -> Bool {
         profile.id == model.updatingProfileID
-    }
-
-    private func showURLImport() {
-        SubscriptionEditPanel.show(mode: .url) { url in
-            model.importSubscription(urlString: url)
-        }
     }
 
     /// `NSOpenPanel` 只在 UI 层做；store 只接收 fileURL
