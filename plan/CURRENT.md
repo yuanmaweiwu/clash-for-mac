@@ -16,19 +16,20 @@
 - [x] 路线图：`docs/03-ROADMAP.md`（v0.1 → v1.0 + 风险登记）
 - [x] ADR 0001–0005（自带内核 / macOS 15 / 手写 xcodeproj / TUN 与 helper 进 v1 / Yams 定案）
 - [x] 依赖定案：`Yams` 为唯一第三方解析库，Sparkle 到 v1.0；界面中文为主、预留本地化
-- [x] 技能补齐：`core-process`（内核/API/TUN）、`menubar-ui`（状态栏/浮层）
+- [x] 技能补齐：`core-process`（内核/API/TUN）、`menubar-ui`（状态栏/浮层）、`system-proxy`（代理快照还原）
 - [x] UI 规范 `docs/02-UI-SPEC.md`：Token / 340×640 面板结构 / 组件四态 / 7 处动效 / 无障碍 / 空错态
   - 已裁定冲突：状态栏图标语义统一为「是否接管流量」；Dynamic Type 分场景（面板固定、设置窗口支持）
 - [x] 内核获取：`Scripts/fetch-kernel.sh` 取上游 latest arm64；已实测 v1.19.34（arm64，57MB）
 
 ## 进行中
 
-- [ ] UI 规范待用户过目（`docs/02-UI-SPEC.md` 已产出 400 行，已自查并消解与技能的口径冲突）
+- [ ] 静态原型：`Prototype/`（SPM 可执行包，假数据，designer 实现中）→ 用户肉眼过视觉
+- [ ] UI 规范待用户过目（`docs/02-UI-SPEC.md` 已自查并消解与技能的口径冲突）
 
 ## 下一步（按优先级）
 
 1. 用户确认视觉方向 → 定稿 UI 规范
-2. 补齐技能（全部项目级）：`system-proxy`、`swift-style`、`build-release`
+2. 补齐技能（全部项目级）：`swift-style`、`build-release`
 3. v0.1 骨架：`.xcodeproj`（App / Helper / Tests）+ `MenuBarExtra` 空面板 + helper 安装 + 内核启停 + `/version`
 4. 内核签名与 helper spawn 校验方案（v0.1 内落地）
 

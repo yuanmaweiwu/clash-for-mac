@@ -8,6 +8,7 @@
 ├── architecture/           # 分层 / 目录归属 / 新增 feature
 ├── core-process/           # 内核 mihomo：进程 / API / TUN / 配置注入
 ├── menubar-ui/             # 状态栏与控制中心浮层实现约定
+├── system-proxy/           # 系统代理开关与快照还原
 ├── plan/                   # 进度交接与上下文压缩（plan/CURRENT.md）
 ├── git/                    # 提交 / 回退 / 远程安全约定
 ├── swiftui-pro/            # 外部：SwiftUI 代码 review（Paul Hudson）
@@ -22,6 +23,7 @@
 | [`architecture`](./skills/architecture/SKILL.md) | 本仓 | 代码放哪层、依赖禁令、feature 骨架 | 新增/移动代码、跨 feature 复用 |
 | [`core-process`](./skills/core-process/SKILL.md) | 本仓 | 内核二进制/版本、helper 进程、API 契约、TUN、错误分类 | 内核启停、配置注入、节点/流量、升级内核 |
 | [`menubar-ui`](./skills/menubar-ui/SKILL.md) | 本仓 | MenuBarExtra 与 NSPanel、材质层级、动效、键盘与无障碍 | 写/改状态栏图标、面板、浮层 |
+| [`system-proxy`](./skills/system-proxy/SKILL.md) | 本仓 | networksetup 开关、快照、崩溃/卸载还原、端口联动 | 开/关代理、排查残留、改动网络设置 |
 | [`plan`](./skills/plan/SKILL.md) | 本仓 | 进度快照与上下文压缩 | 新开对话、续作、阶段收尾 |
 | [`git`](./skills/git/SKILL.md) | 本仓 | 自动本地 commit、中文 message、远程闸门 | 改完收尾、大改前、回退、push |
 | [`swiftui-pro`](./skills/swiftui-pro/SKILL.md) | twostraws | 九维 review：废弃 API / 性能 / 数据流 / 无障碍 / 并发 | review、合并前检查 |
@@ -29,8 +31,7 @@
 
 ## 计划中
 
-`swift-style`（写法约定）、`code-review`（分级审核）、`build-release`（构建/签名/公证/CI）、
-`system-proxy`（networksetup 快照/还原）。
+`swift-style`（写法约定）、`code-review`（分级审核）、`build-release`（构建/签名/公证/CI）。
 
 > 全部装到本目录（`.agents/skills/`），见根 `AGENTS.md` <铁律 0>。
 
