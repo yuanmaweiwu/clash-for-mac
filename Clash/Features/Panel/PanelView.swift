@@ -137,6 +137,7 @@ struct PanelView: View {
                 updatedText: model.showsLiveTraffic ? model.updatedText : "未导入配置",
                 // v0.2：换成 /connections 的真实连接数
                 connectionCount: nil,
+                kernelVersion: model.kernelVersion,
                 onRefresh: { model.refreshProfile() }
             )
             .padding(.top, Metrics.tileGap)

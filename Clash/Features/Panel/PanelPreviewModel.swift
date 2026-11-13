@@ -91,6 +91,9 @@ final class PanelPreviewModel {
     /// 内核相位（转发 `KernelService`，只读）
     var phase: KernelPhase { kernel.phase }
 
+    /// 内核版本（`/version` 的 `version` 字段）；未运行时为 nil
+    var kernelVersion: String? { kernel.kernelVersion }
+
     /// 启动 / 停止过程中：连接磁贴不可再点
     var isKernelBusy: Bool { kernel.isTransitioning }
 

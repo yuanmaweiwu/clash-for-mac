@@ -6,6 +6,8 @@ struct FooterView: View {
     let updatedText: String
     /// 连接数；v0.1 没接 `/connections`，传 nil → 显示「—」，不编造数字
     let connectionCount: Int?
+    /// 内核版本（如 `1.19.34`）；未运行传 nil → 显示「—」
+    let kernelVersion: String?
     let onRefresh: () -> Void
 
     @Environment(\.openSettings) private var openSettings
@@ -21,6 +23,12 @@ struct FooterView: View {
             }
 
             Spacer(minLength: 8)
+
+            Text(versionText)
+                .font(.system(size: 11).monospacedDigit())
+                .foregroundStyle(Theme.textTertiary)
+                .padding(.trailing, 8)
+                .accessibilityLabel(versionLabel)
 
             HStack(spacing: 0) {
                 IconButtonView(systemName: "link", label: "连接列表", iconSize: 13) {
@@ -53,5 +61,16 @@ struct FooterView: View {
     private var connectionCountLabel: Text {
         guard let connectionCount else { return Text("连接数未知") }
         return Text("连接数 \(connectionCount)")
+    }
+
+    /// 版本号统一带 `v` 前缀；未运行显示「—」，不编造
+    private var versionText: String {
+        guard let kernelVersion, !kernelVersion.isEmpty else { return "—" }
+        return kernelVersion.hasPrefix("v") ? kernelVersion : "v\(kernelVersion)"
+    }
+
+    private var versionLabel: Text {
+        guard let kernelVersion, !kernelVersion.isEmpty else { return Text("内核版本未知") }
+        return Text("内核版本 \(versionText)")
     }
 }
