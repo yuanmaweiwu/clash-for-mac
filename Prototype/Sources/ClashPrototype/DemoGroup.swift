@@ -19,8 +19,12 @@ struct DemoGroup: Identifiable, Sendable {
         self.selectedNodeID = nodes.first?.id
     }
 
-    /// 卡内只露 3 行，其余走「还有 N 个 ›」
-    var visibleNodes: [DemoNode] { Array(nodes.prefix(3)) }
+    /// 卡内只露 3 行：选中项置顶，其后按配置顺序取 2 个
+    var orderedNodes: [DemoNode] {
+        guard let selected = selectedNode else { return Array(nodes.prefix(3)) }
+        let others = nodes.filter { $0.id != selected.id }
+        return [selected] + others.prefix(2)
+    }
 
     var extraCount: Int { max(nodes.count - 3, 0) }
 

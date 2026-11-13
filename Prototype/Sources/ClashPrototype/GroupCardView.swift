@@ -1,14 +1,13 @@
 import SwiftUI
 
-/// 分组卡：卡头 32 + 三行节点 32 = 128pt，卡内不滚动（§3.4 / §4.6）。
-/// 卡头右侧「还有 N 个 ›」是二级面板入口；行点击立即选中。
-/// hover / 选中胶囊左右内缩 6pt、上下 2pt，避免与卡片描边或分隔线粘在一起。
+/// 分组卡：卡头 32 + 三行节点 32 = 128pt，卡内不滚动、不画任何分隔线（§3.4 / §4.6）。
+/// 选中项恒在首行，切换时整组三行交叉淡入（不整卡飞入）。
 @MainActor
 struct GroupCardView: View {
     let group: DemoGroup
     let onOpen: () -> Void
     let onSelect: (UUID) -> Void
-    /// 原型调试：强制某一行 hover（离屏快照用）
+    /// 原型调试：强制某一行 hover（离屏快照用，按显示顺序）
     var debugHoverRowIndex: Int?
     /// 原型调试：强制卡头 hover
     var debugHoverHeader = false
@@ -21,12 +20,25 @@ struct GroupCardView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            // 分隔线单独占一行，任何 hover / 选中底都盖不住它
-            Rectangle()
-                .fill(Theme.hairline)
-                .frame(height: Metrics.cardSeparatorHeight)
 
-            ForEach(Array(group.visibleNodes.enumerated()), id: \.element.id) { index, node in
+            rows
+                .id(group.selectedNodeID)
+                .transition(.opacity)
+        }
+        .animation(.easeInOut(duration: 0.18), value: group.selectedNodeID)
+        .background {
+            RoundedRectangle(cornerRadius: Metrics.radiusCard, style: .continuous)
+                .fill(Theme.card)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: Metrics.radiusCard, style: .continuous)
+                .strokeBorder(Theme.hairline, lineWidth: Metrics.hairline)
+        }
+    }
+
+    private var rows: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(group.orderedNodes.enumerated()), id: \.element.id) { index, node in
                 NodeRowView(
                     node: node,
                     isSelected: group.isSelected(node),
@@ -35,14 +47,6 @@ struct GroupCardView: View {
                     action: { onSelect(node.id) }
                 )
             }
-        }
-        .background {
-            RoundedRectangle(cornerRadius: Metrics.radiusCard, style: .continuous)
-                .fill(Theme.card)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: Metrics.radiusCard, style: .continuous)
-                .strokeBorder(Theme.hairline, lineWidth: Metrics.hairline)
         }
     }
 
@@ -63,7 +67,7 @@ struct GroupCardView: View {
                     .foregroundStyle(Theme.textTertiary)
             }
             .padding(.horizontal, Metrics.cardPadding)
-            .frame(height: Metrics.groupCardHeaderHeight)
+            .frame(height: Metrics.cardHeaderHeight)
             .frame(maxWidth: .infinity)
             .background {
                 if showsHeaderPill {

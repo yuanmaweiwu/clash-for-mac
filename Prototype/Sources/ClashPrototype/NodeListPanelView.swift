@@ -19,6 +19,7 @@ struct NodeListPanelView: View {
                             isSelected: group.isSelected(node),
                             isAvailable: node.latency != nil,
                             rowHeight: 44,
+                            pillInsetV: Metrics.listPillInsetV,
                             action: { model.selectNode(groupID: group.id, nodeID: node.id) }
                         )
                     }

@@ -41,14 +41,24 @@ enum PrototypeSnapshot {
         let subscriptions = PrototypeModel()
         subscriptions.route = .subscriptions
 
-        // 首行 hover：把选中挪到第二行，让第一行真的呈 hover 灰
+        // 首行 hover：首行恒为选中项，用来核胶囊与卡顶的 2pt 留白
         let hoverFirst = PrototypeModel()
         hoverFirst.pinAllGroups()
-        if let group = hoverFirst.groups.first, group.nodes.count > 1 {
-            hoverFirst.selectNode(groupID: group.id, nodeID: group.nodes[1].id)
-        }
         hoverFirst.debugHoverRowIndex = 0
         hoverFirst.debugHoverCardIndex = 0
+
+        // 相邻 hover：第二行 hover（灰），核对与上一行胶囊的间隔
+        let hoverAdjacent = PrototypeModel()
+        hoverAdjacent.pinAllGroups()
+        hoverAdjacent.debugHoverRowIndex = 1
+        hoverAdjacent.debugHoverCardIndex = 0
+
+        // 切到「新加坡 04」后，它必须置顶
+        let selectedTop = PrototypeModel()
+        if let group = selectedTop.groups.first,
+           let node = group.nodes.first(where: { $0.name == "新加坡 04" }) {
+            selectedTop.selectNode(groupID: group.id, nodeID: node.id)
+        }
 
         // 末行 hover：用第二张卡（新加坡 04 可用），看卡片底边留白
         let hoverLast = PrototypeModel()
@@ -106,6 +116,8 @@ enum PrototypeSnapshot {
         renderPanel(hoverGroup, name: "hover-group-row@2x.png", appearance: .aqua, in: directory)
         renderPanel(hoverSubscription, name: "hover-subscription-row@2x.png", appearance: .aqua, in: directory)
         renderPanel(hoverFirst, name: "hover-first-row@2x.png", appearance: .aqua, in: directory)
+        renderPanel(hoverAdjacent, name: "hover-adjacent-row@2x.png", appearance: .aqua, in: directory)
+        renderPanel(selectedTop, name: "panel-selected-top@2x.png", appearance: .aqua, in: directory)
         renderPanel(hoverLast, name: "hover-last-row@2x.png", appearance: .aqua, in: directory)
         renderPanel(hoverHeader, name: "hover-header@2x.png", appearance: .aqua, in: directory)
         renderPanel(hoverDark, name: "hover-dark@2x.png", appearance: .darkAqua, in: directory)

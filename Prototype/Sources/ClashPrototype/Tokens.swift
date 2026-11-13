@@ -148,13 +148,11 @@ enum Metrics {
     static let cardHeaderHeight: CGFloat = 32
     static let rowHeight: CGFloat = 32
     static let cardPadding: CGFloat = 10
-    /// hover / 选中胶囊相对行内缩：左右 6、上下 4（32pt 行 → 胶囊 24，文字距胶囊边 4）
+    /// 一级卡片 hover / 选中胶囊：左右 6、上下 2（32pt 行 → 胶囊 28，文字距胶囊边 4）
     static let pillInsetH: CGFloat = 6
-    static let pillInsetV: CGFloat = 4
-    /// 分组卡卡头：32 − 分隔线，保证 卡头 + 分隔线 + 3 行 = 128
-    static let groupCardHeaderHeight: CGFloat = 31
-    /// VStack 里 0.5pt 会被压成 0，分隔线固定 1pt
-    static let cardSeparatorHeight: CGFloat = 1
+    static let pillInsetV: CGFloat = 2
+    /// 二级列表（44/48pt 行）胶囊：上下 4（行高更高，胶囊更厚）
+    static let listPillInsetV: CGFloat = 4
 
     // 圆角
     static let radiusPanel: CGFloat = 12

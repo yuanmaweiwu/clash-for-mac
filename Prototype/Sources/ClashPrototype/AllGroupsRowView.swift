@@ -38,7 +38,7 @@ struct AllGroupsRowView: View {
                 RoundedRectangle(cornerRadius: Metrics.radiusRow, style: .continuous)
                     .fill(isActive ? Theme.rowSelected : Theme.rowHover)
                     .padding(.horizontal, Metrics.pillInsetH)
-                    .padding(.vertical, Metrics.pillInsetV)
+                    .padding(.vertical, Metrics.listPillInsetV)
             }
         }
         .contentShape(Rectangle())

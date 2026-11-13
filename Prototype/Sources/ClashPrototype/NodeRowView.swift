@@ -12,6 +12,8 @@ struct NodeRowView: View {
     var forcedHover = false
     /// 二级列表用 44，卡片内保持 32
     var rowHeight: CGFloat?
+    /// 二级列表胶囊上下内缩 4；卡片内用 token 的 2
+    var pillInsetV: CGFloat?
     let action: () -> Void
 
     @State private var isHovering = false
@@ -66,7 +68,7 @@ struct NodeRowView: View {
                 RoundedRectangle(cornerRadius: Metrics.radiusRow, style: .continuous)
                     .fill(isSelected ? Theme.rowSelected : Theme.rowHover)
                     .padding(.horizontal, Metrics.pillInsetH)
-                    .padding(.vertical, Metrics.pillInsetV)
+                    .padding(.vertical, pillInsetV ?? Metrics.pillInsetV)
             }
         }
         .contentShape(Rectangle())
