@@ -78,63 +78,106 @@ final class KernelService {
         defer { isTransitioning = false }
 
         do {
-            let binaryURL = try Self.bundledKernelURL()
-
-            // 强杀兜底：`SIGKILL` / 系统强杀时 `AppTerminationGuard` 没机会跑，旧内核会被
-            // launchd 收留并继续占着 mixed-port。先按「可执行路径完全相等」清掉，再起新的。
-            // 正常退出 / SIGTERM 路径不经过这里（那条路已由 `AppTerminationGuard` 处理）。
-            await OrphanKernelReaper.reapOrphans(matching: binaryURL)
-
-            // 清完孤儿仍被占 → 是别的程序占着（或孤儿杀不掉）：报 portInUse，不硬起
-            let mixedPort = settings.mixedPort
-            guard PortAllocator.isAvailable(port: mixedPort) else {
-                Self.logger.error("mixed-port \(mixedPort) 已被占用，拒绝启动内核")
-                throw KernelError.portInUse
-            }
-
-            let ports = try PortAllocator.allocateDistinct(2)
-
-            // 配置来源：CLASH_PROFILE（DEBUG）/ profiles 下唯一一份，都没有则用内置空配置
-            let profileURL = ProfileLocator.locate()
-            hasProfile = profileURL != nil
-            let injected = RuntimeConfigBuilder.Injected(
-                mixedPort: mixedPort,
-                allowLAN: settings.allowLAN,
-                controllerPort: ports[0],
-                dnsPort: ports[1],
-                secret: RuntimeConfigBuilder.makeSecret(),
-                logLevel: settings.logLevel.cliValue
-            )
-            let runtimeURL = try RuntimeConfigBuilder.build(from: profileURL, injected: injected)
-            Self.logger.notice("使用配置 profile=\(ProfileLocator.displayName(for: profileURL), privacy: .public)")
-
-            // 校验通过才进 starting（core-process §4）
-            try await validateConfiguration(binaryURL: binaryURL, configPath: runtimeURL)
-
-            let runner = runner ?? makeRunner(binaryURL: binaryURL)
-            setPhase(.starting)
-            let pid = try await runner.start(configPath: runtimeURL)
-
-            port = injected.controllerPort
-            secret = injected.secret
-            let client = ClashAPIClient(
-                port: injected.controllerPort,
-                secret: injected.secret,
-                timeout: Self.readinessRequestTimeout
-            )
-            self.client = client
-
-            Self.logger.notice("内核进程已拉起 pid=\(pid) controller=127.0.0.1:\(injected.controllerPort)")
-
-            kernelVersion = try await waitUntilReady(client: client, runner: runner)
-            activeMixedPort = injected.mixedPort
-            activeLogLevel = injected.logLevel
-            activeAllowLAN = injected.allowLAN
-            setPhase(.running)
-            Self.logger.notice("内核就绪 version=\(self.kernelVersion ?? "?", privacy: .public)")
+            try await performStart()
         } catch {
-            await failStart(with: error)
+            // 占用者是本产品自己留下的内核（DerivedData / 另一份拷贝 / 强杀残留）：回收后
+            // 自动重试一次，不该让用户为我们的孤儿买单。别家进程占用才需要用户动手。
+            guard let kernelError = error as? KernelError,
+                  case .portInUse(_, let occupant) = kernelError,
+                  occupant?.isProductKernel == true,
+                  await reapProductKernelAndWaitForPort() else {
+                await failStart(with: error)
+                return
+            }
+            Self.logger.notice("占用端口的本产品内核已回收，重试启动一次")
+            do {
+                try await performStart()
+            } catch {
+                await failStart(with: error)
+            }
         }
+    }
+
+    /// 一次完整的启动尝试：孤儿回收 → 端口确认 → 配置生成校验 → 拉起 → 等就绪。
+    private func performStart() async throws {
+        let binaryURL = try Self.bundledKernelURL()
+
+        // 强杀兜底：`SIGKILL` / 系统强杀时 `AppTerminationGuard` 没机会跑，旧内核会被
+        // launchd 收留并继续占着 mixed-port。判据是「本产品的任意构建」（见
+        // `KernelProcessIdentity`），DerivedData 里跑过的版本也会被收掉。
+        // 正常退出 / SIGTERM 路径不经过这里（那条路已由 `AppTerminationGuard` 处理）。
+        await OrphanKernelReaper.reapOrphans()
+
+        // 清完孤儿仍被占 → 是别的程序占着（或孤儿杀不掉）：报 portInUse 并带上占用者，不硬起
+        let mixedPort = settings.mixedPort
+        try await ensurePortAvailable(mixedPort)
+
+        let ports = try PortAllocator.allocateDistinct(2)
+
+        // 配置来源：CLASH_PROFILE（DEBUG）/ profiles 下唯一一份，都没有则用内置空配置
+        let profileURL = ProfileLocator.locate()
+        hasProfile = profileURL != nil
+        let injected = RuntimeConfigBuilder.Injected(
+            mixedPort: mixedPort,
+            allowLAN: settings.allowLAN,
+            controllerPort: ports[0],
+            dnsPort: ports[1],
+            secret: RuntimeConfigBuilder.makeSecret(),
+            logLevel: settings.logLevel.cliValue
+        )
+        let runtimeURL = try RuntimeConfigBuilder.build(from: profileURL, injected: injected)
+        Self.logger.notice("使用配置 profile=\(ProfileLocator.displayName(for: profileURL), privacy: .public)")
+
+        // 校验通过才进 starting（core-process §4）
+        try await validateConfiguration(binaryURL: binaryURL, configPath: runtimeURL)
+
+        let runner = runner ?? makeRunner(binaryURL: binaryURL)
+        setPhase(.starting)
+        let pid = try await runner.start(configPath: runtimeURL)
+
+        port = injected.controllerPort
+        secret = injected.secret
+        let client = ClashAPIClient(
+            port: injected.controllerPort,
+            secret: injected.secret,
+            timeout: Self.readinessRequestTimeout
+        )
+        self.client = client
+
+        Self.logger.notice("内核进程已拉起 pid=\(pid) controller=127.0.0.1:\(injected.controllerPort)")
+
+        kernelVersion = try await waitUntilReady(client: client, runner: runner, mixedPort: injected.mixedPort)
+        activeMixedPort = injected.mixedPort
+        activeLogLevel = injected.logLevel
+        activeAllowLAN = injected.allowLAN
+        setPhase(.running)
+        Self.logger.notice("内核就绪 version=\(self.kernelVersion ?? "?", privacy: .public)")
+    }
+
+    /// 端口空闲则直接过；被占就诊断占用者并抛 `portInUse`（文案带 pid / 名称）
+    private func ensurePortAvailable(_ port: Int) async throws {
+        if PortAllocator.isAvailable(port: port) { return }
+
+        let occupant = await PortOccupantProbe.listener(onPort: port)
+        Self.logger.error(
+            "mixed-port \(port) 被占用：\(occupant?.summary ?? "未知进程", privacy: .public) path=\(occupant?.executablePath ?? "未知", privacy: .public)"
+        )
+        throw KernelError.portInUse(port: port, occupant: occupant)
+    }
+
+    /// 回收本产品内核后短暂等端口释放；返回端口是否已可用
+    private func reapProductKernelAndWaitForPort() async -> Bool {
+        await OrphanKernelReaper.reapOrphans()
+        return await waitForPort(settings.mixedPort, within: .seconds(2))
+    }
+
+    private func waitForPort(_ port: Int, within timeout: Duration) async -> Bool {
+        let deadline = ContinuousClock.now + timeout
+        while ContinuousClock.now < deadline {
+            if PortAllocator.isAvailable(port: port) { return true }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return PortAllocator.isAvailable(port: port)
     }
 
     // MARK: - 停止
@@ -259,11 +302,11 @@ final class KernelService {
 
     // MARK: - 就绪探测
 
-    private func waitUntilReady(client: ClashAPIClient, runner: KernelRunner) async throws -> String {
+    private func waitUntilReady(client: ClashAPIClient, runner: KernelRunner, mixedPort: Int) async throws -> String {
         let deadline = ContinuousClock.now + Self.readinessTimeout
         while ContinuousClock.now < deadline {
             if !runner.isRunning {
-                throw classifyStartupFailure(exitCode: runner.lastExitCode ?? -1)
+                throw await classifyStartupFailure(exitCode: runner.lastExitCode ?? -1, mixedPort: mixedPort)
             }
             if let version = try? await client.version(timeout: Self.readinessRequestTimeout) {
                 return version.version
@@ -342,10 +385,12 @@ final class KernelService {
 
     // MARK: - 错误归类（只看日志关键字，不解析文本内容）
 
-    private func classifyStartupFailure(exitCode: Int32) -> KernelError {
+    private func classifyStartupFailure(exitCode: Int32, mixedPort: Int) async -> KernelError {
         let tail = logTailText()
         if tail.contains("address already in use") {
-            return .portInUse
+            // 端口在「预检」与「真正绑定」之间被抢：这里补一次占用者诊断
+            let occupant = await PortOccupantProbe.listener(onPort: mixedPort)
+            return .portInUse(port: mixedPort, occupant: occupant)
         }
         if Self.looksLikeGeodataProblem(tail) {
             return .geodataUnavailable

@@ -31,8 +31,8 @@ App ──XPC──► helper(root) ──posix_spawn──► mihomo
 - 降权时需要补 `setgroups` 时，不要硬塞进 spawn attr，改用一个极小的 setuid 包装（或先 `chown` 配置目录再以用户身份写）；**不要**让 root 内核直接写用户目录
 - 停止：先 `SIGTERM`，等 3s，再 `SIGKILL`；端口释放后再回报 `stopped`
 - 单实例保护：helper 内维护 pid + 启动时间戳；重复 `start` 返回既有实例，不重复 spawn
-- **孤儿清理**：App 被 `SIGKILL` / 系统强杀时子进程会残留。`start()` 前必须用 `libproc`（`proc_listallpids` + `proc_pidpath`）找出**可执行路径完全等于 bundle 内 mihomo** 的进程，`SIGTERM` → 2s → `SIGKILL`，再启动；**禁止按进程名模糊匹配**（会误杀 ClashX 等）
-- 启动前确认 `mixed-port` 空闲，被占则报 `portInUse`，不要硬起（两个内核抢同一端口时行为不可预测）
+- **孤儿清理**：App 被 `SIGKILL` / 系统强杀时子进程会残留。`start()` 前必须用 `libproc`（`proc_listallpids` + `proc_pidpath`）找出**本产品内核**：路径以 `/Clash.app/Contents/Resources/Kernel/mihomo` 结尾（`KernelProcessIdentity`），覆盖 DerivedData / `/Applications` / 任意副本；`SIGTERM` → 2s → `SIGKILL`，再启动；**禁止按进程名或 `contains("Clash")` 模糊匹配**（会误杀 ClashX、Clash Verge 等）。helper 的 `/Library/PrivilegedHelperTools/mihomo` 只检测、不 kill（root）
+- 启动前确认 `mixed-port` 空闲；被占则 `lsof -nP -iTCP:<port> -sTCP:LISTEN` 查出 pid + 名称，报 `portInUse`（文案带占用者），不要硬起（两个内核抢同一端口时行为不可预测）。占用者若是本产品内核 → 回收后**自动重试一次**；别家进程则留给用户
 - 崩溃重试：非用户停止的退出 → 最多 3 次（1s / 3s / 9s 退避）；仍失败则锁定为 `failed` 并上报 exit code + 最后 20 行日志
 
 ## 3. 目录布局
@@ -135,7 +135,7 @@ dns:
 | `binaryMissing` | 包内无 mihomo / 权限不对 | 重装应用 |
 | `binaryRejected` | 签名校验失败 | 重装应用（不要建议改 Gatekeeper） |
 | `configInvalid` | `-t` 非 0 | 打开配置文件 / 换配置 |
-| `portInUse` | 绑定失败（日志含 address already in use） | 去设置改端口 |
+| `portInUse` | 绑定失败（address already in use）；文案带占用者 pid / 名称 | 本产品内核 → 自动回收重试；别家 → 去设置改端口 |
 | `helperNotInstalled` | XPC 连接失败 | 引导安装 helper |
 | `permissionDenied` | 授权被拒 | 系统设置 → 登录项与扩展 |
 | `crashed` | 非预期退出 | 展示 exit code + 重试按钮 |

@@ -9,28 +9,33 @@ import OSLog
 /// 抢 7890。这里只负责这种强杀后的**唯一兜底**——正常退出 / `SIGTERM` 路径已由
 /// `AppTerminationGuard` 处理，不要在别处调用。
 ///
-/// 匹配方式：`proc_pidpath` 取进程可执行路径，与包内 mihomo 路径做「标准化后完全相等」
-/// 比较。**绝不按进程名匹配**：ClashX 自带的内核、用户自己跑的 mihomo 同名但路径不同，
-/// 按名字杀会误伤。
+/// 匹配方式：`proc_pidpath` 取进程可执行路径，按 `KernelProcessIdentity` 的**路径段精确
+/// 匹配**判据：路径以 `/Clash.app/Contents/Resources/Kernel/mihomo` 结尾即视为本产品内核，
+/// 因此 DerivedData、`/Applications` 与任意目录下的副本都会被回收（换构建跑一版后旧内核
+/// 占着 7890 就是这个场景）。**绝不按进程名匹配**：ClashX / Clash Verge 自带的内核同名但
+/// 路径不同，按名字杀会误伤。
 enum OrphanKernelReaper {
 
     private static let logger = Logger(subsystem: "com.clash.app", category: "kernel")
     private static let terminationGrace: Duration = .seconds(2)
     private static let killGrace: Duration = .milliseconds(500)
     private static let pollInterval: Duration = .milliseconds(50)
-    private static let pathBufferSize = 4 * Int(MAXPATHLEN)
 
     /// 枚举 → `SIGTERM` → 最多等 2s → 仍在则 `SIGKILL` → 等待退出。
     ///
     /// 返回**已确认退出**的 pid；`SIGKILL` 仍杀不掉的由调用方的端口检查兜住（报 `portInUse`）。
     /// 枚举 / 路径读取失败一律当作「没有孤儿」，不阻塞启动。
+    ///
+    /// helper 的 root 内核（`/Library/PrivilegedHelperTools/mihomo`）不在判据内：
+    /// 它只存在于 TUN 模式，由 `TunService` 管；这里只靠端口诊断报明确错误，不 kill root。
     @discardableResult
-    static func reapOrphans(matching binaryURL: URL) async -> [pid_t] {
-        let target = canonicalPath(of: binaryURL.path)
+    static func reapOrphans() async -> [pid_t] {
         let orphans = allPIDs().filter { pid in
             guard pid != getpid(), isAlive(pid) else { return false }
-            guard let path = executablePath(of: pid) else { return false }
-            return canonicalPath(of: path) == target
+            guard let path = KernelProcessIdentity.executablePath(of: pid),
+                  KernelProcessIdentity.isProductKernel(path: path) else { return false }
+            // 本进程自己拉起、仍在跑的内核不是孤儿（正常重启会先 `stop()`，这里只是兜底）
+            return parentPID(of: pid) != getpid()
         }
 
         guard !orphans.isEmpty else {
@@ -82,12 +87,15 @@ enum OrphanKernelReaper {
     }
 
     private static func executablePath(of pid: pid_t) -> String? {
-        var buffer = [CChar](repeating: 0, count: pathBufferSize)
-        let length = buffer.withUnsafeMutableBufferPointer { pointer in
-            proc_pidpath(pid, pointer.baseAddress, UInt32(pointer.count))
-        }
-        guard length > 0 else { return nil }
-        return String(decoding: buffer.prefix(Int(length)).map(UInt8.init(bitPattern:)), as: UTF8.self)
+        KernelProcessIdentity.executablePath(of: pid)
+    }
+
+    /// 父进程 pid：跳过本进程自己拉起的内核用
+    private static func parentPID(of pid: pid_t) -> pid_t? {
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return nil }
+        return pid_t(info.pbi_ppid)
     }
 
     // MARK: - 进程状态
@@ -107,14 +115,14 @@ enum OrphanKernelReaper {
         return pids.filter(isAlive)
     }
 
-    // MARK: - 路径规范化
+    // MARK: - 描述
 
-    /// `/var` ↔ `/private/var`、软链接、`..` 统一后再比较，避免同一文件两种写法被漏判
-    private static func canonicalPath(of path: String) -> String {
-        URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
-    }
-
+    /// 日志里带上路径：区分「DerivedData 那份」和「/Applications 那份」是排查的关键
     private static func describe(_ pids: [pid_t]) -> String {
-        pids.map(String.init).joined(separator: ", ")
+        pids.map { pid in
+            guard let path = executablePath(of: pid) else { return String(pid) }
+            return "\(pid)(\(path))"
+        }
+        .joined(separator: ", ")
     }
 }
