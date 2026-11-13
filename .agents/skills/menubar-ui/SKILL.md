@@ -36,6 +36,8 @@ MenuBarExtra {
 5. 首次安装时状态栏图标在「控制中心」之外，用户可能找不到 → 首次启动给一次引导
 6. 图标用 `Image(nsImage:)` 设 `isTemplate = true`，颜色随菜单栏自适应；不要用彩色 SF Symbol
 
+**已升级（`adr/0011`）**：本仓库现在就是 `NSStatusItem` + `NSPanel`（因为需要右键菜单与「完全退出」）。下面保留原始判断依据，供其它项目参考：
+
 **升级到 AppKit 的信号**（满足任一才换 `NSStatusItem` + `NSPanel`）：
 
 - 需要自定义「点击外部不关闭」或拖拽固定面板
