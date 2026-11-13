@@ -2,6 +2,8 @@ import SwiftUI
 
 /// 全部策略组的一行 48pt（两行：组名 + 节点数）：hover / 当前组用同一套胶囊，
 /// 当前组只加粗 + 底色，不加 ✓；星标控制是否固定到首屏（主组禁用）。
+///
+/// 整行是按钮（键盘可 Tab、可 Space 触发、有焦点环）；星标叠在行尾，自己也是一个按钮。
 @MainActor
 struct AllGroupsRowView: View {
     let group: ProxyGroupModel
@@ -10,9 +12,39 @@ struct AllGroupsRowView: View {
     let onOpen: () -> Void
 
     @State private var isHovering = false
+    @FocusState private var isRowFocused: Bool
     @FocusState private var isStarFocused: Bool
 
     var body: some View {
+        Button(action: onOpen) {
+            rowBody
+        }
+        .buttonStyle(PressableButtonStyle())
+        .focused($isRowFocused)
+        .focusEffectDisabled()
+        .accessibilityLabel(Text(group.name))
+        .accessibilityValue(Text("\(group.nodes.count) 个节点"))
+        .accessibilityHint(Text("按下查看节点"))
+        .overlay {
+            if isRowFocused {
+                RoundedRectangle(cornerRadius: Metrics.radiusRow + 2, style: .continuous)
+                    .strokeBorder(Theme.focus, lineWidth: 2)
+                    .padding(-2)
+            }
+        }
+        .overlay(alignment: .trailing) {
+            starButton
+                .padding(.trailing, Space.s)
+        }
+        .frame(height: Metrics.listRowHeight)
+        .background { rowBackground }
+        .onHover { isHovering = $0 }
+        .animation(.easeInOut(duration: 0.14), value: isHovering)
+        .animation(.easeInOut(duration: 0.18), value: isActive)
+    }
+
+    /// 文字区右侧给星标留 28pt 热区 + 6pt 呼吸
+    private var rowBody: some View {
         HStack(spacing: Space.m) {
             VStack(alignment: .leading, spacing: Space.hair) {
                 Text(group.name)
@@ -21,29 +53,25 @@ struct AllGroupsRowView: View {
                     .lineLimit(1)
                 Text("\(group.nodes.count) 个节点")
                     .font(Typography.caption)
-                    .foregroundStyle(Theme.textTertiary)
+                    .foregroundStyle(Theme.textSecondary)
             }
 
             Spacer(minLength: Space.s)
-
-            starButton
         }
-        .padding(.horizontal, Metrics.cardPadding)
-        .frame(height: Metrics.listRowHeight)
+        .padding(.leading, Metrics.cardPadding)
+        .padding(.trailing, Metrics.cardPadding + Metrics.hitTarget)
         .frame(maxWidth: .infinity)
-        .background {
-            if isActive || isHovering {
-                RoundedRectangle(cornerRadius: Metrics.radiusRow, style: .continuous)
-                    .fill(isActive ? Theme.rowSelected : Theme.rowHover)
-                    .padding(.horizontal, Metrics.pillInsetH)
-                    .padding(.vertical, Metrics.listPillInsetV)
-            }
-        }
         .contentShape(Rectangle())
-        .onTapGesture { onOpen() }
-        .onHover { isHovering = $0 }
-        .animation(.easeInOut(duration: 0.14), value: isHovering)
-        .animation(.easeInOut(duration: 0.18), value: isActive)
+    }
+
+    @ViewBuilder
+    private var rowBackground: some View {
+        if isActive || isHovering {
+            RoundedRectangle(cornerRadius: Metrics.radiusRow, style: .continuous)
+                .fill(isActive ? Theme.rowSelected : Theme.rowHover)
+                .padding(.horizontal, Metrics.pillInsetH)
+                .padding(.vertical, Metrics.listPillInsetV)
+        }
     }
 
     private var starButton: some View {
@@ -51,7 +79,7 @@ struct AllGroupsRowView: View {
             Image(systemName: group.isPinned ? "star.fill" : "star")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(starColor)
-                .frame(width: 28, height: 28)
+                .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
                 .contentShape(Rectangle())
         }
         .buttonStyle(PressableButtonStyle())

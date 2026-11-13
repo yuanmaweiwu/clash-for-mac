@@ -88,7 +88,7 @@ struct LogWindowView: View {
                     .foregroundStyle(isSelected ? Theme.textPrimary : Theme.textSecondary)
             }
             .padding(.horizontal, Space.m)
-            .frame(height: 26)
+            .frame(height: Metrics.hitTarget)
             .background {
                 RoundedRectangle(cornerRadius: Metrics.radiusRow, style: .continuous)
                     .fill(isSelected ? Theme.rowSelected : Color.clear)

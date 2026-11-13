@@ -21,7 +21,7 @@ struct ConnectionRowView: View {
 
                 Text(subtitle)
                     .font(Typography.caption)
-                    .foregroundStyle(Theme.textTertiary)
+                    .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
@@ -74,7 +74,7 @@ struct ConnectionRowView: View {
             Image(systemName: "xmark.circle.fill")
                 .font(.system(size: 14, weight: .regular))
                 .foregroundStyle(Theme.textTertiary)
-                .frame(width: 20, height: 20)
+                .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
