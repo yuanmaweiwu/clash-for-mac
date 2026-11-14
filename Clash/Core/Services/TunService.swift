@@ -485,6 +485,9 @@ final class TunService {
         // 7. 抓基线：关闭时用它判断路由 / DNS 是否复原
         baseline = await SystemNetworkProbe.capture()
 
+        // AUDIT: 真机诊断——送进去的端点是否与实际监听一致
+        Self.logger.notice("AUDIT 准备 spawn 配置=\(yaml.utf8.count)bytes controller=127.0.0.1:\(ports[0]) dns=:\(ports[1]) mixed=\(mixedPort) secretLen=\(secret.count)")
+
         // 8. 送配置 → 启动 root 内核（两步 XPC；失败时停一次防半开）
         let runner = HelperKernelRunner(client: client)
         do {
@@ -502,8 +505,10 @@ final class TunService {
         do {
             version = try await waitUntilReady(port: ports[0], secret: secret)
         } catch {
+            Self.logger.notice("AUDIT 就绪失败，准备 stop runner")
             await runner.stop()
             hasHelperKernel = false
+            Self.logger.notice("AUDIT stop runner 返回")
             // root 的 kernel.log 是 0600，用户读不到：把最可能的真实原因（geodata 缺失导致
             // 内核在等在线下载）写进 banner，而不是只留一句「未就绪」
             let geodataHint = await Self.geodataTimeoutHint(profileURL: profileURL)
@@ -543,13 +548,33 @@ final class TunService {
     private func waitUntilReady(port: Int, secret: String) async throws -> String {
         let probe = ClashAPIClient(port: port, secret: secret, timeout: 1)
         let deadline = ContinuousClock.now + Self.readinessTimeout
+        // AUDIT: 真机诊断——每次轮询的耗时与错误（区分「慢」「死」「端口/secret 不对」）
+        let began = ContinuousClock.now
+        var attempt = 0
+        Self.logger.notice("AUDIT waitUntilReady 开始 port=\(port) secretLen=\(secret.count) timeout=\(Int(Self.readinessTimeout.components.seconds))s")
         while ContinuousClock.now < deadline {
-            if let response = try? await probe.version(timeout: 1) {
+            attempt += 1
+            do {
+                let response = try await probe.version(timeout: 1)
+                let elapsed = Self.ms(from: began)
+                Self.logger.notice("AUDIT waitUntilReady 就绪 attempt=\(attempt) 耗时=\(elapsed)ms version=\(response.version, privacy: .public)")
                 return response.version
+            } catch {
+                let elapsed = Self.ms(from: began)
+                // 只记前 5 次与之后每 10 次：8s 预算下最多 80 次，全记会淹没日志
+                if attempt <= 5 || attempt % 10 == 0 {
+                    Self.logger.notice("AUDIT waitUntilReady 未就绪 attempt=\(attempt) 耗时=\(elapsed)ms port=\(port) err=\(String(describing: error), privacy: .public)")
+                }
             }
             try? await Task.sleep(for: Self.readinessPollInterval)
         }
+        Self.logger.error("AUDIT waitUntilReady 超时 attempt=\(attempt) port=\(port) 预算=\(Int(Self.readinessTimeout.components.seconds))s")
         throw TunError.notReady
+    }
+
+    private static func ms(from start: ContinuousClock.Instant) -> Int {
+        let d = ContinuousClock.now - start
+        return Int(d.components.seconds * 1000 + d.components.attoseconds / 1_000_000_000_000_000)
     }
 
     // MARK: - 关闭

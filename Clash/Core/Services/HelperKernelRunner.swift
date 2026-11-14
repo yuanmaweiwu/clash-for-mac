@@ -39,14 +39,25 @@ final class HelperKernelRunner: KernelRunner {
     /// 两步分开是协议决定：写盘失败时不必先起内核再回滚，错误也更明确。
     @discardableResult
     func start(configData: Data) async throws -> Int32 {
+        // AUDIT: 真机诊断——两步 XPC 各自的耗时（定位就绪预算被谁吃掉）
+        let t0 = ContinuousClock.now
         try await client.applyRuntimeConfig(configData)
+        let t1 = ContinuousClock.now
 
         let detail = try await client.startKernel()
+        let t2 = ContinuousClock.now
         let pid = Self.pid(from: detail)
         running = true
         lastExitCode = nil
+        let applyMs = Self.ms(from: t0, to: t1), spawnMs = Self.ms(from: t1, to: t2)
+        Self.logger.notice("AUDIT helper start applyMs=\(applyMs) spawnMs=\(spawnMs) detail=\(detail ?? "nil", privacy: .public)")
         Self.logger.notice("helper 已启动内核 pid=\(pid) 配置=\(configData.count) bytes")
         return pid
+    }
+
+    private static func ms(from: ContinuousClock.Instant, to: ContinuousClock.Instant) -> Int {
+        let d = to - from
+        return Int(d.components.seconds * 1000 + d.components.attoseconds / 1_000_000_000_000_000)
     }
 
     /// `KernelRunner` 的门面：helper 不接受路径参数，这里只负责把文件读成正文再送过去。
