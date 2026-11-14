@@ -62,11 +62,24 @@ final class KernelSupervisor: @unchecked Sendable {
     // MARK: - 启动
 
     private func startLocked() -> KernelCommandResult {
-        // 单实例：已有实例在跑就回报既有 pid，绝不重复 spawn
+        // 单实例：已有实例在跑时先比配置新鲜度（AUDIT A7）。
+        // App 每轮 `applyRuntimeConfig` 都会改写 runtime.yaml；旧进程带着旧正文（旧
+        // controller 端口 / 旧订阅）继续跑，App 端等 `/version` 只会超时。配置比进程新 →
+        // 停旧进程，按新配置重新 spawn；否则才复用。
         if let process, process.isRunning {
             let pid = process.processIdentifier
-            HelperLog.notice("内核已在运行，复用 pid=\(pid)")
-            return .success("pid=\(pid)")
+            let configMtime = Self.modificationDate(of: HelperLayout.runtimeConfigPath)
+            let startDate = KernelProcessClock.startDate(pid: pid)
+            if let configMtime, let startDate,
+               shouldRestartKernel(configMtime: configMtime, processStart: startDate) {
+                HelperLog.notice(
+                    "配置已更新（config=\(configMtime.timeIntervalSince1970) > start=\(startDate.timeIntervalSince1970)），重启内核"
+                )
+                _ = stopLocked()
+            } else {
+                HelperLog.notice("内核已在运行且配置未变，复用 pid=\(pid)")
+                return .success("pid=\(pid)")
+            }
         }
         closeLog()
 
@@ -150,6 +163,11 @@ final class KernelSupervisor: @unchecked Sendable {
     }
 
     // MARK: - 内部
+
+    /// 运行配置的 mtime（取不到 → nil，调用方按「配置未知」保守复用）
+    private static func modificationDate(of path: String) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
+    }
 
     private func waitForExit(_ process: Process, within timeout: TimeInterval) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
