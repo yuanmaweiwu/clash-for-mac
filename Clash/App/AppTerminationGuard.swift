@@ -154,6 +154,7 @@ final class AppTerminationGuard {
     /// 1. 先还原系统代理（按快照并发还原各网络服务，实测 4 个服务 ~0.9s）
     /// 2. TUN 开着就同步 `stopKernel`（root 内核不在本进程里，不发信号就永远在跑）
     /// 3. 再给本地内核发 `SIGTERM`
+    /// 4. 最后落盘文本设置与延迟缓存（侧车缓存可能很大，不能挤占前 3 步的预算）
     ///
     /// 顺序不能反：内核先死会留下「代理指向死端口」的状态 = 用户断网。
     private func runCleanup() {
@@ -165,9 +166,9 @@ final class AppTerminationGuard {
         guard !alreadyStarted else { return }
 
         let began = Date()
-        // 文本设置是 300ms 合并写、延迟缓存是 1s 合并写：退出前都落盘
-        settings.flushPendingWrite()
-        LatencyCache.shared.flush()
+        // 顺序（预算 3s 硬超时）：先还原系统代理（~0.9s），再停 TUN 内核，再停本地内核，
+        // 最后才落盘文本设置 / 延迟缓存。落盘放最后：JSON 写入在侧车缓存大时能吃掉
+        // 0.9s 预算，挤掉真正决定「用户是否断网」的代理还原。
         systemProxy.disableSynchronouslyForTermination()
 
         // helper 是 launchd 常驻，不会随 App 退出；TUN 的内核还在就会一直接管流量，
@@ -184,6 +185,10 @@ final class AppTerminationGuard {
         }
 
         kernel.shutdownForTermination()
+
+        // 文本设置是 300ms 合并写、延迟缓存是 1s 合并写：退出前都落盘
+        settings.flushPendingWrite()
+        LatencyCache.shared.flush()
 
         let elapsed = String(format: "%.3f", Date().timeIntervalSince(began))
         let snapshot = systemProxy.hasSnapshot ? "仍在" : "已删"
