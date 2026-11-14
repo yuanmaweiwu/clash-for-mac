@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import OSLog
 
@@ -749,13 +750,39 @@ final class TunService {
         await kernel.start()
     }
 
+    /// 截图 / 自检夹具（`CLASH_PREVIEW_PAGE`、`CLASH_TUN_SMOKE`、`*_HARNESS` 等）：没有用户会话
+    private static var isAutomationFixture: Bool {
+        let environment = ProcessInfo.processInfo.environment
+        if environment["CLASH_PREVIEW_PAGE"] != nil { return true }
+        if environment["CLASH_TUN_SMOKE"] != nil { return true }
+        if environment["CLASH_TUN_CONFIG_HARNESS"] != nil { return true }
+        if environment.keys.contains(where: { $0.hasPrefix("CLASH_AUDIT_") }) { return true }
+        return environment.contains { key, value in key.hasSuffix("_HARNESS") && !value.isEmpty }
+    }
+
+    /// 同 bundle 的另一个实例是否在跑（排除自己）：它在用 helper 内核时不能被我们回收
+    private static var isAnotherInstanceRunning: Bool {
+        guard let bundleID = Bundle.main.bundleIdentifier else { return false }
+        let me = ProcessInfo.processInfo.processIdentifier
+        return NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .contains { $0.processIdentifier != me }
+    }
+
     /// 启动时清理上一次会话遗留的 root 内核（`kill -9` / 崩溃时退出清理没机会跑）。
     ///
     /// helper 是 launchd 常驻，内核是它的子进程：App 没了内核照样在接管流量，而面板显示
     /// 「已关闭」——用户会以为没开 TUN 却上不了网。这里像 `OrphanKernelReaper` 一样先清掉。
+    ///
+    /// **两条前置**（AUDIT A4）：截图 / 自检夹具不承载用户会话；本 bundle 还有第二个实例时
+    /// 那个实例可能正用着这个 TUN 内核，抢过来就是「预览把用户的 TUN 杀了」。
     private func reapOrphanKernelIfNeeded() {
         Task { [weak self] in
             guard let self else { return }
+            guard !Self.isAutomationFixture else { return }
+            guard !Self.isAnotherInstanceRunning else {
+                Self.logger.notice("检测到同 bundle 的另一个实例，跳过遗留内核回收")
+                return
+            }
             // 没装组件就不去连：省一次必然失败的 XPC，也避免启动日志里出现无害的 error
             guard HelperInstaller.isInstalled else { return }
             let running = (try? await self.client.kernelState()) ?? nil
