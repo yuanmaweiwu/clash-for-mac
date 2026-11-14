@@ -136,12 +136,12 @@ enum AuditBatch2Harness {
         }
 
         let subscriptions = model.subscriptions
-        guard let gouzi = subscriptions.first(where: { $0.name.hasPrefix("机场B") }),
-              let flybit = subscriptions.first(where: { $0.name == "机场A" }) else {
-            print("SKIP B4 需要订阅「机场B」与「机场A」各一条，当前 \(subscriptions.map(\.name))")
+        guard subscriptions.count >= 2 else {
+            print("SKIP B4 需要两条订阅，当前 \(subscriptions.map(\.name))")
             return 0
         }
-        let targets: [(name: String, id: String)] = [("机场B", gouzi.id), ("机场A", flybit.id)]
+        let originalID = model.activeSubscriptionID
+        let targets: [(name: String, id: String)] = subscriptions.prefix(2).map { ($0.name, $0.id) }
         print("B4 目标订阅 \(targets.map { "\($0.name)=\($0.id)" }.joined(separator: ", "))")
         print("B4 起点 active=\(model.activeSubscriptionID ?? "nil") phase=\(kernel.phase)")
 
@@ -201,9 +201,9 @@ enum AuditBatch2Harness {
         }
         print("B4 取证：本地内核日志里真实 `启动 mihomo pid=` 次数应 ≤ 2（首启 + 末次）")
 
-        // 收尾：订阅恢复「机场B」，内核停掉，TUN / 代理保持关闭
-        if let gouzi = targets.first(where: { $0.name == "机场B" }) {
-            model.activateSubscription(gouzi.id)
+        // 收尾：订阅恢复为开始时的那条，内核停掉，TUN / 代理保持关闭
+        if let originalID {
+            model.activateSubscription(originalID)
             _ = await waitUntil(timeout: 60) { kernel.phase == .running && !kernel.isTransitioning }
         }
         await cleanup(tun: tun, kernel: kernel, systemProxy: systemProxy)

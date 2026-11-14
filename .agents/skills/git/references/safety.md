@@ -50,4 +50,4 @@
 
 ## 本仓库 remote
 
-`origin` 指向内网 Gitea（`http://内网地址:3000/Clash/Clash.git`）。内网地址不等于授权：push 仍须用户当轮明确要求。
+`origin` 可能指向自建/内网 Git 服务。内网地址不等于授权：push 仍须用户当轮明确要求。

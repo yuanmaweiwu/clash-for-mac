@@ -23,7 +23,7 @@ struct ConnectionEntry: Identifiable, Decodable, Sendable, Equatable {
 
     /// 链路里的出口节点；全内置（如 `DIRECT`）时为 nil
     ///
-    /// 内核顺序是「出口节点 → 外层策略组」（v1.19.34 实测：`["🇭🇰 香港 | 00", "机场A"]`），
+    /// 内核顺序是「出口节点 → 外层策略组」（v1.19.34 实测：`["🇭🇰 香港 | 00", "机场组"]`），
     /// 所以取**第一个**非内置项；全内置链路说明走的是直连 / 拒绝，没有节点可展示。
     var node: String? {
         chains.first { !ProxyNodeFilter.builtinNames.contains($0.uppercased()) }
@@ -96,7 +96,7 @@ extension ConnectionEntry {
         self.host = previewHost
         self.processName = processName
         self.rule = rule
-        self.chains = [node].compactMap { $0 } + ["机场A"]
+        self.chains = [node].compactMap { $0 } + ["示例组"]
         self.upload = upload
         self.download = download
         self.start = .now.addingTimeInterval(-180)

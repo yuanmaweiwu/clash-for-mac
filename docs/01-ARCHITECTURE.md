@@ -145,7 +145,7 @@ idle ──start──► starting ──ok──► running ──stop──►
 - profile 删除前若为 active：先切到另一条或停内核，**不允许删出空 active**
 - 订阅 URL 常含 token：日志、错误文案、崩溃报告一律脱敏
 - `pinnedGroups` 是 UI 偏好，只存 index，**不注入** runtime 配置
-- **主组识别**：首屏第一张卡 = 配置里第一个 `select` 组（实测真实订阅叫「机场A」，不是「节点选择」），名字一律取自配置
+- **主组识别**：首屏第一张卡 = 配置里第一个 `select` 组（实测真实订阅叫「机场名」，不是「节点选择」），名字一律取自配置
 - **geodata 共享**：内核 `-d` 目录全 profile 共用一个（首次运行会下载 `geoip.metadb` 约 8MB），不要按 profile 各建一个，否则每份订阅重复 8MB；下载源与内核同一策略，`geoip.metadb` 必需、`geosite.dat` 失败只告警
 
 ## 5. 与内核的接口面（只依赖这些）

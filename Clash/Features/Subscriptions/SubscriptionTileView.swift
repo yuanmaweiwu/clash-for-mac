@@ -124,7 +124,7 @@ struct SubscriptionTileView: View {
 }
 
 #if DEBUG
-// 五种状态夹具：正常 / 快用尽 / 已过期 / 真实订阅（机场A：100.8/128 GB，无 expire）/ 未导入。
+// 五种状态夹具：正常 / 快用尽 / 已过期 / 无到期 / 未导入。
 // 全部走生产的 `tileContent` 格式化，不是手写的假字符串。
 #Preview("订阅磁贴 · 五种状态") {
     Grid(alignment: .leading, horizontalSpacing: Metrics.tileGap, verticalSpacing: 10) {
@@ -134,7 +134,7 @@ struct SubscriptionTileView: View {
         }
         GridRow {
             tilePreviewCell("已过期", tilePreviewContent(download: 128_000_000_000, expireOffset: -10 * 86_400))
-            tilePreviewCell("机场A · 无到期", tilePreviewContent(download: 108_233_273_344, expireOffset: nil))
+            tilePreviewCell("无到期", tilePreviewContent(download: 100_000_000_000, expireOffset: nil))
         }
         GridRow {
             tilePreviewCell("未导入", .empty)
