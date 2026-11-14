@@ -107,7 +107,7 @@
 
 ### 2.5 圆角
 
-`radius/panel` 16pt（外框）· `radius/card` 12pt（分组卡、磁贴、设置卡）· `radius/row` 7pt（行选中底、chip）· `radius/track` 7pt（分段轨道）· `radius/control` 6pt（分段选中块、小控件）· `radius/dot` 50%。
+`radius/panel` 16pt（外框）· `radius/card` 12pt（分组卡、磁贴、设置卡）· `radius/row` 7pt（行选中底、chip）· `radius/track` 7pt（分段轨道）· `radius/control` 6pt（输入框、小控件）· `radius/segment-pill` 4pt（分段选中块：轨道 7 − 内距 4 = 3，取 4）· `radius/dot` 50%。
 
 约束：同一容器内不再嵌套 > 6pt 的圆角控件；任何容器圆角不超过 16pt。
 

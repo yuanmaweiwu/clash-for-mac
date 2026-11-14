@@ -118,10 +118,10 @@ struct SegmentBarView: View {
     }
 
     private var selectedPill: some View {
-        RoundedRectangle(cornerRadius: Metrics.radiusControl, style: .continuous)
+        RoundedRectangle(cornerRadius: Metrics.radiusSegmentPill, style: .continuous)
             .fill(Theme.opaque)
             .overlay {
-                RoundedRectangle(cornerRadius: Metrics.radiusControl, style: .continuous)
+                RoundedRectangle(cornerRadius: Metrics.radiusSegmentPill, style: .continuous)
                     .strokeBorder(Theme.hairline, lineWidth: Metrics.hairline)
             }
     }

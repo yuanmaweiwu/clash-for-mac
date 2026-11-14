@@ -293,12 +293,14 @@ enum Metrics {
     /// 输入框聚焦描边（强调色，替代系统焦点环）
     static let fieldFocusStroke: CGFloat = 1.5
 
-    // 圆角（面板 16 / 卡片 12 / 行 7 / 控件 6）
+    // 圆角（面板 16 / 卡片 12 / 行 7 / 控件 6 / 分段选中块 4）
     static let radiusPanel: CGFloat = 16
     static let radiusCard: CGFloat = 12
     static let radiusRow: CGFloat = 7
     static let radiusTrack: CGFloat = 7
     static let radiusControl: CGFloat = 6
+    /// 分段选中块：轨道 7 − 内距 4 = 3，取 4 视觉更稳；取 6 会与轨道不同心、四角露出尖角
+    static let radiusSegmentPill: CGFloat = 4
 
     /// 控件最小命中区
     static let hitTarget: CGFloat = 28
