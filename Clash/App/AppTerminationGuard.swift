@@ -184,6 +184,8 @@ final class AppTerminationGuard {
             )
         }
 
+        // 只投递 SIGTERM，**不等**内核真正退出：等它要占用 3s 预算里最贵的那段时间，
+        // 而进程退出后由系统回收、残留由下次启动的 `OrphanKernelReaper` 兜底。
         kernel.shutdownForTermination()
 
         // 文本设置是 300ms 合并写、延迟缓存是 1s 合并写：退出前都落盘
