@@ -112,7 +112,6 @@ enum Theme {
     static let emphasis = Color(nsColor: clashDynamicColor(light: clashBlack(0.18), dark: clashWhite(0.22)))
     static let errorStroke = Color(nsColor: clashDynamicColor(light: clashRGB(0xD70015, 0.30), dark: clashRGB(0xFF453A, 0.35)))
     static var accentStroke: Color { Color(nsColor: .controlAccentColor).opacity(0.40) }
-    static let panelShadow = Color(nsColor: clashDynamicColor(light: clashBlack(0.18), dark: clashBlack(0.50)))
     /// 键盘焦点环 2pt、外扩 2pt（§2.2 / §6.2）
     static var focus: Color { Color(nsColor: .controlAccentColor).opacity(0.70) }
 
