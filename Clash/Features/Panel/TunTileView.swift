@@ -61,7 +61,7 @@ struct TunTileView: View {
                     .scaleEffect(0.7)
             } else {
                 Image(systemName: iconName)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(iconColor)
             }
         }
@@ -70,9 +70,11 @@ struct TunTileView: View {
     private var iconName: String {
         switch state {
         case .authFailed, .startFailed: "exclamationmark"
-        case .on: "shield.lefthalf.filled"
+        // 盾牌用**线框** `shield`：13pt 下只要填实（`shield.fill` / `shield.lefthalf.filled`），
+        // 在 accent 圆底上反白就糊成一团、读作「圆角方块」；线框的轮廓两种底色下都认得出。
+        // 字重提到 semibold，补上线框比实心少掉的分量，与隔壁 `globe.americas.fill` 同阶。
+        case .on, .off, .waitingAuth, .starting, .stopping: "shield"
         case .requiresAuth: "lock.fill"
-        case .off, .waitingAuth, .starting, .stopping: "shield.lefthalf.filled"
         }
     }
 
