@@ -68,6 +68,8 @@ struct GroupCardView: View {
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    // 名称吃满剩余宽度（尾部槽只按自然宽占位，见 `trailingSlot`）
+                    .layoutPriority(1)
 
                 Spacer(minLength: Space.s)
 
@@ -79,12 +81,7 @@ struct GroupCardView: View {
                         .fixedSize()
                 }
 
-                Text(headerTrailingText)
-                    .font(Typography.caption)
-                    .foregroundStyle(Theme.textSecondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .frame(maxWidth: 132, alignment: .trailing)
+                trailingSlot
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(Theme.textTertiary)
@@ -118,6 +115,29 @@ struct GroupCardView: View {
         .accessibilityLabel(Text(cardAccessibilityLabel))
         .accessibilityHint("按下查看全部节点")
         .accessibilityAddTraits(.isButton)
+    }
+
+    /// 卡头尾部槽：**只按自己的自然宽占位**（最多 132），剩下的宽度全给组名。
+    ///
+    /// 直接用 `.frame(maxWidth: 132)` 时，这个上限会被当成固定占位——组名只剩 127pt，
+    /// 省略号右侧白扔 100pt 多；反过来把名称优先级抬高，又会把这行压成「还…」。
+    /// 所以先试自然宽、装不下才退到 132 + 中间省略（长节点名仍不挤掉组名）。
+    private var trailingSlot: some View {
+        ViewThatFits(in: .horizontal) {
+            trailingLabel
+                .fixedSize()
+            trailingLabel
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(width: 132, alignment: .trailing)
+        }
+        .layoutPriority(2)
+    }
+
+    private var trailingLabel: Text {
+        Text(headerTrailingText)
+            .font(Typography.caption)
+            .foregroundStyle(Theme.textSecondary)
     }
 
     /// 「未生效」必须读得出来：选中 / 数量之外先说状态，避免只看到节点名误以为在生效
