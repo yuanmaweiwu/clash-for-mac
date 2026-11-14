@@ -16,6 +16,7 @@ struct AllGroupsPanelView: View {
                         AllGroupsRowView(
                             group: group,
                             isActive: group.id == model.activeGroupID,
+                            showsInactiveLabel: model.showsInactiveLabel(for: group),
                             onTogglePin: { model.togglePin(group.id) },
                             onOpen: { model.pushGroup(group.id) }
                         )

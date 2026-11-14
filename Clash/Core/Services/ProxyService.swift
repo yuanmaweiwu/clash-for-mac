@@ -30,6 +30,13 @@ final class ProxyService {
     private(set) var hasLoaded = false
     /// 正在测速的组（互斥用）
     private(set) var testingGroup: String?
+    /// 被 `GET /rules` 的 `proxy` 引用到的策略组名（以 `/proxies` 的组名为准，§3.4）
+    ///
+    /// 空集有两种来源：规则一条都没指向策略组（全是 DIRECT / REJECT…），
+    /// 或者规则列表还没拉到。用 `hasRuleSnapshot` 区分，UI 据此决定是否启用「生效组」过滤。
+    private(set) var effectiveGroupNames: Set<String> = []
+    /// 是否成功拿到过规则快照。false 时（内核没有 `/rules` / 请求失败）UI 退回旧的 pin / 第一组行为
+    private(set) var hasRuleSnapshot = false
 
     /// 首屏 / 列表用的策略组（不含 `GLOBAL`），内核配置顺序
     var groups: [ProxyGroupModel] { allGroups.filter { !$0.isGlobal } }
@@ -78,7 +85,22 @@ final class ProxyService {
         let sessionKey = "\(kernel.port ?? -1):\(kernel.secret ?? "")"
         let isNewSession = sessionKey != lastRefreshSessionKey
         do {
-            apply(proxies: try await client.proxies(), preferCache: isNewSession)
+            // 规则与代理一起拉：刷新完就能算出「被规则引用」的组，首屏不用等第二次请求
+            async let proxyRequest = client.proxies()
+            async let ruleRequest = client.rules()
+            let snapshot = try await proxyRequest
+            let rules = try? await ruleRequest
+
+            // 组名以 `/proxies` 为准：规则的 `proxy` 只是字符串，不做模糊猜测
+            if let rules {
+                effectiveGroupNames = Self.effectiveGroups(rules: rules, proxies: snapshot)
+                hasRuleSnapshot = true
+            } else {
+                effectiveGroupNames = []
+                hasRuleSnapshot = false
+            }
+
+            apply(proxies: snapshot, preferCache: isNewSession)
             lastError = nil
             loaded = true
             lastRefreshSessionKey = sessionKey
@@ -100,6 +122,8 @@ final class ProxyService {
         isRefreshing = false
         isTesting = false
         testingGroup = nil
+        effectiveGroupNames = []
+        hasRuleSnapshot = false
         mode = .rule
         lastError = nil
         client = nil
@@ -371,6 +395,36 @@ final class ProxyService {
         )
     }
 
+    /// 规则目标里的内置策略：不是策略组，永远不算「生效组」
+    private static let builtInRuleTargets: Set<String> = ["direct", "reject", "reject-drop", "pass", "compatible"]
+
+    /// 从规则快照里收集被引用的策略组名（§3.4）。
+    ///
+    /// - 只认 `/proxies` 里真实存在的组名：规则目标是节点名 / 内置策略时自然落空
+    /// - 匹配前双方都去掉首尾与内部空白并转小写，避免配置里「香港 01」与规则里「香港01」这类写法差异
+    /// - `GLOBAL` 是模式容器，不是规则目标，排除
+    private static func effectiveGroups(
+        rules: [RuleEntry],
+        proxies: [String: ProxyEntry]
+    ) -> Set<String> {
+        var actualNameByKey: [String: String] = [:]
+        for (name, entry) in proxies where entry.isGroup && name != "GLOBAL" {
+            actualNameByKey[groupKey(name)] = name
+        }
+
+        var names: Set<String> = []
+        for rule in rules {
+            let key = groupKey(rule.proxy)
+            guard !builtInRuleTargets.contains(key) else { continue }
+            if let name = actualNameByKey[key] { names.insert(name) }
+        }
+        return names
+    }
+
+    private static func groupKey(_ name: String) -> String {
+        String(name.filter { !$0.isWhitespace }).lowercased()
+    }
+
     /// 组顺序：`/proxies` 是字典（键无顺序），用 `GLOBAL.all` 还原内核的配置顺序，兜底按名字排序
     private static func orderedGroupNames(in proxies: [String: ProxyEntry]) -> [String] {
         var ordered: [String] = []
@@ -456,6 +510,8 @@ final class ProxyService {
                 isGlobal: false
             )
         ]
+        effectiveGroupNames = Set(allGroups.map(\.name))
+        hasRuleSnapshot = true
         hasLoaded = true
     }
 

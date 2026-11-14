@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 分组区：只显示被 pin 的组，按内容自然高度排（§3.4）。
+/// 分组区：只显示被规则引用的（生效）组，按内容自然高度排（§3.4）。
 ///
 /// 滚动交给外层「网络检测 + 策略组」共用容器（`PanelView.scrollTail`），
 /// 这里不再套 `ScrollView`：嵌套滚动在触控板上极易误触。
@@ -19,11 +19,11 @@ struct GroupSectionView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 VStack(spacing: 0) {
-                    GroupSectionHeaderView {
+                    GroupSectionHeaderView(note: model.groupSectionNote) {
                         model.openAllGroups()
                     }
 
-                    ForEach(Array(model.pinnedGroups.enumerated()), id: \.element.id) { index, group in
+                    ForEach(Array(model.homeGroups.enumerated()), id: \.element.id) { index, group in
                         GroupCardView(
                             group: group,
                             onOpen: { model.pushGroup(group.id) },

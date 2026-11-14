@@ -8,6 +8,8 @@ import SwiftUI
 struct AllGroupsRowView: View {
     let group: ProxyGroupModel
     let isActive: Bool
+    /// 该组没有被任何规则引用（§4.7）：行尾提示，仅作说明，不影响 pin 与选择
+    let showsInactiveLabel: Bool
     let onTogglePin: () -> Void
     let onOpen: () -> Void
 
@@ -23,7 +25,9 @@ struct AllGroupsRowView: View {
         .focused($isRowFocused)
         .focusEffectDisabled()
         .accessibilityLabel(Text(group.name))
-        .accessibilityValue(Text("\(group.nodes.count) 个节点"))
+        .accessibilityValue(Text(showsInactiveLabel
+            ? "\(group.nodes.count) 个节点，未生效"
+            : "\(group.nodes.count) 个节点"))
         .accessibilityHint(Text("按下查看节点"))
         .overlay {
             if isRowFocused {
@@ -57,6 +61,14 @@ struct AllGroupsRowView: View {
             }
 
             Spacer(minLength: Space.s)
+
+            if showsInactiveLabel {
+                Text("未生效")
+                    .font(Typography.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
         }
         .padding(.leading, Metrics.cardPadding)
         .padding(.trailing, Metrics.cardPadding + Metrics.hitTarget)
@@ -93,8 +105,15 @@ struct AllGroupsRowView: View {
                     .padding(-1)
             }
         }
-        .help(group.canPin ? (group.isPinned ? "取消固定" : "固定到首屏") : "主组固定显示")
+        .help(starHelp)
         .accessibilityLabel(Text(group.isPinned ? "取消固定 \(group.name)" : "固定 \(group.name)"))
+    }
+
+    /// 未生效组固定了也不会上首屏（首屏只收生效组）；提示说清楚，避免用户以为星标失灵
+    private var starHelp: String {
+        guard group.canPin else { return "主组固定显示" }
+        if showsInactiveLabel { return "该组未被规则引用，不会出现在首屏" }
+        return group.isPinned ? "取消固定" : "固定到首屏"
     }
 
     private var starColor: Color {

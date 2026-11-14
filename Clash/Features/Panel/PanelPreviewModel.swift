@@ -95,8 +95,8 @@ final class PanelPreviewModel {
     var groups: [ProxyGroupModel] { proxies.groups }
     /// 全部策略组（含 `GLOBAL`），供「全部策略组」二级页
     var allGroups: [ProxyGroupModel] { proxies.allGroups }
-    /// 当前操作的组：「全部策略组」的高亮；没操作过时默认第一个（主组）
-    var activeGroupID: String? { selectedGroupID ?? groups.first?.name }
+    /// 当前操作的组：「全部策略组」的高亮；没操作过时默认首屏第一张卡
+    var activeGroupID: String? { selectedGroupID ?? homeGroups.first?.name }
     @ObservationIgnored private var selectedGroupID: String?
 
     var subscriptions: [ProfileEntry] { profiles.entries }
@@ -277,6 +277,43 @@ final class PanelPreviewModel {
 
     var pinnedGroups: [ProxyGroupModel] { proxies.pinnedGroups }
     var pinnedGroupIDs: Set<String> { Set(pinnedGroups.map(\.id)) }
+
+    /// 首屏卡片：只显示**被规则引用**的组（§3.4），最多 2 张。
+    ///
+    /// 生效组 ∩ 已 pin 的组；交集为空时退回配置顺序里的第一个生效组。
+    /// 规则拉不到 / 规则一条都没指向策略组时保持旧行为（pin 的组 → 第一组）。
+    var homeGroups: [ProxyGroupModel] {
+        guard proxies.hasRuleSnapshot, !proxies.effectiveGroupNames.isEmpty else {
+            return legacyHomeGroups
+        }
+
+        let effective = proxies.effectiveGroupNames
+        let pinnedEffective = pinnedGroups.filter { effective.contains($0.name) }
+        if !pinnedEffective.isEmpty { return Array(pinnedEffective.prefix(2)) }
+        if let first = groups.first(where: { effective.contains($0.name) }) { return [first] }
+        return legacyHomeGroups
+    }
+
+    /// 旧行为：pin 的组（主组常在国内），再退回配置里第一组
+    private var legacyHomeGroups: [ProxyGroupModel] {
+        let pinned = Array(pinnedGroups.prefix(2))
+        if !pinned.isEmpty { return pinned }
+        return groups.first.map { [$0] } ?? []
+    }
+
+    /// 首屏标题右侧提示：规则一条都没指向策略组（例如全是 DIRECT / REJECT）
+    var groupSectionNote: String? {
+        guard proxies.hasRuleSnapshot,
+              proxies.effectiveGroupNames.isEmpty,
+              !groups.isEmpty else { return nil }
+        return "当前规则未使用策略组"
+    }
+
+    /// 「全部策略组」行尾是否标「未生效」（规则快照可用、非 `GLOBAL`、且没被任何规则引用）
+    func showsInactiveLabel(for group: ProxyGroupModel) -> Bool {
+        guard proxies.hasRuleSnapshot, !group.isGlobal else { return false }
+        return !proxies.effectiveGroupNames.contains(group.name)
+    }
 
     /// 空态文案：没配置「还没有配置」/ 有配置但内核没跑「内核未运行」/ 跑了但没组「当前配置没有策略组」
     var emptyGroupTitle: String {
@@ -1216,7 +1253,7 @@ extension PanelPreviewModel {
     /// 分组区自然高度（不扣 banner：banner 只压缩可视窗口，不压内容本身）
     var groupSectionContentHeight: CGFloat {
         if groups.isEmpty { return Metrics.emptyGroupCardHeight }
-        return Metrics.groupSectionHeight(forCards: pinnedGroups.count)
+        return Metrics.groupSectionHeight(forCards: homeGroups.count)
     }
 
     /// 可滚动尾区（网络检测 + 策略组）的完整内容高度
