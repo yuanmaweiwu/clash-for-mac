@@ -72,7 +72,7 @@ enum SubscriptionFetcher {
         if let download = first.download { return download }
 
         // 传输层失败与 UA 无关，不换 UA 白跑一次
-        if first.failure == .network { throw first.failure ?? .network }
+        if first.failure == .network { throw ProfileStoreError.network }
 
         if let fallbackUserAgent, fallbackUserAgent != userAgent {
             logger.notice(
