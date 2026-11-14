@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import OSLog
 
@@ -397,6 +398,8 @@ private enum Networksetup {
     struct CommandResult: Sendable {
         let status: Int32
         let output: String
+        /// 看门狗判定超时（进程已被终止）；`check` 据此给专门的文案
+        var timedOut = false
 
         var succeeded: Bool {
             status == 0 && !output.localizedCaseInsensitiveContains("** Error")
@@ -405,10 +408,16 @@ private enum Networksetup {
 
     // MARK: 命令执行
 
+    /// 单条 `networksetup` 正常 <100ms；卡住时必须能自己退出，否则 `enable()` 的
+    /// `defer { isTransitioning = false }` 永远不执行 → 磁贴永久 turningOn。
+    /// 写法照 `PortOccupantProbe.listeningProcesses` / `SystemNetworkProbe.runCommandSynchronously`。
+    static let commandTimeout: TimeInterval = 3
+
     static func execute(_ arguments: [String]) -> CommandResult {
+        let executable = toolPathFor(arguments)
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: toolPath)
-        process.arguments = arguments
+        process.executableURL = URL(fileURLWithPath: executable.path)
+        process.arguments = executable.arguments
 
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -420,9 +429,40 @@ private enum Networksetup {
             return CommandResult(status: -1, output: error.localizedDescription)
         }
 
+        let deadline = Date().addingTimeInterval(commandTimeout)
+        while process.isRunning, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+
+        var timedOut = false
+        if process.isRunning {
+            timedOut = true
+            process.terminate()
+            // 再读管道前先确认退出：`terminate()` 被忽略时 SIGKILL 兜底，避免读管道无限阻塞
+            let killDeadline = Date().addingTimeInterval(0.5)
+            while process.isRunning, Date() < killDeadline {
+                Thread.sleep(forTimeInterval: 0.02)
+            }
+            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+        }
+
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
+        guard !timedOut else {
+            systemProxyLogger.error("networksetup 超过 \(Int(commandTimeout))s 未返回，已终止：\(arguments.first ?? "", privacy: .public)")
+            return CommandResult(status: -2, output: "networksetup 超时（\(Int(commandTimeout))s）", timedOut: true)
+        }
         return CommandResult(status: process.terminationStatus, output: String(decoding: data, as: UTF8.self))
+    }
+
+    /// 实际执行哪条命令：生产恒为 `/usr/sbin/networksetup`；DEBUG 自检可一次性替换成假程序
+    private static func toolPathFor(_ arguments: [String]) -> (path: String, arguments: [String]) {
+        #if DEBUG
+        if NetworkSetupDebug.consumeHangIfMatches(arguments) {
+            return ("/bin/sleep", ["10"])
+        }
+        #endif
+        return (toolPath, arguments)
     }
 
     @discardableResult
@@ -435,6 +475,9 @@ private enum Networksetup {
     static func check(_ result: CommandResult, arguments: [String], service: String) throws {
         guard !result.succeeded else { return }
 
+        if result.timedOut {
+            throw SystemProxyError.commandFailed(service: service, detail: "networksetup 超时（\(Int(commandTimeout))s）")
+        }
         let command = arguments.first ?? "networksetup"
         let detail = clipped(result.output)
         if looksLikePermissionProblem(result.output) {
@@ -822,3 +865,42 @@ private enum Networksetup {
 }
 
 private let systemProxyLogger = Logger(subsystem: "com.clash.app", category: "systemproxy")
+
+#if DEBUG
+/// 自检注入（仅 DEBUG）：让下一条参数匹配的命令跑一个「永不返回」的假程序，
+/// 用来验证 3s 看门狗 + `defer { isTransitioning = false }`。
+/// 只生效一次，避免回滚路径也被拖住导致测试结论失真。
+enum NetworkSetupDebug {
+
+    private final class Injector: @unchecked Sendable {
+        private let lock = NSLock()
+        private var token: String?
+
+        func arm(_ value: String?) {
+            lock.lock()
+            defer { lock.unlock() }
+            token = value
+        }
+
+        func consumeIfMatches(_ arguments: [String]) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            guard let token, arguments.contains(where: { $0.contains(token) }) else { return false }
+            self.token = nil
+            return true
+        }
+    }
+
+    private static let injector = Injector()
+
+    /// 下一条参数包含 `token` 的命令换成 `sleep 10`
+    static func hangNextCommand(containing token: String) {
+        injector.arm(token)
+    }
+
+    /// `true` = 本次调用命中注入（已消耗）
+    static func consumeHangIfMatches(_ arguments: [String]) -> Bool {
+        injector.consumeIfMatches(arguments)
+    }
+}
+#endif

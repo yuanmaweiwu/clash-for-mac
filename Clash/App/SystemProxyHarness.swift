@@ -88,6 +88,8 @@ enum SystemProxyHarness {
             failures += await runRollback(service: service)
         case "readonly":
             failures += await runReadOnly(service: service)
+        case "timeout":
+            failures += await runCommandTimeout(service: service)
         case "panel":
             failures += await runPanel(hold: false)
         case "panel-hold":
@@ -307,6 +309,70 @@ enum SystemProxyHarness {
             )
             try? await Task.sleep(for: .seconds(1))
         }
+    }
+
+    /// `networksetup` 被挂住：3s 看门狗必须让 `enable()` 返回失败，且 `isTransitioning` 复位。
+    ///
+    /// 两段：
+    /// - A：**第一条命令**（`-listallnetworkservices`）就挂住——这是「PATH 指向 sleep 10」
+    ///   能造出的最直接场景，要求 `enable()` 3s 量级返回、无快照、系统代理未被改动
+    /// - B：写到一半挂住（`-setwebproxy`）——看门狗 + 按快照回滚都要走完（回滚是 4 个服务
+    ///   的真实命令，总耗时会超过 3s，这里只断言「有界 + 回滚干净」，不拿 3s 卡它）
+    private static func runCommandTimeout(service: SystemProxyService) async -> Int {
+        var failures = 0
+
+        // A：首条命令挂住
+        NetworkSetupDebug.hangNextCommand(containing: "-listallnetworkservices")
+        let firstBegan = Date()
+        do {
+            try await service.enable(port: testPort)
+            failures += report("timeout-first-should-fail", false, "假 networksetup 卡住时 enable 不应成功")
+        } catch let error as SystemProxyError {
+            let elapsed = Date().timeIntervalSince(firstBegan)
+            print("NOTE timeout-first elapsed=\(String(format: "%.2f", elapsed))s error=\(error.logDescription)")
+            failures += report("timeout-first-returned-3s", elapsed < 4.5, "耗时 \(String(format: "%.2f", elapsed))s")
+            if case .commandFailed(_, let detail) = error {
+                failures += report("timeout-error-kind", detail.contains("超时"), detail)
+            } else {
+                failures += report("timeout-error-kind", false, "\(error)")
+            }
+        } catch {
+            failures += report("timeout-error-kind", false, "\(String(describing: error))")
+        }
+        failures += report("timeout-transitioning-reset", !service.isTransitioning)
+        failures += report("timeout-first-no-snapshot", !service.hasSnapshot, "首条命令就失败，不应写过快照")
+
+        // B：写到一半挂住 → 回滚必须干净
+        NetworkSetupDebug.hangNextCommand(containing: "-setwebproxy")
+        let secondBegan = Date()
+        do {
+            try await service.enable(port: testPort)
+            failures += report("timeout-mid-should-fail", false, "写到一半卡住时 enable 不应成功")
+        } catch let error as SystemProxyError {
+            let elapsed = Date().timeIntervalSince(secondBegan)
+            print("NOTE timeout-mid elapsed=\(String(format: "%.2f", elapsed))s error=\(error.logDescription)")
+            if case .commandFailed(_, let detail) = error, detail.contains("超时") {
+                failures += report("timeout-mid-error-kind", true)
+            } else {
+                failures += report("timeout-mid-error-kind", false, "\(error)")
+            }
+            failures += report("timeout-mid-bounded", elapsed < 20, "回滚耗时 \(String(format: "%.2f", elapsed))s")
+        } catch {
+            failures += report("timeout-mid-error-kind", false, "\(String(describing: error))")
+        }
+        failures += report("timeout-mid-transitioning-reset", !service.isTransitioning)
+        failures += report("timeout-mid-rollback-clean", !service.hasSnapshot, "失败后应回滚并删快照")
+
+        // 恢复：注入只生效一次，真实命令应能正常开关
+        do {
+            try await service.enable(port: testPort)
+            failures += report("timeout-recovered-enable", service.isEnabled)
+            try await service.disable()
+            failures += report("timeout-recovered-disable", !service.isEnabled && !service.hasSnapshot)
+        } catch {
+            failures += report("timeout-recovered-enable", false, "\(String(describing: error))")
+        }
+        return failures
     }
 
     private static func runReadOnly(service: SystemProxyService) async -> Int {
