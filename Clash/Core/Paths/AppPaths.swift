@@ -9,8 +9,27 @@ enum AppPaths {
 
     private static let logger = Logger(subsystem: "com.clash.app", category: "paths")
 
-    /// 根目录
+    /// CLI 夹具的数据根覆盖（**仅 DEBUG**）：`CLASH_DATA_ROOT=/tmp/xxx` 时所有路径都落到它下面，
+    /// 自检 / 基准不允许碰真实用户数据。
+    ///
+    /// 只读一次环境变量：App 启动后不再变（`static let` 的求值顺序天然保证）。
+    /// Release 恒为 nil——生产路径只有一个。
+    static let dataRootOverride: URL? = {
+        #if DEBUG
+        guard let raw = ProcessInfo.processInfo.environment["CLASH_DATA_ROOT"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty
+        else { return nil }
+        return URL(fileURLWithPath: (raw as NSString).expandingTildeInPath, isDirectory: true)
+        #else
+        return nil
+        #endif
+    }()
+
+    /// 根目录（`CLASH_DATA_ROOT` 覆盖时就是它本身）
     static let supportDirectory: URL = {
+        if let dataRootOverride {
+            return ensure(dataRootOverride, name: "根目录（CLASH_DATA_ROOT）")
+        }
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL.homeDirectory.appending(path: "Library/Application Support", directoryHint: .isDirectory)
         return ensure(base.appending(path: "Clash", directoryHint: .isDirectory), name: "根目录")
@@ -24,14 +43,23 @@ enum AppPaths {
     /// `~/Library/Caches/com.clash.app`：可再生的缓存（「完全清理」会删掉）。
     ///
     /// 不在这里 `ensure()`：没有缓存时不该凭空建目录，删除时也允许不存在。
+    /// `CLASH_DATA_ROOT` 覆盖时落到数据根下的 `Caches/`，让夹具的清理目标也在临时目录里。
     static var cachesDirectory: URL {
+        if let dataRootOverride {
+            return dataRootOverride.appending(path: "Caches", directoryHint: .isDirectory)
+        }
         let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? URL.homeDirectory.appending(path: "Library/Caches", directoryHint: .isDirectory)
         return base.appending(path: "com.clash.app", directoryHint: .isDirectory)
     }
 
     /// `~/Library/Preferences/com.clash.app.plist`（「完全清理」按存在与否删除）
+    ///
+    /// `CLASH_DATA_ROOT` 覆盖时改成数据根下的 `Preferences.plist`：夹具绝不能删真实偏好。
     static var preferencesPlistURL: URL {
+        if let dataRootOverride {
+            return dataRootOverride.appending(path: "Preferences.plist")
+        }
         let base = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask).first
             ?? URL.homeDirectory.appending(path: "Library", directoryHint: .isDirectory)
         let bundleID = Bundle.main.bundleIdentifier ?? "com.clash.app"

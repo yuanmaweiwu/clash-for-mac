@@ -208,6 +208,12 @@ enum AuditBatch1Harness {
 
     private static func checkDestructiveGuards(kernel: KernelService, model: PanelPreviewModel) async -> Int {
         var failures = 0
+        // A2 会真的调用 `performFullCleanup`（只是理应被过渡守卫拦住）。守卫一旦失效，
+        // 删的就是用户数据——所以没有临时数据根就根本不跑。
+        guard AppPaths.dataRootOverride != nil else {
+            print("SKIP A2 需要 CLASH_DATA_ROOT 指向临时目录（禁止夹具碰真实数据根）")
+            return 0
+        }
         let support = AppPaths.supportDirectory
         let existsBefore = FileManager.default.fileExists(atPath: support.path)
         let mtimeBefore = modificationDate(of: support)

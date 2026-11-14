@@ -689,13 +689,29 @@ final class PanelPreviewModel {
         }
     }
 
-    /// 「完全清理…」：还原系统代理 → 停 TUN / 内核 → 删数据与偏好。
+    /// 清理成功后的文案（UI 层展示；`performFullCleanup()` 返回 `nil` = 成功）。
+    ///
+    /// 数据是**移到废纸篓**而不是删除，所以必须把「可恢复」说清楚——用户当场能反悔。
+    static let cleanupSuccessNotice =
+        "已移到废纸篓，可从废纸篓恢复订阅与设置。"
+        + "请退出并重新打开 Clash（不会自动退出），以便重建数据目录。"
+
+    #if DEBUG
+    /// 最近一次 `performFullCleanup` 实际移进废纸篓的条目（`CLASH_CLEANUP_HARNESS` 验收用）。
+    /// Release 不编译：生产路径不需要知道废纸篓里的 URL。
+    private(set) var cleanupTrashedURLs: [URL] = []
+    #endif
+
+    /// 「完全清理…」：还原系统代理 → 停 TUN / 内核 → 数据与缓存**移到废纸篓** → 清偏好。
+    ///
+    /// 清理成功后 UI 应展示 `cleanupSuccessNotice`（成功时本方法返回 `nil`）。
     ///
     /// 顺序与理由：
     /// 1. 系统代理必须先还原且**确认已关闭**（快照还在 = 代理仍指向本机端口），
     ///    否则删掉 runtime 会让用户对着死端口断网
     /// 2. TUN / 内核停不下来就中止：root 内核还在接管流量时删配置等于制造「黑盒断网」
-    /// 3. 只删本 App 的用户数据与缓存、偏好；**不碰 `/Library/Application Support/ClashHelper`**
+    /// 3. 用户数据与缓存走 `trashItem`（**可恢复**）：先缓存、后数据根，任一失败立即中止，
+    ///    不做「删一半」；**不碰 `/Library/Application Support/ClashHelper`**
     ///    （root 目录由 helper 自己管，卸载入口在「组件」里）
     ///
     /// - Returns: `nil` 表示成功；否则是给用户看的中文失败原因。
@@ -744,27 +760,38 @@ final class PanelPreviewModel {
             return "内核未能停止，已中止清理"
         }
 
-        // 4. 删目录：整个 App 数据根（settings.json / profiles / runtime / kernel / logs / 快照）
+        // 4. 移到废纸篓：整个 App 数据根（settings.json / profiles / runtime / kernel / logs / 快照）
         //    文本设置可能还有 300ms 合并写在路上：先落盘，否则删完目录它会把 settings.json 写回来；
         //    延迟缓存同理（1s 合并写），先 flush 掉在途任务，避免删完目录又被它重建
         settings.flushPendingWrite()
         LatencyCache.shared.flush()
         let fileManager = FileManager.default
+        #if DEBUG
+        cleanupTrashedURLs = []
+        #endif
         let targets: [(String, URL)] = [
-            ("应用数据", AppPaths.supportDirectory),
-            ("缓存", AppPaths.cachesDirectory)
+            ("缓存", AppPaths.cachesDirectory),
+            ("应用数据", AppPaths.supportDirectory)
         ]
         for (name, url) in targets where fileManager.fileExists(atPath: url.path) {
+            // 拿不到 resultingItemURL 也不影响成功判定；DEBUG 夹具用它做「可还原」取证
+            var resulting: NSURL?
             do {
-                try fileManager.removeItem(at: url)
+                try fileManager.trashItem(at: url, resultingItemURL: &resulting)
             } catch {
-                return "删除\(name)失败：\(error.localizedDescription)"
+                return "移到废纸篓失败：\(name)（\(error.localizedDescription)），数据未删除"
             }
+            #if DEBUG
+            if let resulting { cleanupTrashedURLs.append(resulting as URL) }
+            #endif
         }
 
         // 5. 偏好：UserDefaults 域 + plist 文件（存在才删）
-        let bundleID = Bundle.main.bundleIdentifier ?? "com.clash.app"
-        UserDefaults.standard.removePersistentDomain(forName: bundleID)
+        //    夹具（`CLASH_DATA_ROOT`）只改临时 plist，不碰真实偏好域
+        if AppPaths.dataRootOverride == nil {
+            let bundleID = Bundle.main.bundleIdentifier ?? "com.clash.app"
+            UserDefaults.standard.removePersistentDomain(forName: bundleID)
+        }
         let preferencesURL = AppPaths.preferencesPlistURL
         if fileManager.fileExists(atPath: preferencesURL.path) {
             do {
