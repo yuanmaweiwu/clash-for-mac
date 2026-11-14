@@ -217,11 +217,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
 
 
-    /// 设置现在是面板内的二级页：叫出面板 + 推入设置页（与 ⌘, 同一入口）
-    @objc private func openSettings() {
-        AppEnvironment.shared.showSettingsPage()
-    }
-
     @objc private func openLogs() {
         AppEnvironment.shared.openLogsWindow()
     }

@@ -280,12 +280,6 @@ final class KernelProvisioner {
         activeTask.cancel()
     }
 
-    /// 自检 / 排障：把状态复位成 idle（不清文件）
-    func resetPhase() {
-        guard !phase.isActive else { return }
-        phase = .idle
-    }
-
     // MARK: - 版本与升级（设置页）
 
     /// 进入设置页 / 升级完成后刷新一次；只读本地文件，**不联网**
