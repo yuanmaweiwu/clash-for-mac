@@ -838,7 +838,7 @@ struct SettingsPanelView: View {
             let error = await model.performFullCleanup()
             isCleaningUp = false
             maintenanceFailed = error != nil
-            maintenanceNotice = error ?? "已清理。请退出并重新打开 Clash（不会自动退出），以便重建数据目录。"
+            maintenanceNotice = error ?? PanelPreviewModel.cleanupSuccessNotice
         }
     }
 }
