@@ -31,6 +31,12 @@ final class KernelService {
     /// 启动 / 停止过程中：UI 应禁用系统代理磁贴
     private(set) var isTransitioning = false
 
+    #if DEBUG
+    /// 自检夹具专用（`CLASH_AUDIT_A2`）：模拟「内核过渡中」，验证破坏性操作的入口守卫。
+    /// 只在 Debug 编译，生产路径无法置位。
+    func setTransitioningForAudit(_ value: Bool) { isTransitioning = value }
+    #endif
+
     /// 内核由 helper（root）持有（TUN 模式）：App 只接管 API 端点，绝不 spawn / kill。
     /// 为真时 `start()` / `stop()` / `shutdownForTermination()` 全部让位给 `TunService`。
     private(set) var isExternal = false

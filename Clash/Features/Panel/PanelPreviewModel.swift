@@ -592,7 +592,7 @@ final class PanelPreviewModel {
 
     /// 「下载并安装」（未安装态）：本地没有内核 → 直接走首次下载，不做版本比较
     func installKernelIfMissing() async -> String? {
-        guard !isUpdatingKernel else { return "另一个内核任务尚未结束" }
+        guard !kernel.isTransitioning, !isUpdatingKernel else { return "内核正在启动/更新，请稍后" }
         isUpdatingKernel = true
         defer { isUpdatingKernel = false }
         do {
@@ -624,7 +624,9 @@ final class PanelPreviewModel {
     ///
     /// - Returns: `nil` = 成功；否则是给用户看的一句话。
     func updateKernel(to tag: String) async -> String? {
-        guard !isUpdatingKernel else { return "另一个内核更新任务尚未结束" }
+        // 内核启动 / 停止过渡中：`kernel.stop()` 会静默返回，随后 `mihomo -t` 与新进程
+        // 会与正在 spawn 的内核抢同一份 `kernel/` 与 `runtime.yaml`，必须整段拒绝。
+        guard !kernel.isTransitioning, !isUpdatingKernel else { return "内核正在启动/更新，请稍后" }
         // TUN 的内核是 helper 的 root 副本（/Library/PrivilegedHelperTools/mihomo）：
         // 更新用户目录那份不会影响它，先让用户关 TUN，别制造「更新了但没生效」
         if tun.isHelperKernelRunning {
@@ -701,7 +703,11 @@ final class PanelPreviewModel {
     ///
     /// - Returns: `nil` 表示成功；否则是给用户看的中文失败原因。
     func performFullCleanup() async -> String? {
-        // 0. 过渡中的任何一次系统代理写入都不能被删目录打断：
+        // 0. 内核正在 start/stop（含 `mihomo -t` 校验 / spawn）时，`kernel.stop()` 会静默返回，
+        //    随后删 `kernel/` 与 `runtime.yaml` 等于把正在跑的内核的腿抽掉。
+        guard !kernel.isTransitioning, !isUpdatingKernel else { return "内核正在启动/更新，请稍后" }
+
+        // 1. 过渡中的任何一次系统代理写入都不能被删目录打断：
         //    此刻快照可能还没落盘（`hasSnapshot == false`），单看 hasSnapshot 会漏掉这个窗口。
         if systemProxy.isTransitioning {
             return "\(SystemProxyError.busy.userMessage)，已中止清理"
@@ -735,9 +741,9 @@ final class PanelPreviewModel {
             }
         }
 
-        // 3. 本地内核：`stop()` 在过渡中会静默返回，用相位复核一次
+        // 3. 本地内核：`stop()` 在过渡中会静默返回，用相位复核一次（`.starting` 也还没停稳）
         await kernel.stop()
-        if kernel.phase == .running || kernel.isExternal {
+        if kernel.phase == .running || kernel.phase == .starting || kernel.isExternal {
             return "内核未能停止，已中止清理"
         }
 
