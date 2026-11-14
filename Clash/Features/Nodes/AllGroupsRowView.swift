@@ -50,6 +50,7 @@ struct AllGroupsRowView: View {
                     .font(isSelected ? Typography.title : Typography.body)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
+                    .truncationMode(.middle)
                 Text("\(group.nodes.count) 个节点")
                     .font(Typography.caption)
                     .foregroundStyle(Theme.textSecondary)
