@@ -71,7 +71,7 @@
 
 **1x 屏规则**：线宽取 `Metrics.hairline = 1 / max(1, scale)`。2x 屏 0.5pt（1 物理像素），1x 屏 1pt——写成 `1 / max(2, scale)` 时 1x 上只有 0.5pt，会被舍成 0 像素，等于没有线。验收看「实测像素行数 ≥1 且沿行连续」，不看 token 数值。
 
-**阴影规则**：卡片与磁贴**一律不用阴影**，只用 fill + 1pt 描边分层。面板投影交给 `NSPanel` 原生（`hasShadow = true`），不自绘、不叠多层。
+**阴影规则**：卡片与磁贴**一律不用阴影**，只用 fill + 1pt 描边分层。面板投影交给 `NSPanel` 原生（`hasShadow = true`），不自绘、不叠多层。因此**没有阴影 token**：`Theme.panelShadow` 已从 App 目标删除，**App 目标 0 引用**（`Prototype/` 原型仍有 2 处，是独立 SwiftPM 包，不进 App 构建）。
 
 ### 2.3 文本
 

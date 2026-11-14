@@ -53,6 +53,7 @@ enum Theme {
     static let emphasis = Color(nsColor: clashDynamicColor(light: clashBlack(0.18), dark: clashWhite(0.22)))
     static let errorStroke = Color(nsColor: clashDynamicColor(light: clashRGB(0xD70015, 0.30), dark: clashRGB(0xFF453A, 0.35)))
     static let accentStroke = Color(nsColor: clashDynamicColor(light: clashRGB(0x007AFF, 0.35), dark: clashRGB(0x0A84FF, 0.40)))
+    /// ⚠️ 仅原型用：App 目标已删掉 `panelShadow`（§2.2 卡片零阴影），这里留 2 处是历史原型，不进 App 构建
     static let panelShadow = Color(nsColor: clashDynamicColor(light: clashBlack(0.18), dark: clashBlack(0.50)))
     /// 键盘焦点环 2pt、外扩 2pt（§2.2 / §6.2）
     static let focus = Color(nsColor: clashDynamicColor(light: clashRGB(0x007AFF, 0.70), dark: clashRGB(0x0A84FF, 0.70)))
