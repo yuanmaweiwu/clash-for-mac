@@ -102,6 +102,15 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
         hostingView = hosting
     }
 
+    #if DEBUG
+    /// 内存归因夹具专用：丢掉整棵 SwiftUI 树，观察 footprint 是否回落。
+    /// 只被 `MemoryFootprintHarness` 调用，不参与正常显隐路径。
+    func releaseSwiftUIForMemoryAudit() {
+        panel.contentView = nil
+        hostingView = nil
+    }
+    #endif
+
     private func configureWindow() {
         panel.delegate = self
         panel.isFloatingPanel = true

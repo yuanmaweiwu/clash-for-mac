@@ -48,7 +48,7 @@ final class AppEnvironment {
         let smokeMode = TunSmokeHarness.requestedMode()
         let auditRequested = AuditBatch1Harness.isRequested || AuditBatch2Harness.isRequested
             || CleanupHarness.isRequested || LatencyBenchHarness.isRequested
-            || NetworkProbeHarness.isRequested
+            || NetworkProbeHarness.isRequested || MemoryFootprintHarness.isRequested
         #else
         let smokeMode: String? = nil
         let auditRequested = false
@@ -83,6 +83,7 @@ final class AppEnvironment {
         LatencyBenchHarness.runIfRequested(kernel: kernel, tun: tun, settings: settings)
         CleanupHarness.runIfRequested(model: model)
         NetworkProbeHarness.runIfRequested(model: model)
+        _ = MemoryFootprintHarness.runIfRequested()
         AuditBatch1Harness.runIfRequested(
             kernel: kernel,
             tun: tun,
