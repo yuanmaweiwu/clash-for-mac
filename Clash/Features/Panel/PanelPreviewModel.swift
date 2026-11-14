@@ -1082,7 +1082,14 @@ final class PanelPreviewModel {
         enqueueKernelOperation { [weak self] in
             guard let self else { return }
             await self.kernel.stop()
-            // 切订阅比 stop 还快：已经有人排了更新的意图，就别再拉起旧配置
+            // 切订阅比 stop 还快：已经有人排了更新的意图，就别再拉起旧配置。
+            // 250ms 合并窗口：0.2s 连切时把中间选择全部折叠掉，只按最后一次启动
+            // （窗口内被取消 → 直接让位，一次真实 `kernel.start()` 都不跑）。
+            do {
+                try await Task.sleep(for: .milliseconds(250))
+            } catch {
+                return
+            }
             guard !Task.isCancelled else { return }
             await self.kernel.start()
         }
