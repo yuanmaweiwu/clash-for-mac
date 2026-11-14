@@ -262,9 +262,8 @@ private func testSubscriptionHeaderParsing() {
 // MARK: - 3. 日志脱敏
 
 private func testLogRedaction() async {
-    // `LogRedactor` 与 `LogStore` 同住一个 @MainActor 文件，跨 actor 调用一次
     func redact(_ text: String) async -> String {
-        await MainActor.run { LogRedactor.redactCredentials(in: text) }
+        LogRedactor.redactCredentials(in: text)
     }
 
     let url = "GET https://api.test/x?token=abc123&page=1"

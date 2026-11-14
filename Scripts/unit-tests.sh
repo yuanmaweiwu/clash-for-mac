@@ -23,13 +23,14 @@ trap 'rm -rf "$WORK"' EXIT
 # 被测的纯函数源文件（新增文件记得加进来）
 SOURCES=(
     Tests/main.swift
-    Tests/LogStoreCompileShims.swift
-    # LogRedactor（与 LogStore 同一文件）
-    Clash/Core/Services/LogStore.swift
+    # LogRedactor 脱敏
+    Clash/Core/Services/LogRedactor.swift
     Clash/Core/Models/LogLine.swift
     Clash/Core/Models/KernelPhase.swift
     # RuntimeConfigBuilder 注入
     Clash/Core/Services/RuntimeConfigBuilder.swift
+    # KernelError 的关联类型（真实定义，不再是替身）
+    Clash/Core/Services/KernelProvisionError.swift
     Clash/Core/Services/KernelError.swift
     Clash/Core/Models/ProxyMode.swift
     Clash/Core/Paths/AppPaths.swift
