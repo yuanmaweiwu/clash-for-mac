@@ -60,7 +60,7 @@ final class SystemProxyService {
         let url = snapshotURL
         do {
             return try await Task.detached(priority: .userInitiated) {
-                let snapshot = try Networksetup.capture(kernelPort: kernelPort)
+                let snapshot = try await Networksetup.capture(kernelPort: kernelPort)
                 try Networksetup.save(snapshot, to: url)
                 return snapshot
             }.value
@@ -112,7 +112,7 @@ final class SystemProxyService {
 
         do {
             try await Task.detached(priority: .userInitiated) {
-                try Networksetup.activate(
+                try await Networksetup.activate(
                     port: port,
                     snapshotURL: url,
                     failVerification: failVerification
@@ -148,7 +148,7 @@ final class SystemProxyService {
         let url = snapshotURL
         do {
             try await Task.detached(priority: .userInitiated) {
-                try Networksetup.deactivate(snapshotURL: url)
+                try await Networksetup.deactivate(snapshotURL: url)
             }.value
             isEnabled = false
             lastError = nil
@@ -406,27 +406,26 @@ private enum Networksetup {
         process.standardOutput = pipe
         process.standardError = pipe
 
+        // 退出通知用信号量等：不要 `while isRunning { sleep(20ms) }` 轮询——实测每条命令
+        // 会被轮询拖到 ~110ms（单轮 40+ 条命令就是 4s+），信号量等待只要 ~9ms。
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
+
         do {
             try process.run()
         } catch {
             return CommandResult(status: -1, output: error.localizedDescription)
         }
 
-        let deadline = Date().addingTimeInterval(commandTimeout)
-        while process.isRunning, Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.02)
-        }
-
         var timedOut = false
-        if process.isRunning {
+        if finished.wait(timeout: .now() + commandTimeout) == .timedOut {
             timedOut = true
             process.terminate()
-            // 再读管道前先确认退出：`terminate()` 被忽略时 SIGKILL 兜底，避免读管道无限阻塞
-            let killDeadline = Date().addingTimeInterval(0.5)
-            while process.isRunning, Date() < killDeadline {
-                Thread.sleep(forTimeInterval: 0.02)
+            // 先确认退出再读管道，避免 `terminate()` 被忽略时读管道无限阻塞
+            if finished.wait(timeout: .now() + 0.5) == .timedOut {
+                kill(process.processIdentifier, SIGKILL)
+                _ = finished.wait(timeout: .now() + 0.5)
             }
-            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
         }
 
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
@@ -499,14 +498,17 @@ private enum Networksetup {
         return names
     }
 
-    static func capture(kernelPort: Int) throws -> SystemProxySnapshot {
+    static func capture(kernelPort: Int) async throws -> SystemProxySnapshot {
         let names = try listServices()
-        let services = try names.map(readState)
+        // 服务之间互不影响：4 个服务并发读，20 条只读命令从 ~200ms 降到 ~50ms
+        let states = try await runConcurrently(names) { name in
+            try readState(name)
+        }
         return SystemProxySnapshot(
             version: 1,
             createdAt: Date(),
             kernelPort: kernelPort,
-            services: services
+            services: states
         )
     }
 
@@ -613,26 +615,25 @@ private enum Networksetup {
 
     /// 采集 → 落盘 → 逐服务写入 → 读回校验；任一步失败按快照回滚。
     /// 快照写盘失败时直接抛错：此时系统代理一个字都没改。
-    static func activate(port: Int, snapshotURL: URL, failVerification: Bool = false) throws {
+    static func activate(port: Int, snapshotURL: URL, failVerification: Bool = false) async throws {
         let total = LatencyTrace.shared.begin()
         defer { LatencyTrace.shared.record("total", from: total) }
 
         let captureStart = LatencyTrace.shared.begin()
-        let snapshot = try capture(kernelPort: port)
+        let snapshot = try await capture(kernelPort: port)
         try save(snapshot, to: snapshotURL)
         LatencyTrace.shared.record("capture", from: captureStart)
 
         let setStart = LatencyTrace.shared.begin()
         do {
-            for service in snapshot.services {
-                try setProxy(service.name, port: port)
-            }
+            // 按服务并发：4 个服务的 3 条写命令同时跑（服务之间互不影响，实测无锁冲突）
+            _ = try await runConcurrently(snapshot.services) { try setProxy($0.name, port: port) }
             LatencyTrace.shared.record("set", from: setStart)
             if failVerification {
                 throw SystemProxyError.verificationFailed(service: snapshot.services.first?.name ?? "系统代理", detail: "自检注入")
             }
             let verifyStart = LatencyTrace.shared.begin()
-            try verifyProxied(snapshot.services.map(\.name), port: port)
+            try await verifyProxied(snapshot.services.map(\.name), port: port)
             LatencyTrace.shared.record("verify", from: verifyStart)
         } catch {
             rollback(snapshot, snapshotURL: snapshotURL)
@@ -655,38 +656,43 @@ private enum Networksetup {
         parseProxy(try run([kind.getCommand, name], service: name))
     }
 
-    /// 面板「代理中」的唯一判据：每个服务的 HTTP / HTTPS 都指向 127.0.0.1:<port> 且已启用
-    static func verifyProxied(_ names: [String], port: Int) throws {
-        for name in names {
-            for kind in [ProxyKind.web, .secure] {
-                let endpoint = try endpoint(of: kind, service: name)
-                guard endpoint.enabled else {
-                    throw SystemProxyError.verificationFailed(service: name, detail: "\(kind.displayName) 未启用")
-                }
-                guard endpoint.server == localServer, endpoint.port == port else {
-                    throw SystemProxyError.verificationFailed(
-                        service: name,
-                        detail: "\(kind.displayName) 读回为 \(endpoint.server):\(endpoint.port)"
-                    )
-                }
+    /// 面板「代理中」的唯一判据：每个服务的 HTTP / HTTPS 都指向 127.0.0.1:<port> 且已启用。
+    /// 服务之间并发读回；单个服务内仍逐项校验（顺序不影响结论，但少一层嵌套）。
+    static func verifyProxied(_ names: [String], port: Int) async throws {
+        _ = try await runConcurrently(names) { name in
+            try verifyProxiedService(name, port: port)
+        }
+    }
+
+    private static func verifyProxiedService(_ name: String, port: Int) throws {
+        for kind in [ProxyKind.web, .secure] {
+            let endpoint = try endpoint(of: kind, service: name)
+            guard endpoint.enabled else {
+                throw SystemProxyError.verificationFailed(service: name, detail: "\(kind.displayName) 未启用")
             }
-            if configuresSOCKS {
-                let socks = try endpoint(of: .socks, service: name)
-                guard socks.enabled, socks.server == localServer, socks.port == port else {
-                    throw SystemProxyError.verificationFailed(service: name, detail: "SOCKS 读回不一致")
-                }
+            guard endpoint.server == localServer, endpoint.port == port else {
+                throw SystemProxyError.verificationFailed(
+                    service: name,
+                    detail: "\(kind.displayName) 读回为 \(endpoint.server):\(endpoint.port)"
+                )
             }
-            let auto = parseAuto(try run(["-getautoproxyurl", name], service: name))
-            guard !auto.enabled else {
-                throw SystemProxyError.verificationFailed(service: name, detail: "PAC 仍处于开启状态")
+        }
+        if configuresSOCKS {
+            let socks = try endpoint(of: .socks, service: name)
+            guard socks.enabled, socks.server == localServer, socks.port == port else {
+                throw SystemProxyError.verificationFailed(service: name, detail: "SOCKS 读回不一致")
             }
+        }
+        let auto = parseAuto(try run(["-getautoproxyurl", name], service: name))
+        guard !auto.enabled else {
+            throw SystemProxyError.verificationFailed(service: name, detail: "PAC 仍处于开启状态")
         }
     }
 
     // MARK: 还原事务
 
-    /// 读快照 → 逐项还原 → 读回校验 → 删快照
-    static func deactivate(snapshotURL: URL) throws {
+    /// 读快照 → 逐项还原 → 读回校验 → 删快照（各服务并发）
+    static func deactivate(snapshotURL: URL) async throws {
         let total = LatencyTrace.shared.begin()
         defer { LatencyTrace.shared.record("total", from: total) }
 
@@ -697,11 +703,11 @@ private enum Networksetup {
         LatencyTrace.shared.record("capture", from: captureStart)
 
         let setStart = LatencyTrace.shared.begin()
-        try restoreServices(snapshot)
+        _ = try await runConcurrently(snapshot.services) { try restore(service: $0) }
         LatencyTrace.shared.record("set", from: setStart)
 
         let verifyStart = LatencyTrace.shared.begin()
-        try verifyAllRestored(snapshot)
+        _ = try await runConcurrently(snapshot.services) { try verifyRestored($0) }
         LatencyTrace.shared.record("verify", from: verifyStart)
 
         try removeSnapshot(at: snapshotURL)
@@ -723,16 +729,54 @@ private enum Networksetup {
         try removeSnapshot(at: snapshotURL)
     }
 
-    /// 并发跑每个服务的单服务事务，收集第一个错误：一个服务失败不阻断其余服务
+    /// 并发跑每个服务的单服务事务，收集**按输入顺序**的第一个错误：一个服务失败不阻断其余服务
     /// （尽量把能还原的都还原掉），最后由调用方决定是否保留快照。
+    ///
+    /// 用 `withTaskGroup` 而不是 `DispatchGroup`：UI 路径里调用线程是协作线程池，
+    /// 不能拿它跑其中一个分片（阻塞等待信号量会占住线程）。
+    private static func runConcurrently<T: Sendable, R: Sendable>(
+        _ values: [T],
+        _ body: @Sendable @escaping (T) throws -> R
+    ) async throws -> [R] {
+        guard !values.isEmpty else { return [] }
+
+        let results = await withTaskGroup(of: (Int, Result<R, SystemProxyError>).self) { group in
+            for (index, value) in values.enumerated() {
+                group.addTask {
+                    do {
+                        return (index, .success(try body(value)))
+                    } catch {
+                        let mapped = error as? SystemProxyError
+                            ?? .commandFailed(service: "系统代理", detail: String(describing: error))
+                        return (index, .failure(mapped))
+                    }
+                }
+            }
+            var collected: [(Int, Result<R, SystemProxyError>)] = []
+            for await item in group { collected.append(item) }
+            return collected.sorted { $0.0 < $1.0 }
+        }
+
+        var values: [R] = []
+        var firstError: SystemProxyError?
+        for (_, result) in results {
+            switch result {
+            case .success(let value): values.append(value)
+            case .failure(let error): if firstError == nil { firstError = error }
+            }
+        }
+        if let firstError { throw firstError }
+        return values
+    }
+
+    /// 退出路径专用（**同步**，不能 await）：`DispatchGroup` + 全局队列并发跑每个服务。
+    /// 不用 `concurrentPerform`：它会拿调用线程（主线程）跑其中一个分片，等于没提速。
     private static func forEachServiceConcurrently(
         _ services: [ServiceProxyState],
         _ body: @escaping @Sendable (ServiceProxyState) throws -> Void
     ) throws {
         guard !services.isEmpty else { return }
 
-        // 不用 `concurrentPerform`：它会拿调用线程（主线程）跑其中一个分片，
-        // 那一份又要吃主线程的 `waitUntilExit` 开销，等于没提速。
         let failures = FailureBox()
         let group = DispatchGroup()
         for service in services {
@@ -754,7 +798,7 @@ private enum Networksetup {
         if let first = failures.first { throw first }
     }
 
-    /// 并发收集错误（`forEachServiceConcurrently` 专用）
+    /// 并发收集错误（`deactivateForTermination` 专用：同步、不能 await）
     private final class FailureBox: @unchecked Sendable {
         private let lock = NSLock()
         private var stored: SystemProxyError?

@@ -134,7 +134,7 @@ enum SystemNetworkProbe {
     }
 
     /// 同步执行（`captureSynchronously` / 退出路径用），带 3s 超时。
-    /// 写法照 `PortOccupantProbe.listeningProcesses`：超时先 `terminate`，再读管道收尾。
+    /// 用 `terminationHandler` + 信号量等退出：轮询 `isRunning` 会白等 ~100ms/条命令。
     static func runCommandSynchronously(_ path: String, _ arguments: [String]) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
@@ -144,6 +144,9 @@ enum SystemNetworkProbe {
         process.standardOutput = pipe
         process.standardError = pipe
 
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
+
         do {
             try process.run()
         } catch {
@@ -151,13 +154,13 @@ enum SystemNetworkProbe {
             return nil
         }
 
-        let deadline = Date().addingTimeInterval(commandTimeout)
-        while process.isRunning && Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.02)
-        }
-        if process.isRunning {
+        if finished.wait(timeout: .now() + commandTimeout) == .timedOut {
             logger.error("执行 \(path, privacy: .public) 超过 \(Int(commandTimeout))s，已终止")
             process.terminate()
+            if finished.wait(timeout: .now() + 0.5) == .timedOut {
+                kill(process.processIdentifier, SIGKILL)
+                _ = finished.wait(timeout: .now() + 0.5)
+            }
         }
 
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
