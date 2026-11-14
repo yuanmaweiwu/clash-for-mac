@@ -1,7 +1,8 @@
 #if DEBUG
 import Foundation
 
-/// 真机 TUN 自检（仅 DEBUG）：`CLASH_TUN_SMOKE=1`（默认）/ `=probe` / `=badconfig`。
+/// 真机 TUN 自检（仅 DEBUG）：`CLASH_TUN_SMOKE=1`（默认）/ `=probe` / `=badconfig` /
+/// `=gate`（只验开 TUN 前的门禁，不弹密码框、不 spawn 内核）。
 ///
 /// 这一轮**会真的启动 root 内核**（用户已在真机授权安装），所以：
 /// - 用 App 自己的 `TunService` 实例（XPC 校验要求客户端是本 App 的可执行路径）
@@ -38,6 +39,8 @@ enum TunSmokeHarness {
                 failures = await resubscribeCycle(model: model, tun: tun)
             case "helper":
                 failures = await helperStates(tun: tun)
+            case "gate":
+                failures = await geodataGate(tun: tun)
             default:
                 failures = await fullCycle(tun: tun, kernel: kernel, systemProxy: systemProxy)
             }
@@ -147,9 +150,9 @@ enum TunSmokeHarness {
         await tun.enable()
         let ready = await waitUntilSettled(tun: tun)
         print("phase=\(tun.phase) banner=\(tun.bannerMessage ?? "—")")
-        let blockedByGeodata = tun.bannerMessage?.contains("内核缺少") == true
-        if !ready, blockedByGeodata {
-            print("SKIP 运行目录缺 geodata（组件安装时未拷贝）；其余流程未触达")
+        let blockedBeforeStart = { if case .needsInstall = tun.phase { true } else { false } }()
+        if !ready, blockedBeforeStart {
+            print("SKIP 开 TUN 前门禁未通过（需要授权 / 安装）：其余流程未触达")
         } else if !ready {
             print("FAIL enable 未进入 on")
             failures += 1
@@ -295,6 +298,36 @@ enum TunSmokeHarness {
             print("FIXTURE [\(label)] status=\(model.statusText) | hint=\(model.hintText) | action=\(model.action?.title ?? "nil")")
         }
         return 0
+    }
+
+    /// 开 TUN 前的 geodata 门禁：走**磁贴点击的同一个入口** `toggle()`，只验到说明卡为止。
+    /// 不输密码、不 spawn 内核（组件运行目录缺 geosite 时根本到不了那一步）。
+    private static func geodataGate(tun: TunService) async -> Int {
+        print("=== TLDR profile=\(ProfileLocator.displayName(for: ProfileLocator.locate())) ===")
+        tun.toggle()
+        for _ in 0..<40 {
+            if !tun.isBusy, tun.installPrompt != nil { break }
+            if case .failed = tun.phase { break }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        print("phase=\(tun.phase)")
+        print("tile=\(tun.tileState.rawValue) busy=\(tun.isBusy) installing=\(tun.isInstalling)")
+        print("banner=\(tun.bannerMessage ?? "—")")
+        print("prompt=\(String(describing: tun.installPrompt))")
+        print("alertTitle=\(TunInstallPrompt.title(for: tun.installPrompt))")
+        print("alertMessage=\(TunInstallPrompt.message(for: tun.installPrompt))")
+
+        // 等于点「取消」：必须留在可重试的「需要授权」，不能掉进死的失败态
+        let before = tun.phase
+        tun.cancelInstallPrompt()
+        print("afterCancel phase=\(tun.phase) tile=\(tun.tileState.rawValue) busy=\(tun.isBusy)")
+        print("afterCancel.banner=\(tun.bannerMessage ?? "—")")
+
+        var failures = 0
+        if tun.isBusy { print("FAIL 取消后仍有忙碌闩锁"); failures += 1 }
+        if case .failed = tun.phase { print("FAIL 取消后掉进失败态（应为需要授权）"); failures += 1 }
+        if case .failed = before { print("FAIL 门禁没有给出可修复的路径（直接失败）"); failures += 1 }
+        return failures
     }
 
     // MARK: - 等待

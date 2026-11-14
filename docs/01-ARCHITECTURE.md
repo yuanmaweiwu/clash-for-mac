@@ -183,6 +183,7 @@ idle ──start──► starting ──ok──► running ──stop──►
 - helper 通过**一次性管理员授权**安装为 LaunchDaemon（`adr/0008`）：`osascript … with administrator privileges` 写 `/Library/PrivilegedHelperTools/` + `/Library/LaunchDaemons/` 并 `launchctl bootstrap system`；不用 `SMAppService`（无签名身份无法注册）
 - XPC 连接校验：取 `audit token` 的 pid → 反查可执行路径，必须等于当前 App 的 bundle 路径；ad-hoc 签名无 team id，故不依赖签名校验
 - helper 只暴露白名单操作（协议 v2，实际实现）：`ping()`、`applyRuntimeConfig(bytes)`、`startKernel()`、`stopKernel()`、`kernelState()`
+- **geodata 只在安装时拷入**：安装脚本从 `~/Library/Application Support/Clash/kernel/` 拷 `geoip.metadb` / `geosite.dat` 到运行目录 `/Library/Application Support/ClashHelper/`；运行期 App 不写 root 目录，helper 也没有「补文件」接口。因此用户目录后来才下载到 `geosite.dat`、或换到需要 GeoSite 的订阅（规则 `GEOSITE,` **或 DNS 策略 `'geosite:cn'` 冒号形式**）时，root 内核会尝试在线下载 → 国内超时 → 「8 秒内未就绪」。唯一修复路径是**重装组件**（脚本重新拷入），App 用「需要重新安装网络组件」说明卡引导；开 TUN 前的门禁按 `geoip` / `geosite` 独立词判定，宁可多判（多拷一份已有数据）也不漏判（静默 8 秒超时）
 - 唯一从 XPC 进来的内容是「配置正文」，落盘路径由 `HelperLayout` 推导；系统代理写在 App 侧完成（`networksetup` 不需要 root）
 - helper **不提供**任意命令执行接口
 - 日志用 `os.Logger(subsystem: "com.clash.app", category:)`；secret、订阅 URL 中的 token 需脱敏

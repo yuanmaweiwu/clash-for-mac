@@ -3,17 +3,34 @@ import Foundation
 /// TUN 运行目录里有没有 GeoIP / GeoSite 数据库。
 ///
 /// 为什么 App 要管这个：内核以 `-d /Library/Application Support/ClashHelper` 启动，只要订阅里
-/// 有 `GEOIP,` / `GEOSITE,` 规则，mihomo 就必须在这个目录里找到 `geoip.metadb`（或 `geoip.dat`）
+/// 用到 `geoip` / `geosite`，mihomo 就必须在这个目录里找到 `geoip.metadb`（或 `geoip.dat`）
 /// 和 `geosite.dat`。找不到时它会**去 GitHub 下载**——国内基本 90 秒超时，最终表现为
-/// 「内核 8 秒内未就绪」，而真正的错误在 root 的 `kernel.log` 里，用户完全看不到。
+/// 「内核 8 秒内未就绪」，而真正的错误在 root 的 `kernel.log` 里（0600），用户完全看不到。
+///
+/// 需求来源不止规则：`nameserver-policy` 里的 `'geosite:category-ads-all'` 同样会让内核去下载
+/// geosite（真机事故：只扫 `geosite,` 漏判 → TUN 静默失效）。
 ///
 /// 目录是 0755 root:wheel：App 能读**目录项**（所以能做存在性判断），读不到 0600 的日志。
 ///
 /// 实现要点：
 /// - 订阅可达 1–5 MB：只做 `Data` 字节扫描（不 `String(contentsOf:)` + `uppercased()` 造两份副本）
+/// - 两个词在一次遍历里判完；命中即提前返回
 /// - 结果按 (配置文件路径, mtime) 缓存：一次启动里 gate 会问 1–2 次，第二次不再读盘
 /// - 扫描放 `Task.detached`：判定发生在内核启动 / 开 TUN 的路径上，不能阻塞主线程
 enum TunGeodataProbe {
+
+    /// 缺什么、缺在哪一侧。
+    ///
+    /// 分两边的意义：用户内核目录可以由 App 自己下载补齐，helper 运行目录只能靠重装组件拷入
+    /// （安装脚本从 `~/Library/Application Support/Clash/kernel/` 拷 `geoip.metadb` / `geosite.dat`）。
+    struct Gap: Sendable, Equatable {
+        /// 用户内核目录缺哪些（`KernelService.ensureGeodataIfNeeded` 负责下载）
+        var userDirectory: [String] = []
+        /// helper 运行目录缺哪些（只有「重新安装组件」能拷进去）
+        var helperDirectory: [String] = []
+
+        var isEmpty: Bool { userDirectory.isEmpty && helperDirectory.isEmpty }
+    }
 
     /// 订阅里是否需要地理数据库
     static func profileNeedsGeodata(_ profileURL: URL?) async -> Bool {
@@ -21,26 +38,21 @@ enum TunGeodataProbe {
         return requirements.geoip || requirements.geosite
     }
 
-    /// 缺哪些文件；空数组 = 齐全或不需要
-    static func missing(profileURL: URL?) async -> [String] {
+    /// 需要哪些文件、两侧各缺哪些；`isEmpty` = 齐全或不需要
+    static func gap(profileURL: URL?) async -> Gap {
         let requirements = await requirements(for: profileURL)
+        guard requirements.geoip || requirements.geosite else { return Gap() }
 
-        var missing: [String] = []
-        if requirements.geoip, !hasGeoIPDatabase() {
-            missing.append("geoip.metadb")
+        var gap = Gap()
+        if requirements.geoip {
+            if !exists(AppPaths.geoIPDatabaseURL.path) { gap.userDirectory.append("geoip.metadb") }
+            if !hasGeoIPDatabase() { gap.helperDirectory.append("geoip.metadb") }
         }
-        if requirements.geosite, !hasGeoSiteDatabase() {
-            missing.append("geosite.dat")
+        if requirements.geosite {
+            if !exists(AppPaths.geoSiteDatabaseURL.path) { gap.userDirectory.append("geosite.dat") }
+            if !hasGeoSiteDatabase() { gap.helperDirectory.append("geosite.dat") }
         }
-        return missing
-    }
-
-    /// 给用户看的一句话；`nil` = 没问题
-    static func missingDescription(profileURL: URL?) async -> String? {
-        let missing = await missing(profileURL: profileURL)
-        guard !missing.isEmpty else { return nil }
-        return "内核缺少 \(missing.joined(separator: "、"))（运行目录 \(HelperLayout.supportDirectory)），"
-            + "启动时会尝试在线下载并超时；请在设置里「重新安装…」管理员组件，把已下载的地理数据拷入该目录"
+        return gap
     }
 
     // MARK: - 规则扫描
@@ -93,38 +105,84 @@ enum TunGeodataProbe {
             guard let data = try? Data(contentsOf: profileURL, options: .mappedIfSafe) else {
                 return Requirements()
             }
-            let requirements = Requirements(
-                geoip: contains("geoip,", in: data),
-                geosite: contains("geosite,", in: data)
-            )
+            let requirements = scan(data)
             cache.store(requirements, for: profileURL, modified: modified)
             return requirements
         }.value
     }
 
-    /// 大小写不敏感地找 `geoip,` / `geosite,` 这 6–8 个字节。
+    /// 一次字节遍历，同时判 `geoip` / `geosite`。
     ///
-    /// 不用 `String.uppercased()`：那会给几 MB 的订阅再造一份副本；这里直接在 `Data`
-    /// 的字节上按 ASCII 折叠比较，零额外分配。
-    private static func contains(_ token: String, in data: Data) -> Bool {
-        let folded = token.utf8.map { asciiLower($0) }
-        guard !folded.isEmpty, data.count >= folded.count else { return false }
+    /// 识别三种写法（都是 mihomo 真实配置里的来源）：
+    /// - 规则语法：`GEOSITE,category-ads-all,REJECT`、`GEOIP,CN,DIRECT`
+    /// - DNS 策略冒号形式：`'geosite:category-ads-all'`、`'geosite:cn,geolocation-cn'`
+    /// - 裸词：`RULE-SET` / provider 名 / 文件名里出现的 `geosite-cn`、`geosite.dat` 等
+    ///
+    /// **误判成本**：多判一次 = 重装时多拷一份已经存在的数据文件（本地 `cp`，几 MB）；
+    /// 漏判的代价 = root 内核去 jsdelivr 下载 → 国内超时 → 8 秒后静默失败，用户读不到
+    /// 0600 的 kernel.log。所以这里**宁可多判**：只要出现独立的 `geoip` / `geosite` 词
+    /// 就当作需要，不去区分它出现在规则、DNS 策略还是 `geox-url` 里。
+    private static func scan(_ data: Data) -> Requirements {
+        var requirements = Requirements()
 
-        return data.withUnsafeBytes { raw -> Bool in
-            guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return false }
-            let lastStart = raw.count - folded.count
-            var start = 0
-            while start <= lastStart {
-                var offset = 0
-                while offset < folded.count,
-                      asciiLower(base[start + offset]) == folded[offset] {
-                    offset += 1
+        data.withUnsafeBytes { raw in
+            guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return }
+            let count = raw.count
+            var index = 0
+            while index < count {
+                if asciiLower(base[index]) != UInt8(ascii: "g") {
+                    index += 1
+                    continue
                 }
-                if offset == folded.count { return true }
-                start += 1
+                // `geo` 前缀：两个词共用
+                guard index + 4 < count,
+                      asciiLower(base[index + 1]) == UInt8(ascii: "e"),
+                      asciiLower(base[index + 2]) == UInt8(ascii: "o") else {
+                    index += 1
+                    continue
+                }
+
+                switch asciiLower(base[index + 3]) {
+                case UInt8(ascii: "i"):
+                    // `geoip` + 词边界
+                    if index + 5 < count,
+                       asciiLower(base[index + 4]) == UInt8(ascii: "p"),
+                       isWordBoundary(base[index + 5]) {
+                        requirements.geoip = true
+                        index += 5
+                    } else {
+                        index += 1
+                    }
+                case UInt8(ascii: "s"):
+                    // `geosite` + 词边界
+                    if index + 7 < count,
+                       asciiLower(base[index + 4]) == UInt8(ascii: "i"),
+                       asciiLower(base[index + 5]) == UInt8(ascii: "t"),
+                       asciiLower(base[index + 6]) == UInt8(ascii: "e"),
+                       isWordBoundary(base[index + 7]) {
+                        requirements.geosite = true
+                        index += 7
+                    } else {
+                        index += 1
+                    }
+                default:
+                    index += 1
+                }
+
+                if requirements.geoip, requirements.geosite { return }
             }
-            return false
         }
+
+        return requirements
+    }
+
+    /// 词尾必须是分隔符（`,` `:` `-` `.` 引号 / 换行…），不能还是字母数字或下划线，
+    /// 否则 `geography` / `geolocation` 这类词会被误判。
+    private static func isWordBoundary(_ byte: UInt8) -> Bool {
+        let lowered = asciiLower(byte)
+        if lowered >= UInt8(ascii: "a"), lowered <= UInt8(ascii: "z") { return false }
+        if byte >= UInt8(ascii: "0"), byte <= UInt8(ascii: "9") { return false }
+        return byte != UInt8(ascii: "_")
     }
 
     private static func asciiLower(_ byte: UInt8) -> UInt8 {
@@ -133,13 +191,16 @@ enum TunGeodataProbe {
 
     // MARK: - 文件
 
+    private static func exists(_ path: String) -> Bool {
+        FileManager.default.fileExists(atPath: path)
+    }
+
     private static func hasGeoIPDatabase() -> Bool {
-        let fileManager = FileManager.default
-        return fileManager.fileExists(atPath: HelperLayout.supportDirectory + "/geoip.metadb")
-            || fileManager.fileExists(atPath: HelperLayout.supportDirectory + "/geoip.dat")
+        exists(HelperLayout.supportDirectory + "/geoip.metadb")
+            || exists(HelperLayout.supportDirectory + "/geoip.dat")
     }
 
     private static func hasGeoSiteDatabase() -> Bool {
-        FileManager.default.fileExists(atPath: HelperLayout.supportDirectory + "/geosite.dat")
+        exists(HelperLayout.supportDirectory + "/geosite.dat")
     }
 }

@@ -43,6 +43,9 @@ final class TunService {
         case notInstalled
         /// 装了但协议版本对不上（`HelperVersion` 变了）
         case outdated
+        /// 组件已装好，但它的**运行目录**缺 geodata（安装时才会拷入）：
+        /// 只能重装一次把用户目录里已下载的数据拷进去，helper 侧不新增接口
+        case missingGeodata
     }
 
     enum TunFailure: Equatable, Sendable {
@@ -227,10 +230,21 @@ final class TunService {
     }
 
     func cancelInstallPrompt() {
-        guard installPrompt != nil else { return }
+        guard let blocker = installPrompt else { return }
         installPrompt = nil
-        phase = .off
-        failureMessage = TunFailure.userCancelled.userMessage
+        // 取消不等于「没这个需求」：留在「需要授权」态，磁贴还能再点重试。
+        // 只有 `.notInstalled` 走回原来的 off（此时连组件都没有，语义就是「没开」）。
+        switch blocker {
+        case .notInstalled:
+            phase = .off
+            failureMessage = TunFailure.userCancelled.userMessage
+        case .outdated:
+            phase = .needsInstall(blocker)
+            failureMessage = "管理员组件需要更新：点 TUN 可再次授权安装"
+        case .missingGeodata:
+            phase = .needsInstall(blocker)
+            failureMessage = "组件运行目录仍缺地理数据：点 TUN 可再次授权，重新安装会把已下载的数据拷进去"
+        }
     }
 
     /// 用户按 Esc / 点外部关闭：只收起说明卡，保持「需要授权」，不改变其它状态
@@ -391,10 +405,29 @@ final class TunService {
             return
         }
 
-        // 3. GeoIP / GeoSite 数据库：缺了内核会去 GitHub 下载（90s 超时），先拦下并给准确原因
+        // 3. GeoIP / GeoSite 数据库：缺了内核会去 jsdelivr 下载（国内 90s 超时 → 表现为
+        //    「8 秒未就绪」），先拦下。两侧分开处理：
+        //    - 用户目录缺 → `ensureGeodataIfNeeded` 已跑过仍缺，是下载失败，给网络原因
+        //    - helper 运行目录缺 → 只有「重新安装组件」能拷入，走说明卡，不是死路
         let profileURL = ProfileLocator.locate()
-        if let missingGeodata = await TunGeodataProbe.missingDescription(profileURL: profileURL) {
-            fail(.startup(missingGeodata))
+        let geodataGap = await TunGeodataProbe.gap(profileURL: profileURL)
+        if !geodataGap.userDirectory.isEmpty {
+            fail(.startup("地理数据下载不完整（缺少 \(geodataGap.userDirectory.joined(separator: "、"))），"
+                + "请检查网络后重试"))
+            return
+        }
+        if !geodataGap.helperDirectory.isEmpty {
+            let missing = geodataGap.helperDirectory.joined(separator: "、")
+            guard !retryingAfterInstall else {
+                // 重装过了还缺：说明用户目录里没有可拷入的文件（`geosite.dat` 下载失败只告警）
+                fail(.startup("重新安装后组件运行目录仍缺 \(missing)，"
+                    + "请检查网络让 App 下载好地理数据后再重装组件"))
+                return
+            }
+            phase = .needsInstall(.missingGeodata)
+            installPrompt = .missingGeodata
+            failureMessage = "组件运行目录缺少 \(missing)：重新安装会把已下载的地理数据拷进去"
+                + "（需要管理员密码），否则内核会去在线下载并超时"
             return
         }
 
@@ -471,7 +504,11 @@ final class TunService {
         } catch {
             await runner.stop()
             hasHelperKernel = false
+            // root 的 kernel.log 是 0600，用户读不到：把最可能的真实原因（geodata 缺失导致
+            // 内核在等在线下载）写进 banner，而不是只留一句「未就绪」
+            let geodataHint = await Self.geodataTimeoutHint(profileURL: profileURL)
             fail(.startup("内核启动后 \(Int(Self.readinessTimeout.components.seconds)) 秒内未就绪"
+                + geodataHint
                 + "（详见 \(HelperLayout.kernelLogPath)）"))
             return
         }
@@ -595,6 +632,14 @@ final class TunService {
             Self.logger.notice("发现遗留的 TUN 内核 pid=\(running, privacy: .public)，先停掉")
             try? await self.client.stopKernel()
         }
+    }
+
+    /// 8 秒超时最常见的真实原因：组件运行目录缺 geodata，内核正在等 GitHub 下载。
+    /// 只在「订阅确实需要 + 文件确实没有」时补这一句，避免把无关超时误导成 geodata 问题。
+    private static func geodataTimeoutHint(profileURL: URL?) async -> String {
+        let gap = await TunGeodataProbe.gap(profileURL: profileURL)
+        guard !gap.helperDirectory.isEmpty else { return "" }
+        return "（缺少 \(gap.helperDirectory.joined(separator: "、"))，内核正在尝试在线下载地理数据）"
     }
 
     private static func describe(_ error: Error) -> String {

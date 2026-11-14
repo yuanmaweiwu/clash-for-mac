@@ -75,6 +75,8 @@ App ──XPC──► helper(root) ──posix_spawn──► mihomo
 **`-d` 目录全 profile 共用一个**：首次运行会下载 `geoip.metadb`（约 8MB）到 `-d` 目录；按 profile 分开会让每份订阅各下一份。
 首次启动需要网络（`Can't find MMDB, start download`）；离线首启要能给出「正在准备地理数据」而不是「配置无效」。
 
+**TUN / helper 的 `-d` 是 root 目录**（`/Library/Application Support/ClashHelper`）：geodata 只在安装脚本里从用户内核目录拷入一次，运行期不会再同步。订阅后来才需要 GeoSite（规则 `GEOSITE,` 或 DNS 策略 `'geosite:cn'` 冒号形式）时，root 内核找不到 `geosite.dat` 就会尝试在线下载 → 国内超时 → 表现为「8 秒内未就绪」。修复只有一条路：重装组件（重新拷入），不要给 helper 加写盘接口。
+
 订阅更新时同样用临时 runtime 校验，通过后才原子替换 `profiles/<id>.yaml`；失败保留旧文件并只写 `lastError`。
 `subscription-userinfo` 响应头（`upload/download/total/expire`）解析进 index，缺字段留空。
 

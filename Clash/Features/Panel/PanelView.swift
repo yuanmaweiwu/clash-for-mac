@@ -58,13 +58,13 @@ struct PanelView: View {
         }
         // TUN 授权说明卡：声明式 alert（不用 NSAlert.runModal，避免不可见模态会话吞点击）
         .alert(
-            TunInstallPrompt.title(updating: model.tunInstallPrompt == .outdated),
+            TunInstallPrompt.title(for: model.tunInstallPrompt),
             isPresented: installPromptBinding
         ) {
             Button("取消", role: .cancel) { model.cancelTunInstall() }
             Button("继续") { model.confirmTunInstall() }
         } message: {
-            Text(TunInstallPrompt.message)
+            Text(TunInstallPrompt.message(for: model.tunInstallPrompt))
         }
     }
 
