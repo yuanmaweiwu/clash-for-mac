@@ -493,9 +493,7 @@ private enum Networksetup {
             .map { $0.trimmingCharacters(in: .whitespaces) }
 
         let names = lines.dropFirst().filter { line in
-            !line.isEmpty
-                && !line.hasPrefix("*")
-                && !line.localizedCaseInsensitiveContains("asterisk")
+            !line.isEmpty && !line.hasPrefix("*")
         }
         guard !names.isEmpty else { throw SystemProxyError.noServices }
         return names
