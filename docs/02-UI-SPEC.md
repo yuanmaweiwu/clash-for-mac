@@ -343,7 +343,7 @@
 
 ### 4.3 分段模式切换（规则 / 全局 / 直连）
 
-**结构** 153×28pt 轨道（`radius/track`，`surface/track`），三段等分，段内 4pt 内边距；选中段 `surface/opaque` + `radius/control` + 11pt semibold `text/primary`；未选中 11pt regular `text/secondary`。上方标题「代理模式」（`font/caption`，`text/secondary`），标题与轨道间距 4pt。
+**结构** 153×28pt 轨道（`radius/track`，`surface/track`），三段等分，段内 4pt 内边距；选中段 `surface/opaque` + `radius/control` + 11pt semibold `text/primary`；未选中 11pt regular `text/secondary`。上方标题「代理模式」（`font/body` 13pt，与同排「系统代理」同阶，`text/secondary`），标题与轨道间距 4pt。
 
 **状态**：默认 / hover（未选中段文字转 `text/primary`）/ 切换中（选中段文字换 12pt `ProgressView`，表示下发配置）/ 失败（选中段描边闪 `error` 一次，400ms 后回真实值）。
 
