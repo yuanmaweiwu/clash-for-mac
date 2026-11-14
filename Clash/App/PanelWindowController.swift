@@ -341,6 +341,20 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
             return
         }
         lastResignAt = Date()
+        // 自己的弹窗（SwiftUI alert / 组件安装说明卡）抢走 key 时**不能收面板**：
+        // 面板一收，弹窗孤零零浮在桌面上，用户会以为卡死；再点图标还要被合并逻辑吞一次，
+        // 表现就是「点一下面板没了、要连点两次才回来」。（用户现场反馈 2026-11-14）
+        if let key = NSApp.keyWindow, key !== panel, key.isVisible {
+            pendingResignClose = false
+            Self.logger.notice("失焦来自本应用弹窗，保留面板（keyWindow=\(String(describing: type(of: key)), privacy: .public)）")
+            // 弹窗关掉后把 key 还给面板，否则「点桌面收起」再也收不到
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                guard let self, self.panel.isVisible, !self.panel.isKeyWindow else { return }
+                guard NSApp.keyWindow == nil || NSApp.keyWindow === self.panel else { return }
+                self.panel.makeKeyAndOrderFront(nil)
+            }
+            return
+        }
         // 失焦是「点状态栏图标」造成的才记一笔：点桌面 / 别的 App 收起时，
         // 下一次点图标是要**打开**面板，不能被这次失焦吞掉
         pendingResignClose = isMouseOverStatusItem?() ?? false
