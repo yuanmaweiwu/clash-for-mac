@@ -532,6 +532,17 @@ final class ProxyService {
                 isPinned: false,
                 canPin: true,
                 isGlobal: false
+            ),
+            // GLOBAL 在真机上由内核合成，这里一并摆出来：预览「全部策略组」时能看到「全局」标签
+            ProxyGroupModel(
+                name: "GLOBAL",
+                type: "Selector",
+                now: "节点选择",
+                nodes: [node("节点选择", .ok(32)), node("自动选择", .ok(64))],
+                delay: 32,
+                isPinned: false,
+                canPin: false,
+                isGlobal: true
             )
         ]
         effectiveGroupNames = ["节点选择"]

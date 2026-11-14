@@ -877,7 +877,8 @@ final class PanelPreviewModel {
     func selectNode(groupID: String, nodeID: String) {
         // 测速中不允许切节点，避免列表顺序抖动
         guard proxies.testingGroup == nil else { return }
-        guard let group = groups.first(where: { $0.id == groupID }),
+        // 用 `allGroups`：GLOBAL 是全局模式的选节点入口，不能被 `groups`（已排除 GLOBAL）挡掉
+        guard let group = allGroups.first(where: { $0.id == groupID }),
               let node = group.nodes.first(where: { $0.id == nodeID }),
               node.isAvailable else { return }
 

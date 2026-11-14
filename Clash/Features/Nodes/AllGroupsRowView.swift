@@ -2,8 +2,8 @@ import SwiftUI
 
 /// 全部策略组的一行 48pt（两行：组名 + 节点数）：hover / 当前组用同一套胶囊。
 ///
-/// 这一页是**策略组管理（pin）**，不是节点选择页：点整行 = 切换是否固定到首屏；
-/// 进去选节点走首屏卡片头的「还有 N 个 ›」。
+/// 这一页是**策略组管理（pin）**：点整行 = 切换是否固定到首屏；进去选节点走首屏卡片头的「还有 N 个 ›」。
+/// 唯一例外是 `GLOBAL`：全局模式下它是选节点的唯一入口，点行仍进全局节点列表，行尾标「全局」。
 /// 固定状态不用图标：已固定 → 名称加粗 + 行尾「已固定」，未固定 → 常规字重、行尾不加字。
 /// 整行是按钮（键盘可 Tab、可 Space 触发、有焦点环）。
 @MainActor
@@ -13,13 +13,14 @@ struct AllGroupsRowView: View {
     /// 该组没有被任何规则引用（§4.7）：行尾提示，仅作说明，不影响 pin
     let showsInactiveLabel: Bool
     let onTogglePin: () -> Void
+    /// `GLOBAL` 专用：打开全局节点列表（唯一还保留的节点入口）
+    let onOpen: () -> Void
 
     @State private var isHovering = false
     @FocusState private var isRowFocused: Bool
 
     var body: some View {
-        // 主组不可取消固定：行失效，避免「点了没反应」却看不出原因
-        Button(action: { if group.canPin { onTogglePin() } }) {
+        Button(action: handleTap) {
             rowBody
         }
         .buttonStyle(PressableButtonStyle())
@@ -71,8 +72,18 @@ struct AllGroupsRowView: View {
         .contentShape(Rectangle())
     }
 
-    /// 「已固定 · 未生效」/ 只有其中一项 / 都没有（未固定的生效组）
+    /// 行点击：`GLOBAL` 进全局节点列表（全局模式的唯一入口），其余组切换固定
+    private func handleTap() {
+        if group.isGlobal {
+            onOpen()
+        } else if group.canPin {
+            onTogglePin()
+        }
+    }
+
+    /// 「已固定 · 未生效」/ 只有其中一项 / 都没有（未固定的生效组）；`GLOBAL` 固定显示「全局」
     private var statusText: String? {
+        if group.isGlobal { return "全局" }
         var parts: [String] = []
         if group.isPinned { parts.append("已固定") }
         if showsInactiveLabel { parts.append("未生效") }
@@ -89,8 +100,9 @@ struct AllGroupsRowView: View {
         }
     }
 
-    /// 读屏先报固定状态与生效状态，再报节点数
+    /// 读屏先报固定状态与生效状态，再报节点数；`GLOBAL` 只报「全局组」
     private var rowValue: String {
+        if group.isGlobal { return "全局组，\(group.nodes.count) 个节点" }
         var parts = [group.isPinned ? "已固定到首屏" : "未固定"]
         if showsInactiveLabel { parts.append("未生效") }
         parts.append("\(group.nodes.count) 个节点")
@@ -98,7 +110,7 @@ struct AllGroupsRowView: View {
     }
 
     private var rowHint: String {
-        if group.isGlobal { return "全局组不可固定" }
+        if group.isGlobal { return "按下查看全局节点" }
         guard group.canPin else { return "主组固定显示" }
         return "按下切换是否固定到首屏"
     }
