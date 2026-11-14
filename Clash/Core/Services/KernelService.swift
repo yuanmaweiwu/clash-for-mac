@@ -28,7 +28,7 @@ final class KernelService {
     private(set) var activeAllowLAN: Bool?
     /// 本轮启动是否用了用户配置（false = 内置空配置），空态文案据此区分
     private(set) var hasProfile = false
-    /// 启动 / 停止过程中：UI 应禁用连接磁贴
+    /// 启动 / 停止过程中：UI 应禁用系统代理磁贴
     private(set) var isTransitioning = false
 
     /// 内核由 helper（root）持有（TUN 模式）：App 只接管 API 端点，绝不 spawn / kill。

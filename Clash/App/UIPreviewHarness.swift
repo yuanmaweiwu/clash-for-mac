@@ -34,6 +34,8 @@ enum UIPreviewHarness {
         switch page {
         case "log", "log-empty":
             presentLogPreview(empty: page == "log-empty")
+        case "tiles":
+            presentTileBoard()
         default:
             presentPanelPreview(page: page, environment: environment)
         }
@@ -142,6 +144,13 @@ enum UIPreviewHarness {
             }
             return model
         }
+    }
+
+    /// `CLASH_PREVIEW_PAGE=tiles`：两个开关磁贴的全状态板（只拼视图，不碰内核 / 系统代理）。
+    private static func presentTileBoard() {
+        let hosting = NSHostingView(rootView: TileStateBoardView())
+        hosting.layoutSubtreeIfNeeded()
+        present(hosting, size: hosting.fittingSize, name: "tiles")
     }
 
     /// `CLASH_PREVIEW_SETTINGS=custom-fields`：设置页要能看见「自定义 UA / 镜像前缀」两个输入框。

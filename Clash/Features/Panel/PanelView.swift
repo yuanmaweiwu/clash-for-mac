@@ -162,6 +162,10 @@ struct PanelView: View {
             ControlGridView(model: model)
                 .padding(.top, Metrics.sectionGap)
 
+            // 系统代理 / TUN 互斥：都未启用时才露一行「任选其一」（§4.2）。
+            // 高度恒定，开着代理时只是留白，不把面板撑高或压矮。
+            TransportHintView(isVisible: model.showsTransportHint)
+
             TrafficCardView(
                 hasCurve: model.hasTrafficCurve,
                 isLive: model.showsLiveTraffic,

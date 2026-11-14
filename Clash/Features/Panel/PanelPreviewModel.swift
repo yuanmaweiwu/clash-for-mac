@@ -49,7 +49,7 @@ final class PanelPreviewModel {
     /// 网络检测（URLSession 直连四个固定目标，5s 超时）
     @ObservationIgnored private let networkProbes = NetworkProbeService()
 
-    /// 连接磁贴的五态（§4.2）；开 / 关成功与否都以读回校验为准
+    /// 系统代理磁贴的五态（§4.2）；启用 / 停用成功与否都以读回校验为准
     private(set) var connectionState: ConnectionState = .off
     /// 系统代理操作的失败文案（优先于内核错误进 banner）
     private(set) var connectionError: String?
@@ -57,11 +57,11 @@ final class PanelPreviewModel {
     /// 我们是否正在接管系统代理（快照存在且未还原）
     var isSystemProxyOn: Bool { systemProxy.isEnabled }
 
-    /// 连接磁贴实际展示的状态：`.on` / `.off` 以系统代理真实开关为准。
+    /// 系统代理磁贴实际展示的状态：`.on` / `.off` 以系统代理真实开关为准。
     ///
     /// TUN 与系统代理互斥，TUN 开启会在 `TunService` 里直接关掉系统代理；这条路径
     /// 不经过本模型的 `connectionState`，所以磁贴必须以 `systemProxy.isEnabled` 为准，
-    /// 否则会一直显示「已开启」。过渡 / 失败态保留原值。
+    /// 否则会一直显示「已启用」。过渡 / 失败态保留原值。
     var connectionTileState: ConnectionState {
         switch connectionState {
         case .turningOn, .turningOff, .failed(_):
@@ -236,7 +236,15 @@ final class PanelPreviewModel {
     /// 不确定进度条用；总长度未知时为 nil
     var kernelProvisioningProgress: Double? { kernel.provisioningPhase.progress }
 
-    /// 连接磁贴不可再点：内核启停中、系统代理正在写入、TUN 正在过渡，或正在升级内核
+    /// 系统代理与 TUN 都关着时，磁贴下方露一行「任选其一」提示。
+    ///
+    /// 两者是替代关系（互斥，开一个必关另一个），都关着恰恰是最容易误读成
+    /// 「两个都要开」的时刻；任一已启用 / 过渡中 / 失败都不再显示——那时用户已经选好了路。
+    var showsTransportHint: Bool {
+        connectionTileState == .off && tunState == .off
+    }
+
+    /// 系统代理磁贴不可再点：内核启停中、系统代理正在写入、TUN 正在过渡，或正在升级内核
     var isConnectionBusy: Bool {
         isUpdatingKernel || kernel.isTransitioning || connectionState.isBusy || tun.isBusy
     }
@@ -253,7 +261,7 @@ final class PanelPreviewModel {
 
     /// 状态条文案（§3.3）：内核 running + 代理关 = 已就绪，代理开 = 代理中。
     ///
-    /// 连接磁贴只表示系统代理，内核由 App 生命周期管理，所以「代理关」不再是「未运行」。
+    /// 系统代理磁贴只表示系统代理，内核由 App 生命周期管理，所以「代理关」不再是「未运行」。
     var status: DemoStatus {
         switch phase {
         case .stopped:
@@ -425,9 +433,9 @@ final class PanelPreviewModel {
         }
     }
 
-    // MARK: - 连接磁贴（系统代理总开关）
+    // MARK: - 系统代理磁贴（总开关）
 
-    /// 关闭 → 只还原系统代理（内核继续跑，节点仍可见可选）；开启 → 内核没跑先启动，再接管系统代理。
+    /// 未启用 → 内核没跑先启动，再接管系统代理（内核继续跑时只补代理）；已启用 → 只还原系统代理。
     /// 过渡中忽略点击。
     func toggleConnection() {
         // 内核过渡中：先说清原因（否则 isConnectionBusy 会静默吞掉这一下，用户以为点坏了）
@@ -790,7 +798,7 @@ final class PanelPreviewModel {
     //
     // 状态机与安装流程都在 `TunService` 里；这里只做转发与「与系统代理互斥」的编排。
 
-    /// 磁贴五态（§4.2）：已关闭 / 需要授权 / 等待授权 / 已开启 / 失败
+    /// 磁贴五态（§4.2）：未启用 / 需要授权 / 等待授权 / 已启用 / 失败
     var tunState: TunState { tun.tileState }
     /// 过渡 / 授权中 / 升级内核：磁贴禁用，忽略重复点击
     var isTunBusy: Bool { isUpdatingKernel || tun.isBusy }

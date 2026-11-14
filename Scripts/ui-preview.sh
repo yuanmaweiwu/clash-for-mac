@@ -5,6 +5,7 @@
 #   page   root-single | root-double | root-empty | nodes | groups | subscriptions
 #          | subscriptions-empty | subscriptions-loading | subscriptions-failed
 #          | subscription-new | connections | rules | settings | log | log-empty
+#          | tiles（两个开关磁贴的全状态板，只拼视图不建模型）
 #   scrim  legacy | light | balanced | solid（默认取代码里的默认档）
 #
 # 只用于视觉走查：夹具窗口不启动内核、不碰系统代理，也不读写用户配置。

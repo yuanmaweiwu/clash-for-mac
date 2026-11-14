@@ -204,6 +204,10 @@ enum Metrics {
     // 分区
     static let statusBarHeight: CGFloat = 36
     static let controlHeight: CGFloat = 138
+    /// 主控区下方那行「系统代理与 TUN 任选其一」：11pt 一行 13 + 上方 6 呼吸区。
+    /// 高度恒定（只在两者都未启用时显字，其余留白），切换状态时面板不抖。
+    static let transportHintTextHeight: CGFloat = 13
+    static var transportHintHeight: CGFloat { transportHintTextHeight + Space.s }
     /// 状态条 / 主控 / 曲线 / 分组之间的区块间距
     static let sectionGap: CGFloat = Space.xl
     static let chartCardHeight: CGFloat = 80
@@ -227,19 +231,22 @@ enum Metrics {
     /// 行尾策略名上限：超出尾部截断，把宽度让给 payload（中间截断）
     static let ruleTargetMaxWidth: CGFloat = 104
 
-    /// 面板固定部分（含上下内边距与底栏块）：12 + 36 + 16 + 138 + 16 + 80 + 16 + 8 + 32 + 12 = 366
+    /// 面板固定部分（含上下内边距、互斥提示与底栏块）：
+    /// 12 + 36 + 16 + 138 + 19 + 16 + 80 + 16 + 8 + 32 + 12 = 385
     static var panelChromeHeight: CGFloat {
-        panelPadding + statusBarHeight + sectionGap + controlHeight + sectionGap + chartCardHeight
+        panelPadding + statusBarHeight + sectionGap + controlHeight + transportHintHeight
+            + sectionGap + chartCardHeight
             + sectionGap + Space.m + footerHeight + panelPadding
     }
 
     /// 可滚动尾区（网络检测 + 策略组）的可视高度上限。
     ///
-    /// 680 − 固定头部（12 + 36 + 16 + 138 + 16 + 80 + 16 = 314）− 底栏块（8 + 32 + 12 = 52）= 314。
+    /// 680 − 固定头部（12 + 36 + 16 + 138 + 19 + 16 + 80 + 16 = 333）− 底栏块（8 + 32 + 12 = 52）= 295。
     /// 内容超出只在这里滚动，状态条 / 磁贴 / 曲线 / 底栏都不压缩（§3.5）。
     static var scrollTailMaxHeight: CGFloat {
         panelHeightMax
-            - (panelPadding + statusBarHeight + sectionGap + controlHeight + sectionGap + chartCardHeight + sectionGap)
+            - (panelPadding + statusBarHeight + sectionGap + controlHeight + transportHintHeight
+                + sectionGap + chartCardHeight + sectionGap)
             - (Space.m + footerHeight + panelPadding)
     }
     static let emptyGroupCardHeight: CGFloat = 132

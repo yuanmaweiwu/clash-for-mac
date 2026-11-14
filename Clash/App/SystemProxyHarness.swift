@@ -221,7 +221,7 @@ enum SystemProxyHarness {
         return failures
     }
 
-    /// 面板语义（连接磁贴 = 系统代理总开关）：点一下 → 起内核（若没在跑）+ 接管代理；
+    /// 面板语义（系统代理磁贴 = 总开关）：点一下 → 起内核（若没在跑）+ 接管代理；
     /// 再点一下 → 只还原系统代理，内核继续运行。
     /// `hold = true` 时在两个状态各停 8 秒，供外部取证。
     private static func runPanel(hold: Bool = false) async -> Int {
