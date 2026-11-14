@@ -125,8 +125,9 @@ final class SystemProxyService {
             let mapped = Self.mapped(error)
             lastError = mapped
             systemProxyLogger.error("开启系统代理失败：\(mapped.logDescription, privacy: .public)")
-            // `activate` 内部已回滚；这里只兜「回滚本身也失败」的残留，绝不留下半开状态
-            forceRestoreIfSnapshotExists()
+            // `activate` 内部已按快照回滚并删快照；回滚失败时快照留着交给下次启动兜底，
+            // 这里只把 UI 状态对齐到磁盘事实，不再同步重试一遍还原。
+            isEnabled = hasSnapshot
             throw mapped
         }
     }
@@ -197,21 +198,6 @@ final class SystemProxyService {
         } catch {
             systemProxyLogger.error(
                 "退出前还原系统代理失败：\(Self.mapped(error).logDescription, privacy: .public)，保留快照交给下次启动"
-            )
-        }
-    }
-
-    /// 失败兜底：快照还在就再还原一次，避免系统代理停在半开状态
-    private func forceRestoreIfSnapshotExists() {
-        guard hasSnapshot else { return }
-        do {
-            try Networksetup.deactivate(snapshotURL: snapshotURL)
-            isEnabled = false
-            systemProxyLogger.notice("失败兜底：系统代理已按快照还原")
-        } catch {
-            isEnabled = true
-            systemProxyLogger.error(
-                "失败兜底还原未完成：\(Self.mapped(error).logDescription, privacy: .public)，保留快照"
             )
         }
     }
