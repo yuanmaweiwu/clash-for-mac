@@ -45,14 +45,19 @@ struct TrafficCardView: View {
         }
         .padding(Metrics.chartPadding)
         .frame(height: Metrics.chartCardHeight, alignment: .top)
-        .background {
-            RoundedRectangle(cornerRadius: Metrics.radiusCard, style: .continuous)
-                .fill(Theme.card)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: Metrics.radiusCard, style: .continuous)
-                .strokeBorder(Theme.hairline, lineWidth: Metrics.hairline)
-        }
+        .background { cardSurface }
+    }
+
+    /// 单层合成：填充 + 1pt 描边一起光栅化，避免圆角处的半透明过渡带。
+    /// 描边取 `cardStroke`（1pt），与分组卡 / 磁贴同款——曾经错用 `hairline` 只有一半宽。
+    private var cardSurface: some View {
+        RoundedRectangle(cornerRadius: Metrics.radiusCard, style: .continuous)
+            .fill(Theme.card)
+            .overlay {
+                RoundedRectangle(cornerRadius: Metrics.radiusCard, style: .continuous)
+                    .strokeBorder(Theme.hairline, lineWidth: Metrics.cardStroke)
+            }
+            .compositingGroup()
     }
 
     private func legendDot(_ color: Color, label: LocalizedStringKey) -> some View {
