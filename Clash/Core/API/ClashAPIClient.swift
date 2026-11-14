@@ -49,16 +49,28 @@ actor ClashAPIClient {
         let mode: String
     }
 
+    /// WS 流的用途：决定 `stopTraffic()` / `stopLogs()` 各关哪些 socket
+    private enum StreamKind {
+        case traffic
+        case logs
+    }
+
+    /// 一条在连的 WS 流
+    private struct ActiveStream {
+        let kind: StreamKind
+        let socket: URLSessionWebSocketTask
+    }
+
     private let port: Int
     private let baseURL: URL
     private let secret: String
     private let session: URLSession
     /// WS 专用会话：REST 的 5s 资源超时会把长连接掐掉，这里单独放宽
     private let streamSession: URLSession
-    /// 在连的 `/traffic` socket；`stopTraffic()` 与内核重启时统一关闭
-    private var sockets: [UUID: URLSessionWebSocketTask] = [:]
-    /// 在连的 `/logs` socket；与 `/traffic` 分开记账，日志窗口关窗不会连累流量曲线
-    private var logSockets: [UUID: URLSessionWebSocketTask] = [:]
+    /// 全部在连的 WS socket（`/traffic` 与 `/logs` 一起记账，按 `kind` 区分）。
+    ///
+    /// 两类流必须各自可停：日志窗口关窗只能断 `/logs`，不能连累面板流量曲线。
+    private var streams: [UUID: ActiveStream] = [:]
 
     init(port: Int, secret: String, timeout: TimeInterval = 5) {
         self.port = port
@@ -172,85 +184,65 @@ actor ClashAPIClient {
         return response.rules ?? []
     }
 
-    // MARK: - 实时流量（WS）
+    // MARK: - 实时流（WS）：`/traffic` 与 `/logs`
 
     /// `/traffic`：逐秒 `{up,down}`（字节 / 秒，`core-process` §5）。
     ///
-    /// - 鉴权走 `Authorization` 头（与 REST 一致）：secret 不进 URL，也就不会落进日志 / 崩溃报告
-    /// - 单帧解析失败直接跳过，不中断流
-    /// - 断流判定：内核被挂起或连接半开时 `receive()` 会一直不返回，超过 `idleTimeout`
-    ///   没有帧就关 socket 结束流，交给上层重连
-    /// - 取消：`stopTraffic()` 或流被释放都会关 socket，消费端 `for await` 正常退出
+    /// 看门狗 3s：流量固定每秒一帧，长时间没帧只可能是内核被挂起或连接半开。
     func traffic(idleTimeout: Duration = .seconds(3)) -> AsyncThrowingStream<TrafficSample, Error> {
-        let socket = streamSession.webSocketTask(with: streamRequest(path: "traffic"))
-        let id = UUID()
-        sockets[id] = socket
-
-        return AsyncThrowingStream { continuation in
-            let activity = FrameActivity()
-
-            let producer = Task {
-                socket.resume()
-
-                // 看门狗：只负责「多久没帧」，收到帧的判定在收包循环里做
-                let watchdog = Task {
-                    while !Task.isCancelled {
-                        try? await Task.sleep(for: .milliseconds(500))
-                        guard await activity.isIdle(beyond: idleTimeout) else { continue }
-                        socket.cancel(with: .goingAway, reason: nil)
-                        return
-                    }
-                }
-                defer { watchdog.cancel() }
-
-                do {
-                    while !Task.isCancelled {
-                        let message = try await socket.receive()
-                        await activity.touch()
-                        guard let sample = Self.decodeTraffic(message) else { continue }
-                        continuation.yield(sample)
-                    }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: TrafficStreamError.interrupted)
-                }
-            }
-
-            continuation.onTermination = { _ in
-                producer.cancel()
-                socket.cancel(with: .goingAway, reason: nil)
-                Task { await self.removeSocket(id) }
-            }
-        }
+        stream(
+            kind: .traffic,
+            path: "traffic",
+            idleTimeout: idleTimeout,
+            interruption: TrafficStreamError.interrupted,
+            decode: Self.decodeTraffic
+        )
     }
 
     /// 关闭所有 `/traffic` 连接（服务停止 / 内核重启）；消费端随后从 `for await` 退出
     func stopTraffic() {
-        for socket in sockets.values {
-            socket.cancel(with: .goingAway, reason: nil)
-        }
-        sockets.removeAll()
+        stopStreams(of: .traffic)
     }
-
-    private func removeSocket(_ id: UUID) {
-        sockets.removeValue(forKey: id)
-    }
-
-    // MARK: - 内核日志（WS）
 
     /// `/logs?level=<level>`：内核日志推送（`core-process` §5）。
     ///
-    /// - 鉴权走 `Authorization` 头，同 `/traffic`：secret 不进 URL
-    /// - 单帧解析失败直接跳过，不中断流
-    /// - 看门狗阈值比 `/traffic` 宽得多：日志流本身可能长时间没有一帧（内核空闲），
-    ///   用 3s 会一直误杀重连；这里只兜「socket 半开、`receive()` 永不返回」的极端情况
-    /// - 取消：`stopLogs()` 或流被释放都会关 socket，消费端 `for await` 正常退出
+    /// 看门狗阈值比 `/traffic` 宽得多：日志流本身可能长时间没有一帧（内核空闲），
+    /// 用 3s 会一直误杀重连；这里只兜「socket 半开、`receive()` 永不返回」的极端情况。
     func logs(level: String, idleTimeout: Duration = .seconds(600)) -> AsyncThrowingStream<LogLine, Error> {
-        let socket = streamSession.webSocketTask(
-            with: streamRequest(path: "logs", query: [URLQueryItem(name: "level", value: level)])
+        stream(
+            kind: .logs,
+            path: "logs",
+            query: [URLQueryItem(name: "level", value: level)],
+            idleTimeout: idleTimeout,
+            interruption: LogStreamError.interrupted,
+            decode: Self.decodeLog
         )
+    }
+
+    /// 关闭所有 `/logs` 连接（日志窗口关闭 / 内核停止）；消费端随后从 `for await` 退出
+    func stopLogs() {
+        stopStreams(of: .logs)
+    }
+
+    /// 两条 WS 流唯一的实现：建 socket、记账、看门狗、收包、清理都只写在这里。
+    ///
+    /// - 鉴权走 `Authorization` 头（与 REST 一致）：secret 不进 URL，也就不会落进日志 / 崩溃报告
+    /// - 单帧解析失败直接跳过，不中断流
+    /// - 断流判定：内核被挂起或连接半开时 `receive()` 会一直不返回，超过 `idleTimeout`
+    ///   没有帧就关 socket 结束流，交给上层重连（重连节奏由各消费端决定，这里不做退避）
+    /// - 取消：`stopTraffic()` / `stopLogs()` 或流被释放都会关 socket，消费端 `for await` 正常退出
+    /// - 收包异常一律映射成调用方给的 `interruption`：两条流保留各自的中断类型，上层据此区分来源
+    private func stream<Element>(
+        kind: StreamKind,
+        path: String,
+        query: [URLQueryItem] = [],
+        idleTimeout: Duration,
+        interruption: any Error & Sendable,
+        decode: @escaping @Sendable (URLSessionWebSocketTask.Message) -> Element?
+    ) -> AsyncThrowingStream<Element, Error> {
+        let socket = streamSession.webSocketTask(with: streamRequest(path: path, query: query))
         let id = UUID()
-        logSockets[id] = socket
+        streams[id] = ActiveStream(kind: kind, socket: socket)
 
         return AsyncThrowingStream { continuation in
             let activity = FrameActivity()
@@ -273,33 +265,32 @@ actor ClashAPIClient {
                     while !Task.isCancelled {
                         let message = try await socket.receive()
                         await activity.touch()
-                        guard let line = Self.decodeLog(message) else { continue }
-                        continuation.yield(line)
+                        guard let element = decode(message) else { continue }
+                        continuation.yield(element)
                     }
                     continuation.finish()
                 } catch {
-                    continuation.finish(throwing: LogStreamError.interrupted)
+                    continuation.finish(throwing: interruption)
                 }
             }
 
             continuation.onTermination = { _ in
                 producer.cancel()
                 socket.cancel(with: .goingAway, reason: nil)
-                Task { await self.removeLogSocket(id) }
+                Task { await self.removeStream(id) }
             }
         }
     }
 
-    /// 关闭所有 `/logs` 连接（日志窗口关闭 / 内核停止）；消费端随后从 `for await` 退出
-    func stopLogs() {
-        for socket in logSockets.values {
-            socket.cancel(with: .goingAway, reason: nil)
+    /// 关掉某一类流并清账；另一类不受影响（关日志窗口不能连累流量曲线）
+    private func stopStreams(of kind: StreamKind) {
+        for id in streams.filter({ $0.value.kind == kind }).map(\.key) {
+            streams.removeValue(forKey: id)?.socket.cancel(with: .goingAway, reason: nil)
         }
-        logSockets.removeAll()
     }
 
-    private func removeLogSocket(_ id: UUID) {
-        logSockets.removeValue(forKey: id)
+    private func removeStream(_ id: UUID) {
+        streams.removeValue(forKey: id)
     }
 
     private func streamRequest(path: String, query: [URLQueryItem] = []) -> URLRequest {
