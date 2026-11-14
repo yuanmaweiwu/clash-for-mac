@@ -199,17 +199,12 @@ struct SettingsPanelView: View {
     private var subscriptionSection: some View {
         section("订阅") {
             row("User-Agent") {
-                Menu {
-                    ForEach(UserAgentChoice.allCases) { choice in
-                        Button(choice.title) { applyUAChoice(choice) }
-                    }
-                } label: {
-                    menuLabel(uaChoice.title)
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .accessibilityLabel(Text("订阅 User-Agent"))
+                menuPicker(
+                    accessibilityLabel: "订阅 User-Agent",
+                    options: UserAgentChoice.allCases,
+                    selection: Binding(get: { uaChoice }, set: { applyUAChoice($0) }),
+                    title: { $0.title }
+                )
             }
 
             if uaChoice == .custom {
@@ -225,17 +220,15 @@ struct SettingsPanelView: View {
             }
 
             row("默认更新间隔") {
-                Menu {
-                    ForEach(SettingsStore.autoUpdateOptions, id: \.self) { hours in
-                        Button(autoUpdateTitle(hours)) { settings.autoUpdateHours = hours }
-                    }
-                } label: {
-                    menuLabel(autoUpdateTitle(settings.autoUpdateHours))
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .accessibilityLabel(Text("默认更新间隔"))
+                menuPicker(
+                    accessibilityLabel: "默认更新间隔",
+                    options: SettingsStore.autoUpdateOptions,
+                    selection: Binding(
+                        get: { settings.autoUpdateHours },
+                        set: { settings.autoUpdateHours = $0 }
+                    ),
+                    title: { autoUpdateTitle($0) }
+                )
             }
         }
     }
@@ -253,17 +246,15 @@ struct SettingsPanelView: View {
     private var downloadSection: some View {
         section("下载") {
             row("内核下载源") {
-                Menu {
-                    ForEach(KernelDownloadMode.allCases) { mode in
-                        Button(mode.title) { settings.kernelDownloadMode = mode }
-                    }
-                } label: {
-                    menuLabel(settings.kernelDownloadMode.title)
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .accessibilityLabel(Text("内核下载源"))
+                menuPicker(
+                    accessibilityLabel: "内核下载源",
+                    options: KernelDownloadMode.allCases,
+                    selection: Binding(
+                        get: { settings.kernelDownloadMode },
+                        set: { settings.kernelDownloadMode = $0 }
+                    ),
+                    title: { $0.title }
+                )
             }
 
             if settings.kernelDownloadMode == .custom {
@@ -514,17 +505,15 @@ struct SettingsPanelView: View {
             }
 
             row("日志级别") {
-                Menu {
-                    ForEach(LogLevelSetting.allCases) { level in
-                        Button(level.title) { settings.logLevel = level }
-                    }
-                } label: {
-                    menuLabel(settings.logLevel.title)
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .accessibilityLabel(Text("日志级别"))
+                menuPicker(
+                    accessibilityLabel: "日志级别",
+                    options: LogLevelSetting.allCases,
+                    selection: Binding(
+                        get: { settings.logLevel },
+                        set: { settings.logLevel = $0 }
+                    ),
+                    title: { $0.title }
+                )
             }
 
             HStack(spacing: Space.m) {
@@ -732,17 +721,27 @@ struct SettingsPanelView: View {
         .frame(height: Metrics.formRowHeight)
     }
 
-    private func menuLabel(_ title: String) -> some View {
-        HStack(spacing: Space.hair) {
-            Text(title)
-                .font(Typography.body)
-                .foregroundStyle(Theme.textSecondary)
-                .lineLimit(1)
-
-            Image(systemName: "chevron.down")
-                .font(.system(size: 8, weight: .semibold))
-                .foregroundStyle(Theme.textTertiary)
+    /// 设置页所有下拉共用：系统 `Picker(.menu)`——自带下拉箭头、整块按钮可点、hover 有反馈。
+    ///
+    /// 之前用 `Menu` + `.menuStyle(.borderlessButton)` + `.fixedSize()`：命中区只剩那行文字，
+    /// 行右侧空白点了没反应；`.menuIndicator(.hidden)` 又把「可点」的提示抹掉了。
+    private func menuPicker<Item: Hashable>(
+        accessibilityLabel: String,
+        options: [Item],
+        selection: Binding<Item>,
+        title: @escaping (Item) -> String
+    ) -> some View {
+        Picker(accessibilityLabel, selection: selection) {
+            ForEach(options, id: \.self) { item in
+                Text(title(item)).tag(item)
+            }
         }
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .controlSize(.large)
+        .fixedSize()
+        .accessibilityLabel(Text(accessibilityLabel))
+        .accessibilityValue(Text(title(selection.wrappedValue)))
     }
 
     private func noticeText(_ text: String, isError: Bool) -> some View {
@@ -768,6 +767,8 @@ struct SettingsPanelView: View {
     // MARK: - UA
 
     private func applyUAChoice(_ choice: UserAgentChoice) {
+        // 本页的选择状态要立刻同步：只写 settings 不足以驱动「自定义 → 输入框」的切换
+        uaChoice = choice
         switch choice {
         case .systemDefault:
             settings.subscriptionUserAgent = ""
