@@ -17,7 +17,7 @@ if !isFixtureLaunch,
    let identity = Bundle.main.bundleIdentifier,
    let other = NSRunningApplication.runningApplications(withBundleIdentifier: identity)
        .first(where: { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }) {
-    other.activate(options: [.activateIgnoringOtherApps])
+    other.activate()
     exit(0)
 }
 

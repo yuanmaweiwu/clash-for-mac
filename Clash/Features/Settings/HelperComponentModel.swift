@@ -61,7 +61,7 @@ final class HelperComponentModel {
             "正在检查…"
         case .notInstalled:
             "未安装"
-        case .installed(let version):
+        case .installed:
             "已安装"
         case .needsUpdate(let installedVersion, _):
             "需要更新（已装版本 \(installedVersion)）"
