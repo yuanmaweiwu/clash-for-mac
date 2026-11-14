@@ -531,12 +531,10 @@ final class TunService {
             // 停不掉就不能继续往下走：先确认退出，再决定 banner 说什么
             guard await stopHelperKernel(runner) else { return }
             Self.logger.notice("AUDIT stop runner 已确认退出")
-            // root 的 kernel.log 是 0600，用户读不到：把最可能的真实原因（geodata 缺失导致
-            // 内核在等在线下载）写进 banner，而不是只留一句「未就绪」
-            let geodataHint = await Self.geodataTimeoutHint(profileURL: profileURL)
-            fail(.startup("内核启动后 \(Int(Self.readinessTimeout.components.seconds)) 秒内未就绪"
-                + geodataHint
-                + "（详见 \(HelperLayout.kernelLogPath)）"))
+            // root 的 kernel.log 是 0600，用户读不到：只有 helper 目录**确实**缺 geodata 时
+            // 才把「在等在线下载」写进 banner，其余情况给通用排查方向，别默认甩锅 geodata。
+            let hint = await Self.readinessTimeoutHint(profileURL: profileURL, mixedPort: mixedPort)
+            fail(.startup("内核启动后 \(Int(Self.readinessTimeout.components.seconds)) 秒内未就绪" + hint))
             return
         }
 
@@ -792,11 +790,13 @@ final class TunService {
         }
     }
 
-    /// 8 秒超时最常见的真实原因：组件运行目录缺 geodata，内核正在等 GitHub 下载。
-    /// 只在「订阅确实需要 + 文件确实没有」时补这一句，避免把无关超时误导成 geodata 问题。
-    private static func geodataTimeoutHint(profileURL: URL?) async -> String {
+    /// 8 秒超时的真实原因提示：**只有 helper 运行目录确实缺 geodata** 才提地理数据
+    /// （内核在等在线下载）。其余情况给通用排查方向，避免把无关超时误导成 geodata 缺失。
+    private static func readinessTimeoutHint(profileURL: URL?, mixedPort: Int) async -> String {
         let gap = await TunGeodataProbe.gap(profileURL: profileURL)
-        guard !gap.helperDirectory.isEmpty else { return "" }
+        guard !gap.helperDirectory.isEmpty else {
+            return "（常见原因：\(mixedPort) 端口交接未完成 / 配置错误，详见 \(HelperLayout.kernelLogPath)）"
+        }
         return "（缺少 \(gap.helperDirectory.joined(separator: "、"))，内核正在尝试在线下载地理数据）"
     }
 
