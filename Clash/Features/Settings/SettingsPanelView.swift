@@ -91,7 +91,7 @@ struct SettingsPanelView: View {
             Button("取消", role: .cancel) {}
             Button("清理", role: .destructive) { runCleanup() }
         } message: {
-            Text("将删除订阅、内核、缓存与偏好；会先还原系统代理并停止内核 / TUN。已安装的特权组件需到「组件」里单独卸载。App 本身保留，完成后需重启。此操作不可撤销。")
+            Text("将把订阅、内核、缓存与偏好移到废纸篓（可恢复），并先还原系统代理、停止内核 / TUN。已安装的特权组件需到「组件」里单独卸载；App 自身保留，完成后请重启。")
         }
     }
 
