@@ -87,10 +87,6 @@ final class PanelPreviewModel {
 
     // MARK: 分组与订阅
 
-    /// 策略组快照是否已过期：内核停止 / 失败时**保留最后一次快照**（面板不塌、不闪），
-    /// 只置这个标记；重新 `running` 并刷新成功后才清掉。
-    private(set) var isGroupDataStale = false
-
     /// 首屏 / 列表用的策略组（不含 `GLOBAL`），来自内核
     var groups: [ProxyGroupModel] { proxies.groups }
     /// 全部策略组（含 `GLOBAL`），供「全部策略组」二级页
@@ -336,7 +332,6 @@ final class PanelPreviewModel {
                 // 还在的页面打回首层（内核重启 = 订阅更新 / 开关 TUN 的必经路径）
                 guard await self.proxies.refresh() else { return }
                 guard !Task.isCancelled else { return }
-                self.isGroupDataStale = false
                 self.pruneRouteIfTargetMissing()
             }
             // 内核 running（含重启后新端口 / 新 secret）：重建 `/traffic` 连接
@@ -353,9 +348,8 @@ final class PanelPreviewModel {
         case .stopped, .failed:
             // 相位变化不再清空策略组、不再重置路由：开关代理 / TUN / 更新订阅都会
             // 让内核 stop → start，清空只会让面板在开关瞬间塌成空态再长回来。
-            // 保留最后一次快照，标记过期；`running` 后由 refresh 覆盖。
+            // 保留最后一次快照；`running` 后由 refresh 覆盖。
             proxyRefreshTask?.cancel()
-            isGroupDataStale = true
             traffic.stop()
             connections.stopPolling()
             connections.clear()
@@ -784,7 +778,6 @@ final class PanelPreviewModel {
         // 内存态跟上：配置正文已删，策略组快照必须作废，否则面板还挂着上一份配置的卡片
         profiles.forgetAllAfterCleanup()
         proxies.clear()
-        isGroupDataStale = false
         pruneRouteIfTargetMissing()
         connectionState = .off
         return nil
@@ -1100,7 +1093,6 @@ final class PanelPreviewModel {
         // 配置全被删了：快照不再对应任何配置，这里必须清空（这不是「内核查相位变化」，
         // 而是路由 / 分组指向的对象真的不存在了）
         proxies.clear()
-        isGroupDataStale = false
         pruneRouteIfTargetMissing()
 
         if tun.isHelperKernelRunning {
