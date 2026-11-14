@@ -4,7 +4,8 @@
 # 用法：Scripts/ui-preview.sh <page> <out.png> [scrim]
 #   page   root-single | root-double | root-empty | nodes | groups | subscriptions
 #          | subscriptions-empty | subscriptions-loading | subscriptions-failed
-#          | subscription-new | connections | rules | settings | log | log-empty
+#          | subscription-new | connections | connections-empty | rules | rules-empty
+#          | settings | log | log-empty
 #          | tiles（两个开关磁贴的全状态板，只拼视图不建模型）
 #   scrim  legacy | light | balanced | solid（默认取代码里的默认档）
 #

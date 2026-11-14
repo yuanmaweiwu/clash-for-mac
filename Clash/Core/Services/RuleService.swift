@@ -96,8 +96,17 @@ final class RuleService {
 
 #if DEBUG
 extension RuleService {
+    /// 截图夹具开关：为真时 `applyPreviewRules()` 摆一个「已加载但 0 条」的空态
+    static var previewEmpty = false
+
     /// 截图夹具：不请求内核，摆出几条典型规则（含长域名与三种目标）
     func applyPreviewRules() {
+        if Self.previewEmpty {
+            rules = []
+            hasLoaded = true
+            lastError = nil
+            return
+        }
         rules = [
             RuleEntry(type: "DomainSuffix", payload: "services.googleapis.cn", proxy: "节点选择"),
             RuleEntry(type: "Domain", payload: "fb.example.shop", proxy: "DIRECT"),

@@ -89,7 +89,7 @@ struct RulesPanelView: View {
                 .accessibilityHidden(true)
 
             Text("当前配置没有规则")
-                .font(Typography.caption)
+                .font(Typography.body)
                 .foregroundStyle(Theme.textSecondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

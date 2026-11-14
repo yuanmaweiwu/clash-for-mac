@@ -167,9 +167,16 @@ extension ConnectionService {
     /// 预览夹具：不请求内核，摆几条连接（截图走查用）
     /// 预览夹具开关：只影响 Debug 构建
     static var isPreview = false
+    /// 同上：为真时摆一个「列表为空」的空态
+    static var previewEmpty = false
 
     func applyPreviewConnections() {
         Self.isPreview = true
+        if Self.previewEmpty {
+            entries = []
+            lastError = nil
+            return
+        }
         entries = [
             ConnectionEntry(previewHost: "www.google.com", processName: "Safari", rule: "DomainSuffix(google.com)", node: "香港 01", upload: 24_576, download: 1_258_291),
             ConnectionEntry(previewHost: "api.github.com", processName: "Xcode", rule: "DomainSuffix(github.com)", node: "日本 02", upload: 8_192, download: 348_160),

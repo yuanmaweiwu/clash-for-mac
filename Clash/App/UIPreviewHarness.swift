@@ -138,10 +138,12 @@ enum UIPreviewHarness {
             )
             model.applyPreviewGroups()
             model.applyPreviewNetworkProbes()
-            if page == "connections" {
+            ConnectionService.previewEmpty = (page == "connections-empty")
+            RuleService.previewEmpty = (page == "rules-empty")
+            if page == "connections" || page == "connections-empty" {
                 model.applyPreviewConnections()
             }
-            if page == "rules" {
+            if page == "rules" || page == "rules-empty" {
                 model.applyPreviewRules()
             }
             if page == "root-failed" {
@@ -195,9 +197,9 @@ enum UIPreviewHarness {
             model.route = .subscriptions
         case "subscription-new":
             model.route = .subscriptionNew
-        case "connections":
+        case "connections", "connections-empty":
             model.route = .connections
-        case "rules":
+        case "rules", "rules-empty":
             model.route = .rules
         case "settings":
             model.route = .settings
