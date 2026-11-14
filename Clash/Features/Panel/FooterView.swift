@@ -17,7 +17,7 @@ struct FooterView: View {
         HStack(spacing: Space.xs) {
             Text(AppVersion.display)
                 .font(.system(size: 11, weight: .regular).monospacedDigit())
-                .foregroundStyle(Theme.textTertiary)
+                .foregroundStyle(Theme.textSecondary)
                 .accessibilityLabel(Text("版本 \(AppVersion.short ?? "未知")"))
 
             Spacer(minLength: Space.m)

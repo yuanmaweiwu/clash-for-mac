@@ -60,7 +60,7 @@ struct AllGroupsRowView: View {
             if let statusText {
                 Text(statusText)
                     .font(Typography.caption)
-                    .foregroundStyle(Theme.textTertiary)
+                    .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
                     .fixedSize()
             }

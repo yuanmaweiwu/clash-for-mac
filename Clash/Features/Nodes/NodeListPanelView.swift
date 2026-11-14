@@ -98,12 +98,12 @@ struct NodeListPanelView: View {
             if isTesting {
                 Text("测速中…")
                     .font(Typography.caption)
-                    .foregroundStyle(Theme.textTertiary)
+                    .foregroundStyle(Theme.textSecondary)
                     .transition(.opacity)
             } else if model.speedResultFlash {
                 Text("刚刚更新")
                     .font(Typography.caption)
-                    .foregroundStyle(Theme.textTertiary)
+                    .foregroundStyle(Theme.textSecondary)
                     .transition(.opacity)
             }
         }

@@ -112,7 +112,7 @@ struct SubscriptionPanelView: View {
             if let active = model.activeSubscription {
                 Text(isUpdating(active) ? "正在更新「\(active.name)」" : "当前激活 \(active.name)")
                     .font(Typography.caption)
-                    .foregroundStyle(Theme.textTertiary)
+                    .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }

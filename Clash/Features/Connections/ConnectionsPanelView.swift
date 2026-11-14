@@ -85,7 +85,7 @@ struct ConnectionsPanelView: View {
 
             Text("没有活动连接")
                 .font(Typography.caption)
-                .foregroundStyle(Theme.textTertiary)
+                .foregroundStyle(Theme.textSecondary)
         }
         .accessibilityElement(children: .combine)
     }

@@ -14,7 +14,7 @@ struct TransportHintView: View {
     var body: some View {
         Text("系统代理与 TUN 任选其一")
             .font(Typography.caption)
-            .foregroundStyle(Theme.textTertiary)
+            .foregroundStyle(Theme.textSecondary)
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)
             .frame(height: Metrics.transportHintTextHeight)

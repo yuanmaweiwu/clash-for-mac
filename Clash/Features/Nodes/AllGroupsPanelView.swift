@@ -57,7 +57,7 @@ struct AllGroupsPanelView: View {
 
             Text("点行切换展示的策略组")
                 .font(Typography.caption)
-                .foregroundStyle(Theme.textTertiary)
+                .foregroundStyle(Theme.textSecondary)
         }
         .frame(height: Metrics.footerHeight)
     }
