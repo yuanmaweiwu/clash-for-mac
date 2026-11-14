@@ -1,7 +1,9 @@
 import SwiftUI
 
-/// 分组区：只显示被 pin 的组；1 张卡时 148pt、2 张卡时 286pt（§3.4）。
-/// banner 出现时高度被压缩，内容仍在，靠这里滚动查看（§3.5）。
+/// 分组区：只显示被 pin 的组，按内容自然高度排（§3.4）。
+///
+/// 滚动交给外层「网络检测 + 策略组」共用容器（`PanelView.scrollTail`），
+/// 这里不再套 `ScrollView`：嵌套滚动在触控板上极易误触。
 @MainActor
 struct GroupSectionView: View {
     let model: PanelPreviewModel
@@ -16,28 +18,24 @@ struct GroupSectionView: View {
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollView(.vertical) {
-                    VStack(spacing: 0) {
-                        GroupSectionHeaderView {
-                            model.openAllGroups()
-                        }
+                VStack(spacing: 0) {
+                    GroupSectionHeaderView {
+                        model.openAllGroups()
+                    }
 
-                        ForEach(Array(model.pinnedGroups.enumerated()), id: \.element.id) { index, group in
-                            GroupCardView(
-                                group: group,
-                                onOpen: { model.pushGroup(group.id) },
-                                onSelect: { nodeID in
-                                    model.selectNode(groupID: group.id, nodeID: nodeID)
-                                }
-                            )
-                            .padding(.top, index == 0 ? 0 : Space.l)
-                        }
+                    ForEach(Array(model.pinnedGroups.enumerated()), id: \.element.id) { index, group in
+                        GroupCardView(
+                            group: group,
+                            onOpen: { model.pushGroup(group.id) },
+                            onSelect: { nodeID in
+                                model.selectNode(groupID: group.id, nodeID: nodeID)
+                            }
+                        )
+                        .padding(.top, index == 0 ? 0 : Space.l)
                     }
                 }
-                .scrollIndicators(.never)
             }
         }
-        .frame(height: model.groupSectionHeight, alignment: .top)
-        .clipped()
+        .frame(height: model.groupSectionContentHeight, alignment: .top)
     }
 }

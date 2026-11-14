@@ -37,7 +37,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let environment = AppEnvironment.shared
         statusItemController = StatusItemController(model: environment.model, panel: environment.panel)
         Self.logger.info("状态栏图标已创建（左键面板 / 右键菜单）")
+        #if DEBUG
+        openPanelForCaptureIfRequested()
+        #endif
     }
+
+    #if DEBUG
+    /// 截图走查（仅 Debug）：`CLASH_PANEL_ROUTE=root|rules|settings` 启动即展开面板。
+    /// 走的是与用户点击相同的入口（`showPanel` + 面板路由），不改任何数据路径。
+    ///
+    /// 等内核就绪再展开：截图要的是正常态，不是启动瞬间的「内核未运行」。
+    private func openPanelForCaptureIfRequested() {
+        guard let route = ProcessInfo.processInfo.environment["CLASH_PANEL_ROUTE"] else { return }
+        Task { @MainActor in
+            let environment = AppEnvironment.shared
+            for _ in 0..<60 where environment.model.phase != .running {
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+            switch route {
+            case "rules":
+                environment.model.openRules()
+            case "settings":
+                environment.model.openSettingsPage()
+            default:
+                break
+            }
+            environment.showPanel()
+        }
+    }
+    #endif
 
     /// 关掉日志窗口不退出：状态栏应用只在「退出 Clash」/ ⌘Q 时退
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

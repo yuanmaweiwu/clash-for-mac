@@ -32,6 +32,11 @@ actor ClashAPIClient {
         let connections: [ConnectionEntry]?
     }
 
+    private struct RulesResponse: Decodable, Sendable {
+        /// 空配置时同样是 `null`
+        let rules: [RuleEntry]?
+    }
+
     private struct DelayResponse: Decodable, Sendable {
         let delay: Int
     }
@@ -154,6 +159,17 @@ actor ClashAPIClient {
     /// `DELETE /connections`：关闭全部连接
     func closeAllConnections() async throws {
         _ = try await send(["connections"], method: "DELETE")
+    }
+
+    // MARK: - 规则（`core-process` §5）
+
+    /// `GET /rules`：按配置顺序返回全部规则
+    func rules() async throws -> [RuleEntry] {
+        let data = try await send(["rules"], method: "GET")
+        guard let response = try? JSONDecoder().decode(RulesResponse.self, from: data) else {
+            throw APIError.malformedResponse
+        }
+        return response.rules ?? []
     }
 
     // MARK: - 实时流量（WS）

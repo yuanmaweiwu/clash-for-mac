@@ -209,6 +209,31 @@ enum Metrics {
     static let chartPadding: CGFloat = Space.l
     static let groupTitleHeight: CGFloat = 28
     static let groupCardHeight: CGFloat = 136
+
+    // 网络检测（§3.2）：一排 4 个紧凑磁贴，73 × 4 + 8 × 3 = 316（正好内容宽）
+    static let probeTileWidth: CGFloat = 73
+    static let probeTileHeight: CGFloat = 56
+    static let probeTileGap: CGFloat = Space.m
+    /// 标题行比「策略组」28pt 更紧凑：磁贴只有 56 高，标题不该和它抢呼吸区
+    static let probeTitleHeight: CGFloat = 20
+    /// 标题 20 + 间距 12 + 磁贴 56
+    static var probeSectionHeight: CGFloat { probeTitleHeight + Space.l + probeTileHeight }
+
+    // 规则列表（§4.11）：行高比二级列表 48 更紧，一屏多露几条
+    static let ruleRowHeight: CGFloat = 40
+    static let ruleBadgeHeight: CGFloat = 18
+    /// 行尾策略名上限：超出尾部截断，把宽度让给 payload（中间截断）
+    static let ruleTargetMaxWidth: CGFloat = 104
+
+    /// 可滚动尾区（网络检测 + 策略组）的可视高度上限。
+    ///
+    /// 680 − 固定头部（12 + 36 + 16 + 138 + 16 + 80 + 16 = 314）− 底栏块（8 + 32 + 12 = 52）= 314。
+    /// 内容超出只在这里滚动，状态条 / 磁贴 / 曲线 / 底栏都不压缩（§3.5）。
+    static var scrollTailMaxHeight: CGFloat {
+        panelHeightMax
+            - (panelPadding + statusBarHeight + sectionGap + controlHeight + sectionGap + chartCardHeight + sectionGap)
+            - (Space.m + footerHeight + panelPadding)
+    }
     /// 双卡满态：28 + 136 + 12 + 136
     static let groupSectionFullHeight: CGFloat = 312
     static let emptyGroupCardHeight: CGFloat = 132

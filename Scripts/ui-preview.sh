@@ -4,7 +4,7 @@
 # 用法：Scripts/ui-preview.sh <page> <out.png> [scrim]
 #   page   root-single | root-double | root-empty | nodes | groups | subscriptions
 #          | subscriptions-empty | subscriptions-loading | subscriptions-failed
-#          | subscription-new | connections | settings | log | log-empty
+#          | subscription-new | connections | rules | settings | log | log-empty
 #   scrim  legacy | light | balanced | solid（默认取代码里的默认档）
 #
 # 只用于视觉走查：夹具窗口不启动内核、不碰系统代理，也不读写用户配置。

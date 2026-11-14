@@ -44,6 +44,10 @@ final class PanelPreviewModel {
     @ObservationIgnored let logStore: LogStore
     /// 应用设置（端口 / UA / 日志级别 / 关代理是否保留内核）
     @ObservationIgnored let settings: SettingsStore
+    /// 规则列表（`GET /rules`，进页面拉一次 + 缓存）
+    @ObservationIgnored private let ruleService: RuleService
+    /// 网络检测（URLSession 直连四个固定目标，5s 超时）
+    @ObservationIgnored private let networkProbes = NetworkProbeService()
 
     /// 连接磁贴的五态（§4.2）；开 / 关成功与否都以读回校验为准
     private(set) var connectionState: ConnectionState = .off
@@ -119,9 +123,11 @@ final class PanelPreviewModel {
     var isTrafficStale: Bool { !traffic.isStreaming }
 
     /// 面板显隐（唯一入口 `PanelWindowController`）：收起时流量不再发布给 UI，
-    /// 避免隐藏窗口跟着每秒采样离屏重绘（GPU 表面会被一直占着）
+    /// 避免隐藏窗口跟着每秒采样离屏重绘（GPU 表面会被一直占着）。
+    /// 显示时顺手检查网络检测：超过 60s 没测过就自动测一轮（§3.2）。
     func setPanelVisible(_ visible: Bool) {
         traffic.setPanelVisible(visible)
+        if visible { networkProbes.testIfStale() }
     }
 
     // MARK: 连接列表（`/connections`）
@@ -132,6 +138,24 @@ final class PanelPreviewModel {
     var connectionsTotalUp: Int64 { connections.totalUp }
     var connectionsTotalDown: Int64 { connections.totalDown }
     var connectionsError: String? { connections.lastError }
+
+    // MARK: 网络检测（URLSession 直连，不走 App 的 API 客户端）
+
+    /// 四个固定目标（顺序即磁贴顺序）
+    var networkProbeTargets: [NetworkProbeService.Target] { NetworkProbeService.Target.allCases }
+    /// 单目标当前状态：未测 / 测速中 / 延迟 / 超时
+    func networkProbeState(for target: NetworkProbeService.Target) -> NetworkProbeService.State {
+        networkProbes.state(for: target)
+    }
+    /// 点任一磁贴：四个一起重测
+    func testNetworkProbes() { networkProbes.testAll() }
+
+    // MARK: 规则列表（`GET /rules`）
+
+    var rules: [RuleEntry] { ruleService.rules }
+    var rulesCount: Int { ruleService.rules.count }
+    var rulesError: String? { ruleService.lastError }
+    var hasLoadedRules: Bool { ruleService.hasLoaded }
 
     @ObservationIgnored private var bootstrapTask: Task<Void, Never>?
     /// 内核生命周期串行链：同一时刻只有一条 start / stop 在跑
@@ -176,6 +200,7 @@ final class PanelPreviewModel {
         self.traffic = TrafficService(kernel: resolvedKernel)
         self.connections = ConnectionService(kernel: resolvedKernel)
         self.logStore = LogStore(kernel: resolvedKernel)
+        self.ruleService = RuleService(kernel: resolvedKernel)
         self.connectionState = systemProxy.isEnabled ? .on : .off
 
         // 内核一就绪就拉真实策略组；停止 / 失败即清空
@@ -290,6 +315,10 @@ final class PanelPreviewModel {
             if route == .connections {
                 connections.startPolling()
             }
+            // 同理：停在规则页时内核重启过（缓存已作废），这里补拉一次
+            if route == .rules {
+                Task { [weak self] in await self?.ruleService.loadIfNeeded() }
+            }
         case .stopped, .failed:
             // 相位变化不再清空策略组、不再重置路由：开关代理 / TUN / 更新订阅都会
             // 让内核 stop → start，清空只会让面板在开关瞬间塌成空态再长回来。
@@ -299,6 +328,8 @@ final class PanelPreviewModel {
             traffic.stop()
             connections.stopPolling()
             connections.clear()
+            // 规则是配置派生的：内核停了 / 换了配置，缓存不再可信，下次进页面重拉
+            ruleService.invalidate()
             if phase == .failed {
                 // 内核异常退出：先撤系统代理，不能让用户对着死内核被代理
                 restoreProxyAfterKernelFailure()
@@ -772,6 +803,16 @@ final class PanelPreviewModel {
 
     func openConnections() { route = .connections }
 
+    /// 规则页：进页面由 `RulesPanelView.task` 拉一次（有缓存就不拉）
+    func openRules() { route = .rules }
+
+    func loadRulesIfNeeded() async { await ruleService.loadIfNeeded() }
+
+    /// 规则页「重试」：重新读一次，不依赖缓存
+    func refreshRules() {
+        Task { [weak self] in await self?.ruleService.refresh() }
+    }
+
     /// 设置页（`docs/02-UI-SPEC.md` §4.9）：只改路由，保证 App 层（⚙ / ⌘, / 菜单项）
     /// 与面板内推入是同一个入口；面板是否已经叫出来由 App 层负责。
     func openSettingsPage() { route = .settings }
@@ -1124,6 +1165,16 @@ final class PanelPreviewModel {
         kernel.applyPreviewFailure()
     }
 
+    /// Preview 夹具：不启动内核，摆出四种网络检测状态（不发真实请求）
+    func applyPreviewNetworkProbes() {
+        networkProbes.applyPreviewStates()
+    }
+
+    /// Preview 夹具：摆出几条典型规则（不请求内核）
+    func applyPreviewRules() {
+        ruleService.applyPreviewRules()
+    }
+
     /// Preview 夹具：不启动内核，摆出两张卡（仅设计预览用）
     func applyPreviewGroups() {
         proxies.applyPreviewFixture()
@@ -1146,10 +1197,21 @@ final class PanelPreviewModel {
 // 面板高度 = 内容自然高度（§3.5）；banner 在固定头部占位，只从分组区里扣。
 
 extension PanelPreviewModel {
-    var groupSectionHeight: CGFloat {
+    /// 分组区自然高度（不扣 banner：banner 只压缩可视窗口，不压内容本身）
+    var groupSectionContentHeight: CGFloat {
         if groups.isEmpty { return Metrics.emptyGroupCardHeight }
-        let base = Metrics.groupSectionHeight(forCards: pinnedGroups.count)
-        return base - (showsErrorBanner ? Metrics.bannerBlockHeight : 0)
+        return Metrics.groupSectionHeight(forCards: pinnedGroups.count)
+    }
+
+    /// 可滚动尾区（网络检测 + 策略组）的完整内容高度
+    var scrollTailContentHeight: CGFloat {
+        Metrics.probeSectionHeight + Metrics.sectionGap + groupSectionContentHeight
+    }
+
+    /// 尾区可视高度：上限 314（680 − 固定头部 314 − 底栏块 52），banner 出现再扣一条
+    var scrollTailHeight: CGFloat {
+        let available = Metrics.scrollTailMaxHeight - (showsErrorBanner ? Metrics.bannerBlockHeight : 0)
+        return min(scrollTailContentHeight, max(available, 0))
     }
 
     /// 内核启动失败：分组区变暗并禁用（§7）

@@ -54,7 +54,7 @@ enum UIPreviewHarness {
         print("CLASH_PREVIEW_FIT \(Int(hosting.fittingSize.height)) groups=\(model.groups.count) subs=\(model.subscriptions.count) load=\(model.subscriptionPanelState)")
         let isRoot = (model.route == .root)
         let height = isRoot
-            ? min(max(hosting.fittingSize.height, 240), Metrics.panelHeight)
+            ? min(max(hosting.fittingSize.height, 240), Metrics.panelHeightMax)
             : Metrics.panelHeight
 
         present(
@@ -130,8 +130,12 @@ enum UIPreviewHarness {
                 autoStartsKernel: false
             )
             model.applyPreviewGroups()
+            model.applyPreviewNetworkProbes()
             if page == "connections" {
                 model.applyPreviewConnections()
+            }
+            if page == "rules" {
+                model.applyPreviewRules()
             }
             if page == "root-failed" {
                 model.previewFailure()
@@ -171,6 +175,8 @@ enum UIPreviewHarness {
             model.route = .subscriptionNew
         case "connections":
             model.route = .connections
+        case "rules":
+            model.route = .rules
         case "settings":
             model.route = .settings
         default:

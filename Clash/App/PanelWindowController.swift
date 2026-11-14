@@ -140,6 +140,9 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
         // 面板刚显示时也补一次：路由可能是在隐藏状态下改的（⌘, / 菜单），
         // 隐着的时候没有绘制周期，内容还停在旧尺寸上
         syncHostingLayout()
+        #if DEBUG
+        printCaptureRegionIfRequested(screen: screen)
+        #endif
     }
 
     func hide() {
@@ -194,7 +197,22 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
 
         // 布局对齐放在动画启动之后：内容按最终尺寸排一次，动画只负责窗口边框
         syncHostingLayout()
+        #if DEBUG
+        printCaptureRegionIfRequested(screen: panel.screen)
+        #endif
     }
+
+    #if DEBUG
+    /// 截图走查（仅 Debug）：`CLASH_CAPTURE_REGION=1` 时把窗口区域打到 stdout，
+    /// 外部用 `screencapture -R` 直接沿用（坐标原点与 `screencapture` 一致，在左上）。
+    private func printCaptureRegionIfRequested(screen: NSScreen?) {
+        guard ProcessInfo.processInfo.environment["CLASH_CAPTURE_REGION"] == "1" else { return }
+        let screenHeight = screen?.frame.height ?? NSScreen.main?.frame.height ?? 0
+        let frame = panel.frame
+        print("CLASH_PANEL_REGION \(Int(frame.minX)),\(Int(screenHeight - frame.maxY)),\(Int(frame.width)),\(Int(frame.height))")
+        fflush(stdout)
+    }
+    #endif
 
     /// 强制把 SwiftUI 的布局与绘制跟窗口当前尺寸对齐。
     ///

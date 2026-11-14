@@ -119,6 +119,12 @@ struct PanelView: View {
                     model.popRoute()
                 }
             }
+        case .rules:
+            pushedContent {
+                RulesPanelView(model: model) {
+                    model.popRoute()
+                }
+            }
         case .settings:
             pushedContent {
                 SettingsPanelView(model: model, settings: model.settings) {
@@ -168,19 +174,37 @@ struct PanelView: View {
             )
             .padding(.top, Metrics.sectionGap)
 
-            GroupSectionView(model: model)
+            // 网络检测 + 策略组共用一块滚动区：新增 88pt 后双卡态仍能塞进 680，
+            // 由这里吸收溢出，状态条 / 磁贴 / 曲线 / 底栏都不压缩（§3.5）
+            scrollTail
                 .padding(.top, Metrics.sectionGap)
-                .opacity(model.isGroupDisabled ? 0.45 : 1)
-                .disabled(model.isGroupDisabled)
 
             FooterView(
                 onOpenConnections: { model.openConnections() },
+                onOpenRules: { model.openRules() },
                 onOpenSettings: { model.openSettingsPage() }
             )
             .padding(.top, Space.m)
         }
         .padding(.horizontal, Metrics.panelPadding)
         .padding(.vertical, Metrics.panelPadding)
+    }
+
+    /// 可滚动尾区：网络检测在上、策略组在下，同一块滚动容器里
+    private var scrollTail: some View {
+        ScrollView(.vertical) {
+            VStack(spacing: 0) {
+                NetworkProbeSectionView(model: model)
+
+                GroupSectionView(model: model)
+                    .padding(.top, Metrics.sectionGap)
+                    .opacity(model.isGroupDisabled ? 0.45 : 1)
+                    .disabled(model.isGroupDisabled)
+            }
+        }
+        .scrollIndicators(.never)
+        .frame(height: model.scrollTailHeight, alignment: .top)
+        .clipped()
     }
 
     /// 底栏「日志」/ 失败 banner：打开独立日志窗口（单例，重复点击只聚焦），并收起面板浮层
