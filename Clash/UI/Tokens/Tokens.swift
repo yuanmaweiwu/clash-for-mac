@@ -303,8 +303,8 @@ enum Metrics {
     /// 控件最小命中区
     static let hitTarget: CGFloat = 28
 
-    /// 1px = 1 / displayScale
-    static let hairline: CGFloat = 1 / max(2, NSScreen.main?.backingScaleFactor ?? 2)
+    /// 1px = 1 / displayScale（1x 屏也保证 1pt；0.5pt 在 1x 上等于没有线）
+    static let hairline: CGFloat = 1 / max(1, NSScreen.main?.backingScaleFactor ?? 2)
     /// 卡片 / 磁贴描边：固定 1pt（2x 下 2px，连续），不用 0.5pt
     static let cardStroke: CGFloat = 1
 
