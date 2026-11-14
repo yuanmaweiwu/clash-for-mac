@@ -147,7 +147,11 @@ final class HelperClient {
         let once = ResumeOnce()
 
         return try await withCheckedThrowingContinuation { continuation in
-            let proxyObject = connection.remoteObjectProxyWithErrorHandler { [weak self] error in
+            // XPC 的错误回调在私有队列上执行。闭包若继承 `@MainActor` 隔离，Swift 6 的
+            // 执行器断言会在 Release 里也触发（`dispatch_assert_queue` → SIGTRAP）。
+            // 2026-11-14 三次崩溃（组件安装/更新时 helper 被 bootout）都是这条路径，故显式
+            // 标 `@Sendable` 让它脱离 actor 隔离，只有真正要碰 UI 状态时才 hop 回 MainActor。
+            let proxyObject = connection.remoteObjectProxyWithErrorHandler { @Sendable [weak self] error in
                 Self.logger.error("helper XPC 调用失败：\(error.localizedDescription, privacy: .public)")
                 Task { @MainActor [weak self] in self?.teardown() }
                 guard once.claim() else { return }
@@ -163,7 +167,7 @@ final class HelperClient {
                 return
             }
 
-            body(proxy) { value in
+            body(proxy) { @Sendable value in
                 guard once.claim() else { return }
                 continuation.resume(returning: value)
             }
