@@ -136,7 +136,7 @@
 | `size/tile` | 153×64pt | 磁贴，水平 gap 10（几何锁定） |
 | `size/probe-tile` | 73×56pt | 网络检测磁贴，gap 8（73×4 + 8×3 = 316） |
 | `size/rule-row` | 40pt | 规则列表行（比二级列表 48 更紧） |
-| `size/rule-badge` | 104×18pt | 规则类型徽标：定宽列，payload 左缘对齐 |
+| `size/rule-badge` | 高 18pt / 内容宽 | 规则类型徽标：按内容宽度，底色整块 |
 | `size/segment` | 28pt | 分段控件 |
 | `size/chart-card` / `size/chart` | 80 / 36pt | 曲线卡总高 / 绘制区（316 − 12×2 = 292 宽） |
 | `size/group-title` | 28pt | 区块标题（含「全部 ›」28pt 命中区） |
@@ -160,10 +160,11 @@
 | `font/caption` | 11pt / regular | 副标题、单位、说明 |
 | `font/number` | 12pt / medium / `.monospacedDigit()` | 延迟、行内速率 |
 | `font/caption-number` | 11pt / medium / `.monospacedDigit()` | 订阅磁贴用量（153pt 宽的极限） |
+| `font/probe-value` | 10pt / medium / `.monospacedDigit()` | 网络检测磁贴的值（73×56 内三行排布的极限，仅此一处） |
 | `font/number-lg` | 13pt / medium / `.monospacedDigit()` | 状态条速率 |
 | `font/status` | 13pt / medium | 状态条文案 |
 
-**只有 11 / 12 / 13 / 15 四档**（旧的 9pt / 10pt 全部收掉）。所有数字强制等宽，否则 1Hz 刷新会左右抖动。中文走系统字体（自动 PingFang SC），**不手动收紧中文字距**；数字与拉丁字母可随字号收 -0.1～-0.15。
+**只有 10 / 11 / 12 / 13 / 15 五档**，其中 10pt 只服务网络检测磁贴（三行 + 73pt 宽的物理极限；旧的 9pt 已收掉，其余界面不得再用 10）。所有数字强制等宽，否则 1Hz 刷新会左右抖动。中文走系统字体（自动 PingFang SC），**不手动收紧中文字距**；数字与拉丁字母可随字号收 -0.1～-0.15。
 
 **字号与 Dynamic Type 的分工**：状态栏面板是固定尺寸工具面板（与系统控制中心一致），字号固定、**不随 Dynamic Type 放大**；设置窗口、日志等自由排版的界面**必须**支持 Dynamic Type。两者都必须响应系统「加粗文本」。
 
@@ -265,6 +266,7 @@
 
 - 结构：固定头部（状态条 + 主控区 + 曲线卡）+ 可滚动尾区（**网络检测 + 策略组**）+ 固定底栏。`VStack` 外层，只有尾区 `ScrollView`；分组卡内部不再单独滚动。
 - 面板高度 = 内容自然高度，上限 680pt；尾区内容超过 314pt 时**只在这里滚动**（滚动条 `never`），状态条 / 4 磁贴 / 曲线卡 / 底栏位置不动。
+- **高度切换与页面切换同帧完成**：面板高度由 `model.panelHeight` 瞬时决定，窗口不单独动画 frame。旧实现里窗口与 SwiftUI 内容各走一条动画，中间帧的圆角会短暂变直角（实测 6 帧约 300ms）。页面推入仍保留淡入 + 16pt 位移，动画只作用在内容容器内，不改变面板外形。
 - 二级面板同宽同高，仅中间区域替换；顶部 breadcrumb `‹ 节点选择`，返回保留滚动位置。
 
 ---
@@ -424,7 +426,19 @@
 
 **网络检测（首屏，排在流量卡之后、「策略组」之前）**
 
-四个固定目标：Google / GitHub / Apple / YouTube。一排 73×56（gap 8 = 316），`radius/card` + `surface/card` + 1pt 描边；卡内上下居中两行：目标名 11pt `text/secondary` + 状态（`font/caption-number` 等宽）。
+四个固定目标：Google / GitHub / Apple / YouTube。一排 73×56（gap 8 = 316），`radius/card` + `surface/card` + 1pt 描边；卡内三行居中（间距 4 / 2）：品牌 logo 16pt + 目标名 11pt `text/secondary` + 值 `font/probe-value`（10pt 等宽）。三者不叠、不贴边。
+
+**Logo 渲染（按品牌实际形态）**
+
+| 目标 | 素材 | 渲染 |
+|---|---|---|
+| Google | 官方四色 G 矢量（`#4285F4 / #34A853 / #FBBC05 / #EA4335`） | 原色，**非 template** |
+| YouTube | 官方红 `#FF0000` 圆角矩形 + 白三角 | 原色，**非 template** |
+| Apple | Simple Icons 单色路径 | **template**：浅色黑 / 深色白 |
+| GitHub | Simple Icons 单色路径 | **template**：浅色黑 / 深色白 |
+
+素材放 `Assets.xcassets` 的 imageset（Single Scale + Preserve Vector Data），不改色、不描边、不自绘。单色两个勾 Template，多色两个不勾——否则 Google 会变灰、YouTube 会变单色。
+> 商标说明：图标来自 Simple Icons（图标集 CC0）与品牌官方配色的矢量；Google / YouTube / Apple / GitHub 商标归各自公司所有，这里仅用于「连通性检测」的指代。
 
 | 状态 | 表现 |
 |---|---|
@@ -434,6 +448,7 @@
 | 超时 | 「超时」`text/tertiary`（测过但不通，与「未测」区分） |
 
 - 交互：点**任意一个**磁贴 → 四个一起并发重测（5s 超时）；已在测时忽略重复点击。hover 换 `surface/card-hover`，按下 `surface/card-pressed` + 0.98。
+- 标题行右侧刷新：16pt `arrow.clockwise`，28pt 热区，`text/tertiary` → hover `text/primary`；测速中换 12pt `ProgressView` 并禁用（与测速互斥，连点不重启）。
 - 数据：`URLSession` 只读 `HEAD`（Google/YouTube `generate_204`、GitHub 首页、Apple `success.html`），测端到端毫秒；**不走 App 的 API 客户端**，系统代理 / TUN 开着时自然被接管。任一端点 5s 未响应或非 2xx/3xx → 超时，不编造「成功但很慢」。
 - 自动测：面板每次显示时，若距上次测完 ≥ 60s（或本次运行还没测过）自动测一轮。
 - 可访问性：每块 label「<目标> 网络检测」，value「延迟 32 毫秒 / 超时 / 未测速 / 测速中」，hint「按下重测全部目标」。
@@ -442,7 +457,7 @@
 
 - 入口：底栏 `list.bullet.rectangle`，面包屑 `‹ 规则`；同宽 340、同高推入。
 - 数据：`GET /rules` → 按配置顺序渲染（不分组、不排序；排查「为什么没命中」靠顺序）。`ClashAPIClient.rules()` + `RuleService`（缓存 + 手动刷新，进页面拉一次；内核停止 / 换配置即作废）。
-- 行高 40pt（左右 12）：类型徽标**定宽 104pt 列**（11pt 等宽、文字左对齐、超长尾部省略；`surface/track` 铺满 104×18 整块、`radius/row` 圆角——每行都有同一块底，不随类型长短伸缩）+ payload（13pt，单行**中间**截断，左缘落在徽标列之后同一条竖线）+ 行尾目标（11pt `text/secondary`，只 hug 文本、上限 104pt 尾部截断）。行不可点、无 hover 底。
+- 行高 40pt（左右 12）：类型徽标**按内容宽度**（左右 4pt 内边距、`fixedSize`；短类型就该比 `DOMAIN-KEYWORD` 短，不强拉列宽）+ payload（13pt，单行**中间**截断；与徽标固定 8pt 间距，不贴住）+ 行尾目标（11pt `text/secondary`，只 hug 文本、上限 104pt 尾部截断）。徽标底是 `surface/track` + `radius/row` 的整块，**每一行都必须有**。行不可点、无 hover 底。
 - 顶部右侧「共 N 条」；滚动条 `never`。
 - 空态：「当前配置没有规则」；失败：`exclamationmark.triangle` +「读取规则失败」+ 原因 +「重试」；读取中：`ProgressView` +「正在读取规则…」。
 
@@ -553,9 +568,11 @@
 - [ ] 曲线 60s 双色、无坐标轴；无数据显示虚线 + 「暂无流量」
 - [ ] 二级面板同宽同高，返回保留滚动位置
 - [ ] 分组卡只显示 pin 过的组：默认 1 张（634pt），pin 后 2 张（680pt，尾区滚动），unpin 后立刻收窄
-- [ ] 网络检测：4 个 73×56 磁贴（gap 8）在流量卡之后；点任一磁贴四个一起进入「测速中」，随后各自显示延迟（按色阶）或「超时」；首次显示 / 距上次 ≥60s 自动测一轮
+- [ ] 网络检测：4 个 73×56 磁贴（gap 8）在流量卡之后；品牌 logo 16（Google/YouTube 原色、Apple/GitHub 模板反白）+ 名称 11 + 值 10；点任一磁贴四个一起进入「测速中」，随后各自显示延迟（按色阶）或「超时」；首次显示 / 距上次 ≥60s 自动测一轮
+- [ ] 网络检测标题右侧刷新：16pt `arrow.clockwise`（28 热区），测速中换 12pt `ProgressView` 且禁用
 - [ ] 面板总高 ≤ 680；双卡满态只让「网络检测 + 策略组」滚动，状态条 / 4 磁贴 / 曲线 / 底栏固定
-- [ ] 规则页：面包屑 `‹ 规则` + 右上「共 N 条」与 `curl /rules` 条数一致；行高 40、徽标定宽 104 + payload 中间截断（左缘对齐）+ 行尾目标；滚动条不可见；空态 / 失败（文案 + 重试）三态齐全
+- [ ] 主页 ↔ 二级页、二级页之间切换时，面板四角始终是 16pt 圆角（连续帧无直角）
+- [ ] 规则页：面包屑 `‹ 规则` + 右上「共 N 条」与 `curl /rules` 条数一致；行高 40、徽标按内容宽（每行都有 `surface/track` 底）+ payload 中间截断（与徽标 ≥8）+ 行尾目标；滚动条不可见；空态 / 失败（文案 + 重试）三态齐全
 - [ ] 订阅磁贴：商家名 + （到期 / 用量）+ 3pt 满宽条在 64pt 内不溢出；缺 `expire` 左侧留白但用量仍右对齐；缺用量只留商家名；>90% 转 warning、≥100% 转 error，条按 100% 封顶，且数字与条同时在场
 - [ ] 面板底栏：左为本 App 版本号（`v0.4.0`），右只有连接列表、规则与设置三个图标，无「N 分钟前更新」/刷新按钮/连接数/内核版本号
 - [ ] 订阅页三态：读取中（`ProgressView` +「正在读取订阅…」）/ 读取失败（文案 + 重试）/ 已加载为空（空态卡），任一路径都不出现纯白板

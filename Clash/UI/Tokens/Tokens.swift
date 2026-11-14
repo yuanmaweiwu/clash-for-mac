@@ -158,6 +158,8 @@ enum Typography {
     static let number = Font.system(size: 12, weight: .medium).monospacedDigit()
     /// 11 / medium + 等宽数字 —— 订阅磁贴用量（153pt 宽里的极限）
     static let captionNumber = Font.system(size: 11, weight: .medium).monospacedDigit()
+    /// 10 / medium + 等宽数字 —— 网络检测磁贴的值（73×56 内三行排布的极限，仅此一处）
+    static let probeValue = Font.system(size: 10, weight: .medium).monospacedDigit()
     /// 13 / medium + 等宽数字 —— 状态条速率
     static let numberLarge = Font.system(size: 13, weight: .medium).monospacedDigit()
     /// 13 / medium —— 状态条文案
@@ -222,10 +224,14 @@ enum Metrics {
     // 规则列表（§4.11）：行高比二级列表 48 更紧，一屏多露几条
     static let ruleRowHeight: CGFloat = 40
     static let ruleBadgeHeight: CGFloat = 18
-    /// 类型徽标定宽列：payload 左缘对齐（104 容得下最长的 `DOMAIN-KEYWORD`）
-    static let ruleBadgeColumnWidth: CGFloat = 104
     /// 行尾策略名上限：超出尾部截断，把宽度让给 payload（中间截断）
     static let ruleTargetMaxWidth: CGFloat = 104
+
+    /// 面板固定部分（含上下内边距与底栏块）：12 + 36 + 16 + 138 + 16 + 80 + 16 + 8 + 32 + 12 = 366
+    static var panelChromeHeight: CGFloat {
+        panelPadding + statusBarHeight + sectionGap + controlHeight + sectionGap + chartCardHeight
+            + sectionGap + Space.m + footerHeight + panelPadding
+    }
 
     /// 可滚动尾区（网络检测 + 策略组）的可视高度上限。
     ///

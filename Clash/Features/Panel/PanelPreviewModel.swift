@@ -147,7 +147,9 @@ final class PanelPreviewModel {
     func networkProbeState(for target: NetworkProbeService.Target) -> NetworkProbeService.State {
         networkProbes.state(for: target)
     }
-    /// 点任一磁贴：四个一起重测
+    /// 是否正在测（标题行按钮据此换 ProgressView 并禁用）
+    var isTestingNetworkProbes: Bool { networkProbes.isTesting }
+    /// 点任一磁贴 / 标题行刷新：四个一起重测
     func testNetworkProbes() { networkProbes.testAll() }
 
     // MARK: 规则列表（`GET /rules`）
@@ -1212,6 +1214,15 @@ extension PanelPreviewModel {
     var scrollTailHeight: CGFloat {
         let available = Metrics.scrollTailMaxHeight - (showsErrorBanner ? Metrics.bannerBlockHeight : 0)
         return min(scrollTailContentHeight, max(available, 0))
+    }
+
+    /// 面板应有的总高（§3.2）：由路由与尾区内容**瞬时**决定，窗口直接跟这个值走。
+    ///
+    /// 不让 SwiftUI 去动画内容高度：背景的 16pt 圆角是内容自己画的，一旦窗口和内容
+    /// 各走一条动画，中间帧就会出现直角（`PanelWindowController` 也不再动画 frame）。
+    var panelHeight: CGFloat {
+        guard route == .root else { return Metrics.panelHeightMax }
+        return Metrics.panelChromeHeight + min(scrollTailContentHeight, Metrics.scrollTailMaxHeight)
     }
 
     /// 内核启动失败：分组区变暗并禁用（§7）

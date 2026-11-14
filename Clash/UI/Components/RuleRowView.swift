@@ -2,10 +2,11 @@ import SwiftUI
 
 /// 规则行 40pt（§4.11）：类型徽标 + payload + 行尾目标。
 ///
-/// 徽标是**定宽列**（104pt）：payload 左缘每行落在同一条竖线上，500+ 行扫读不锯齿；
-/// 徽标底是 104×18 的整块 `surface/track`（不随类型长短伸缩），所以短类型也不会「看起来没有底」。
+/// 徽标按内容宽度（左右 4pt 内边距）：短类型（`DOMAIN` / `MATCH` / `GEOIP`）就该比
+/// `DOMAIN-KEYWORD` 短，不强行拉齐列宽；底色仍是每行都有的整块 `surface/track`。
+/// 徽标与正文之间固定 8pt（`HStack(spacing:)`），不贴住。
 /// 行不可点（没有选中 / 执行语义）：hover 不加底色，避免暗示能操作。
-/// payload 中间截断（域名前后段都有信息），行尾目标尾部截断。
+/// payload 中间截断（域名前后段都有信息），行尾目标只 hug 文本、上限 104 尾部截断。
 @MainActor
 struct RuleRowView: View {
     let rule: RuleEntry
@@ -16,17 +17,13 @@ struct RuleRowView: View {
                 .font(.system(size: 11, weight: .medium).monospaced())
                 .foregroundStyle(Theme.textSecondary)
                 .lineLimit(1)
-                .truncationMode(.tail)
                 .padding(.horizontal, Space.xs)
-                .frame(
-                    width: Metrics.ruleBadgeColumnWidth,
-                    height: Metrics.ruleBadgeHeight,
-                    alignment: .leading
-                )
+                .frame(height: Metrics.ruleBadgeHeight)
                 .background {
                     RoundedRectangle(cornerRadius: Metrics.radiusRow, style: .continuous)
                         .fill(Theme.track)
                 }
+                .fixedSize(horizontal: true, vertical: false)
 
             Text(rule.payload)
                 .font(Typography.body)

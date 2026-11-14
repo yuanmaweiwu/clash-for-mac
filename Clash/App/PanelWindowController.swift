@@ -1,6 +1,5 @@
 import AppKit
 import OSLog
-import QuartzCore
 import SwiftUI
 
 /// 面板窗口（`docs/adr/0011`）：自建 `NSPanel` 承载同一份 `PanelView`。
@@ -135,7 +134,10 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
         Self.logger.notice("面板定位 x=\(origin.x, privacy: .public) y=\(origin.y, privacy: .public) 尺寸=\(size.width, privacy: .public)×\(size.height, privacy: .public) 屏幕=\(screen?.localizedName ?? "nil", privacy: .public)")
         // 先把流量缓冲补进模型，再上屏：首帧就是完整波形，不会闪一下「暂无流量」
         onVisibilityChange?(true)
+        // 定位这一下可能有高度变化：先把锚点清掉，落位后再记新的顶边
+        panel.topAnchor = nil
         panel.setFrame(NSRect(origin: origin, size: size), display: true)
+        panel.topAnchor = origin.y + size.height
         panel.makeKeyAndOrderFront(nil)
         // 面板刚显示时也补一次：路由可能是在隐藏状态下改的（⌘, / 菜单），
         // 隐着的时候没有绘制周期，内容还停在旧尺寸上
@@ -159,43 +161,38 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
 
         // 兜底：`NSHostingView` 多数时候已经按内容极值把窗口改好了，没改到时我们自己改
         guard abs(oldHeight - height) > 0.5 else {
-            // 尺寸没变也要补一次：`NSHostingView` 会在 SwiftUI 布局过程中按内容极值
-            // 直接改窗口尺寸，那一次改动不会再驱动一轮完整布局，内容就停在旧尺寸的
-            // 绘制结果上（订阅页 496 → 642 后整块空白的根因）。
+            // 高度已被 `NSHostingView` 自己改好（它按底边锚），把顶边钉回锚点；
+            // 顺带补一轮布局：那次改动不会再驱动完整布局，内容会停在旧尺寸的绘制结果上
+            if let top = panel.topAnchor, abs(panel.frame.maxY - top) > 0.5 {
+                var frame = panel.frame
+                frame.origin.y = top - frame.height
+                panel.setFrame(frame, display: true)
+            }
             syncHostingLayout()
             return
         }
 
-        // 顶边不动，只把底边往上/下推
+        // 顶边不动，只把底边往上/下推。锚点用 show 时记下的那条，
+        // 不能读 `panel.frame.maxY`：NSHostingView 可能已经按底边改过一次窗口。
         var frame = panel.frame
-        frame.origin.y = frame.maxY - height
         frame.size.height = height
+        frame.origin.y = (panel.topAnchor ?? frame.maxY) - height
 
-        // 先把目标位置夹进屏幕：动画结束后再夹会打断正在跑的窗口动画
+        // 先把目标位置夹进屏幕，避免瞬改后有一帧落到屏幕外
         if let visible = (panel.screen ?? NSScreen.main)?.visibleFrame {
             frame.origin.y = max(frame.origin.y, visible.minY + Self.screenInset)
         }
 
-        // 高度变化（pin 切换 / 二级页）用动画过渡，避免整块面板瞬间跳高跳矮。
-        // Reduce Motion 下直接到位。
-        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-            panel.setFrame(frame, display: true)
-            clampToScreen()
-        } else {
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.18
-                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                panel.animator().setFrame(frame, display: true)
-            } completionHandler: { [weak self] in
-                Task { @MainActor in self?.clampToScreen() }
-            }
-        }
+        // 高度切换必须与 SwiftUI 内容同帧完成：面板背景的 16pt 圆角由内容自己画，
+        // 一旦窗口动画比内容慢，中间帧就会在四角露出直角（实测 6 帧、约 300ms）。
+        panel.setFrame(frame, display: true)
+        clampToScreen()
 
         Self.logger.debug(
             "窗口高度 \(oldHeight, format: .fixed(precision: 1), privacy: .public) → \(height, format: .fixed(precision: 1), privacy: .public)"
         )
 
-        // 布局对齐放在动画启动之后：内容按最终尺寸排一次，动画只负责窗口边框
+        // 尺寸瞬改后补一轮布局：SwiftUI 的树要按新高度排一次，避免停在旧绘制结果上
         syncHostingLayout()
         #if DEBUG
         printCaptureRegionIfRequested(screen: panel.screen)
@@ -238,6 +235,7 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
         frame.origin.y = max(frame.origin.y, visible.minY + Self.screenInset)
         if frame != panel.frame {
             panel.setFrame(frame, display: true)
+            panel.topAnchor = frame.maxY
         }
     }
 
@@ -265,6 +263,15 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
         hide()
     }
 
+    /// `NSHostingView` 自己改窗口尺寸时可能不走 `setFrame`（内部路径），
+    /// 这里兜一层：高度变了就把顶边钉回锚点，防止面板在一帧里上下跳。
+    func windowDidResize(_ notification: Notification) {
+        guard let top = panel.topAnchor, abs(panel.frame.maxY - top) > 0.5 else { return }
+        var frame = panel.frame
+        frame.origin.y = top - frame.height
+        panel.setFrame(frame, display: true)
+    }
+
     /// 面板内容自己 `window.close()`（例如打开日志窗口后）也要恢复按钮普通态
     func windowWillClose(_ notification: Notification) {
         lastResignAt = Date()
@@ -275,8 +282,20 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
 /// 无边框浮层面板：`nonactivatingPanel` 不抢 App 激活，但仍要能成为 key 窗口，
 /// 否则 Esc、⌘Q 与面板内的键盘交互都收不到。
 private final class PanelWindow: NSPanel {
+    /// 高度变化时保持的顶边（屏幕坐标）。`NSHostingView` 自己按内容极值改窗口尺寸时
+    /// 默认锚在底边，会把面板整体顶下去一帧；记下顶边后任何 resize 都钉住它。
+    var topAnchor: CGFloat?
+
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    override func setFrame(_ frameRect: NSRect, display flag: Bool) {
+        var rect = frameRect
+        if let topAnchor, abs(rect.height - frame.height) > 0.5 {
+            rect.origin.y = topAnchor - rect.height
+        }
+        super.setFrame(rect, display: flag)
+    }
 
     /// LSUIElement 应用没有可见主菜单：⌘Q / ⌘, 在这里兜一层，保证面板聚焦时可用
     override func performKeyEquivalent(with event: NSEvent) -> Bool {

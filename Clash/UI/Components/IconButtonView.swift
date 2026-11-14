@@ -6,6 +6,8 @@ struct IconButtonView: View {
     let systemName: String
     let label: String
     var iconSize: CGFloat = 13
+    /// 静止色（默认 `text/secondary`）；需要更弱一档时传 `text/tertiary`
+    var restingTint: Color?
     let action: () -> Void
 
     @State private var isHovering = false
@@ -15,7 +17,7 @@ struct IconButtonView: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: iconSize, weight: .medium))
-                .foregroundStyle(isHovering ? Theme.textPrimary : Theme.textSecondary)
+                .foregroundStyle(isHovering ? Theme.textPrimary : (restingTint ?? Theme.textSecondary))
                 .frame(width: 28, height: 28)
                 .background {
                     RoundedRectangle(cornerRadius: Metrics.radiusRow, style: .continuous)

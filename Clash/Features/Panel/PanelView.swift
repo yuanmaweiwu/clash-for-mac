@@ -3,8 +3,8 @@ import SwiftUI
 
 /// 340pt 宽的控制面板本体（§3.1 线框 / §3.2 分区规格）。
 ///
-/// 结构固定为：状态条 +（banner）+ 主控区 + 曲线卡 + 可滚动分组区 + 底栏。
-/// 高度由内容自然决定；banner 出现时从分组区里扣，总高不变。
+/// 结构固定为：状态条 +（banner）+ 主控区 + 曲线卡 + 可滚动尾区（网络检测 + 策略组）+ 底栏。
+/// 总高由 `model.panelHeight` 瞬时决定（窗口同帧跟尺寸）；banner 出现时从尾区里扣，总高不变。
 @MainActor
 struct PanelView: View {
     let model: PanelPreviewModel
@@ -26,28 +26,26 @@ struct PanelView: View {
             : .spring(response: 0.32, dampingFraction: 0.90)
     }
 
-    /// pin 变化时面板高度的过渡（motion/list）
-    private var heightAnimation: Animation {
-        reduceMotion
-            ? .easeInOut(duration: 0.15)
-            : .spring(response: 0.28, dampingFraction: 0.80)
-    }
-
     var body: some View {
         ZStack {
             PanelMaterialView()
             Theme.panelScrim
-            panelContent
+            // 页面切换的淡入位移挂在「内容容器」上，外层尺寸由 `model.panelHeight` 瞬时决定：
+            // 容器的滚动/高度动画不会改变面板外形，四角始终是同一条 16pt 圆角。
+            VStack(spacing: 0) {
+                panelContent
+            }
+            .frame(width: Metrics.panelWidth)
+            .animation(pushAnimation, value: model.route)
         }
-        .frame(width: Metrics.panelWidth)
-        // 材质层是弹性的，不锁高度的话会被窗口高度撑满；这里始终取内容自然高度
-        .fixedSize(horizontal: false, vertical: true)
+        .frame(width: Metrics.panelWidth, height: model.panelHeight)
+        // 高度变化不参与任何动画：弹簧动画会让内容短暂低于目标高，窗口的 fitting 尺寸
+        // 跟着抖一下（实测 629 vs 634），窗口把圆角切掉、露出直角帧。
+        .animation(nil, value: model.panelHeight)
         .clipShape(panelShape)
         .overlay {
             panelShape.strokeBorder(Theme.hairline, lineWidth: Metrics.hairline)
         }
-        .animation(pushAnimation, value: model.route)
-        .animation(heightAnimation, value: model.pinnedGroupIDs)
         .background {
             EscapeKeyHandler(model: model, onEscape: onClose)
         }

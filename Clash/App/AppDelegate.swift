@@ -43,7 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     #if DEBUG
-    /// 截图走查（仅 Debug）：`CLASH_PANEL_ROUTE=root|rules|settings` 启动即展开面板。
+    /// 截图走查（仅 Debug）：`CLASH_PANEL_ROUTE=root|rules|settings|cycle` 启动即展开面板。
     /// 走的是与用户点击相同的入口（`showPanel` + 面板路由），不改任何数据路径。
     ///
     /// 等内核就绪再展开：截图要的是正常态，不是启动瞬间的「内核未运行」。
@@ -67,6 +67,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 break
             }
             environment.showPanel()
+            // 圆角走查：root → 规则 → root → 设置 → root，每段 1.2s（由外部连续截图）
+            if route == "cycle" { runRouteCycleForCapture() }
+        }
+    }
+
+    /// 仅截图用：按固定节奏触发高度变化，让外部能连续抓帧核对圆角。
+    private func runRouteCycleForCapture() {
+        Task { @MainActor in
+            let environment = AppEnvironment.shared
+            try? await Task.sleep(for: .seconds(1.0))
+            environment.model.openRules()
+            try? await Task.sleep(for: .seconds(1.2))
+            environment.model.popRoute()
+            try? await Task.sleep(for: .seconds(1.2))
+            environment.model.openSettingsPage()
+            try? await Task.sleep(for: .seconds(1.2))
+            environment.model.popRoute()
+            print("CLASH_CYCLE_DONE")
+            fflush(stdout)
         }
     }
     #endif

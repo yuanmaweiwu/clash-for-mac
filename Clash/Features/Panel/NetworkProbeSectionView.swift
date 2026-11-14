@@ -1,19 +1,26 @@
 import SwiftUI
 
-/// 「网络检测」区块（§3.2）：标题 20 + 间距 12 + 一排 4 个 73×56 磁贴 = 88pt。
+/// 「网络检测」区块（§3.2）：标题 20（右侧刷新）+ 间距 12 + 一排 4 个 73×56 磁贴 = 88pt。
 ///
-/// 四个目标固定（Google / GitHub / Apple / YouTube），点任意一个都是**四个一起重测**：
-/// 「本机网络通不通」是一个整体判断，逐个点只会让结论更慢出来。
+/// 四个目标固定（Google / GitHub / Apple / YouTube），点任意一个磁贴或标题行刷新按钮
+/// 都是**四个一起重测**：「本机网络通不通」是一个整体判断，逐个点只会让结论更慢出来。
 @MainActor
 struct NetworkProbeSectionView: View {
     let model: PanelPreviewModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("网络检测")
-                .font(Typography.section)
-                .foregroundStyle(Theme.textSecondary)
-                .frame(height: Metrics.probeTitleHeight, alignment: .leading)
+            HStack(spacing: Space.s) {
+                Text("网络检测")
+                    .font(Typography.section)
+                    .foregroundStyle(Theme.textSecondary)
+
+                Spacer(minLength: Space.s)
+
+                refreshControl
+            }
+            // 标题行 20pt；刷新按钮 28pt 热区上下各溢出 4pt，落进 12pt 的磁贴间距里
+            .frame(height: Metrics.probeTitleHeight)
 
             HStack(spacing: Metrics.probeTileGap) {
                 ForEach(model.networkProbeTargets) { target in
@@ -29,10 +36,34 @@ struct NetworkProbeSectionView: View {
         }
         .frame(height: Metrics.probeSectionHeight, alignment: .top)
     }
+
+    /// 测速中换成 12pt `ProgressView` 且不可点：与测速互斥，连点不会重启一轮
+    @ViewBuilder
+    private var refreshControl: some View {
+        if model.isTestingNetworkProbes {
+            ProgressView()
+                .controlSize(.small)
+                .scaleEffect(0.7)
+                .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
+                .allowsHitTesting(false)
+                .accessibilityLabel(Text("测速中"))
+        } else {
+            IconButtonView(
+                systemName: "arrow.clockwise",
+                label: "重测全部目标",
+                iconSize: 16,
+                restingTint: Theme.textTertiary
+            ) {
+                model.testNetworkProbes()
+            }
+            .accessibilityHint(Text("四个目标一起重测"))
+        }
+    }
 }
 
-/// 单个检测磁贴 73×56：目标名 11pt + 延迟 / 状态（等宽数字）。
+/// 单个检测磁贴 73×56：品牌 logo（16）+ 目标名（11）+ 延迟 / 状态（10 等宽）。
 ///
+/// 三行居中排布、互不挤压；模板单色渲染，深浅色都由文字色决定，不会发灰。
 /// 四态与延迟色阶对齐 §2.4；「超时」用 `text/tertiary` 表示「测过但不通」，
 /// 与「未测」的 `—` 区分开（前者是结论，后者是还没结论）。
 private struct NetworkProbeTileView: View {
@@ -45,14 +76,25 @@ private struct NetworkProbeTileView: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: Space.hair) {
-                Text(target.name)
-                    .font(Typography.caption)
-                    .foregroundStyle(Theme.textSecondary)
-                    .lineLimit(1)
+            VStack(spacing: Space.xs) {
+                Image(target.iconAssetName)
+                    .renderingMode(target.logoIsTemplate ? .template : .original)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 16, height: 16)
+                    .foregroundStyle(Theme.textPrimary)
+                    .accessibilityHidden(true)
 
-                status
-                    .frame(height: 14)
+                // 名称与延迟是一组：彼此 2pt，和 logo 之间 4pt，三行不糊成一团
+                VStack(spacing: Space.hair) {
+                    Text(target.name)
+                        .font(Typography.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                        .lineLimit(1)
+
+                    status
+                        .frame(height: 12)
+                }
             }
             .frame(width: Metrics.probeTileWidth, height: Metrics.probeTileHeight)
             .background {
@@ -90,18 +132,18 @@ private struct NetworkProbeTileView: View {
         switch state {
         case .idle:
             Text("—")
-                .font(Typography.captionNumber)
+                .font(Typography.probeValue)
                 .foregroundStyle(Theme.textTertiary)
         case .testing:
             ProgressView()
                 .controlSize(.mini)
         case let .reachable(milliseconds):
             Text("\(milliseconds) ms")
-                .font(Typography.captionNumber)
+                .font(Typography.probeValue)
                 .foregroundStyle(color(for: milliseconds))
         case .timeout:
             Text("超时")
-                .font(Typography.captionNumber)
+                .font(Typography.probeValue)
                 .foregroundStyle(Theme.textTertiary)
         }
     }
@@ -128,6 +170,27 @@ private struct NetworkProbeTileView: View {
         case .testing: "测速中"
         case let .reachable(milliseconds): "延迟 \(milliseconds) 毫秒"
         case .timeout: "超时"
+        }
+    }
+}
+
+/// 品牌图标只做「表现层」映射：素材在 Assets，Core 里的 `Target` 不关心资源名。
+private extension NetworkProbeService.Target {
+    var iconAssetName: String {
+        switch self {
+        case .google: "ProbeGoogle"
+        case .github: "ProbeGitHub"
+        case .apple: "ProbeApple"
+        case .youtube: "ProbeYouTube"
+        }
+    }
+
+    /// 品牌本身是单色（Apple / GitHub）走模板，浅色黑、深色白自动反白；
+    /// Google / YouTube 是官方多色，保留原色，不进模板（否则会变灰/单色）。
+    var logoIsTemplate: Bool {
+        switch self {
+        case .apple, .github: true
+        case .google, .youtube: false
         }
     }
 }
