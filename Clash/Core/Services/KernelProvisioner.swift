@@ -746,16 +746,8 @@ final class KernelProvisioner {
     private static func mapDownloadError(_ error: Error) -> KernelProvisionError {
         if let provision = error as? KernelProvisionError { return provision }
         if let urlError = error as? URLError {
-            switch urlError.code {
-            case .cancelled:
-                return .cancelled
-            case .timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost,
-                 .notConnectedToInternet, .dnsLookupFailed, .secureConnectionFailed,
-                 .serverCertificateUntrusted, .zeroByteResource:
-                return .network("\(urlError.code.rawValue) \(urlError.localizedDescription)")
-            default:
-                return .network("\(urlError.code.rawValue) \(urlError.localizedDescription)")
-            }
+            if urlError.code == .cancelled { return .cancelled }
+            return .network("\(urlError.code.rawValue) \(urlError.localizedDescription)")
         }
         return .network(error.localizedDescription)
     }
