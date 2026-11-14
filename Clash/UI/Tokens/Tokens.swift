@@ -58,7 +58,7 @@ enum Theme {
     private static var scrimAlpha: (light: CGFloat, dark: CGFloat) {
         switch scrimStyle {
         case .light: (0.28, 0.28)
-        case .balanced: (0.42, 0.40)
+        case .balanced: (0.55, 0.40)
         case .solid: (0.62, 0.60)
         }
     }

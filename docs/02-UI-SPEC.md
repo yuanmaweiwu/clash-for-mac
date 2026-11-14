@@ -34,7 +34,7 @@
 | Token | 用途 | Light | Dark |
 |---|---|---|---|
 | `surface/panel` | 面板底：系统材质，非自绘 | material | material |
-| `surface/panel-scrim` | 压壁纸、稳定对比度（**默认档 B**） | `#FFFFFF` 0.42 | `#000000` 0.40 |
+| `surface/panel-scrim` | 压壁纸、稳定对比度（**默认档 B**） | `#FFFFFF` 0.55 | `#000000` 0.40 |
 | `surface/card` | 分组卡、磁贴底（默认档 B） | `#FFFFFF` 0.62 | `#FFFFFF` 0.10 |
 | `surface/card-hover` | 卡片 hover | `#E9E9EB` @ card alpha | `#FFFFFF` 0.13 |
 | `surface/card-pressed` | 卡片按下 | `#000000` 0.12 | `#FFFFFF` 0.14 |
@@ -50,7 +50,7 @@
 | 档位 | scrim Light / Dark | card Light / Dark | 观感 |
 |---|---|---|---|
 | A 轻透 | 0.28 / 0.28 | 0.58 / 0.07 | 壁纸参与最多，最「浮在桌面上」 |
-| **B 中等（默认）** | **0.42 / 0.40** | **0.62 / 0.10** | 压掉深色地图的染色，卡片仍能分层 |
+| **B 中等（默认）** | **0.55 / 0.40** | **0.62 / 0.10** | 压掉深色地图的染色，卡片仍能分层 |
 | C 实底 | 0.62 / 0.60 | 0.70 / 0.14 | 接近纸白，几乎不透过壁纸 |
 
 **material 与不透明色的分工**
