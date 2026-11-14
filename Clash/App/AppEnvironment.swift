@@ -46,8 +46,10 @@ final class AppEnvironment {
         #if DEBUG
         // 真机 TUN 自检（会真的起 root 内核）：命中时不让面板自动起本地内核，避免抢端口
         let smokeMode = TunSmokeHarness.requestedMode()
+        let auditRequested = AuditBatch1Harness.isRequested
         #else
         let smokeMode: String? = nil
+        let auditRequested = false
         #endif
         // 服务先于 model / guard 建好：两者共享同一实例，退出清理才看得见真实状态
         let settings = SettingsStore()
@@ -59,7 +61,7 @@ final class AppEnvironment {
             systemProxy: systemProxy,
             settings: settings,
             tun: tun,
-            autoStartsKernel: smokeMode == nil
+            autoStartsKernel: smokeMode == nil && !auditRequested
         )
         self.settings = settings
         self.systemProxy = systemProxy
@@ -76,6 +78,12 @@ final class AppEnvironment {
         Self.logger.info("Clash 启动（v0.2 系统代理 + TUN）")
 
         #if DEBUG
+        AuditBatch1Harness.runIfRequested(
+            kernel: kernel,
+            tun: tun,
+            systemProxy: systemProxy,
+            model: model
+        )
         if let smokeMode {
             TunSmokeHarness.startIfRequested(
                 mode: smokeMode,
