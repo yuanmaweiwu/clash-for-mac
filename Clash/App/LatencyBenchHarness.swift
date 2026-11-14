@@ -258,7 +258,8 @@ enum LatencyBenchHarness {
 
     // MARK: - 组件安装脚本
 
-    /// 只测不弹密码的部分：装好前置检查里能测的耗时 + 脚本生成。
+    /// 只测不弹密码的部分：脚本生成 / 前置检查，以及脚本里的**非交互步骤**
+    /// （把内核与 geodata 拷到临时目录、`cmp` 跳过判断、plist 语法检查）。
     /// 真正的 `osascript … with administrator privileges`（用户在密码框输密码那段）**不自动跑**。
     private static func runHelperScript() -> Int {
         let began = ContinuousClock.now
@@ -269,9 +270,50 @@ enum LatencyBenchHarness {
         let installed = HelperInstaller.isInstalled
         let check = ContinuousClock.now - installedStart
 
-        print("BENCH helper scriptGen=\(ms(generated)) isInstalledCheck=\(ms(check)) installed=\(installed)")
-        print("BENCH helper 脚本正文 \(script.utf8.count) bytes；exec / uninstall 需要密码，未测")
-        return 0
+        // 非交互步骤模拟（目标目录换成临时目录；命令与脚本里一致）
+        let fileManager = FileManager.default
+        let sandbox = fileManager.temporaryDirectory.appending(path: "clash-helper-bench-\(UUID().uuidString)")
+        try? fileManager.createDirectory(at: sandbox, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: sandbox) }
+
+        let kernelSource = AppPaths.kernelBinaryURL
+        let kernelCopy = sandbox.appending(path: "mihomo")
+        let copyStart = ContinuousClock.now
+        _ = SystemNetworkProbe.runCommandSynchronously("/bin/cp", ["-f", kernelSource.path, kernelCopy.path])
+        let copy = ContinuousClock.now - copyStart
+
+        let cmpStart = ContinuousClock.now
+        _ = SystemNetworkProbe.runCommandSynchronously("/bin/cmp", ["-s", kernelSource.path, kernelCopy.path])
+        let cmp = ContinuousClock.now - cmpStart
+
+        var geodataCopy = Duration.zero
+        for name in ["geoip.metadb", "geosite.dat"] {
+            let source = AppPaths.kernelDirectory.appending(path: name)
+            guard fileManager.fileExists(atPath: source.path) else { continue }
+            let start = ContinuousClock.now
+            _ = SystemNetworkProbe.runCommandSynchronously(
+                "/bin/cp", ["-f", source.path, sandbox.appending(path: name).path]
+            )
+            geodataCopy += ContinuousClock.now - start
+        }
+
+        let plistURL = sandbox.appending(path: "com.clash.helper.plist")
+        try? Data(HelperInstaller.launchDaemonPlist.utf8).write(to: plistURL)
+        let lintStart = ContinuousClock.now
+        _ = SystemNetworkProbe.runCommandSynchronously("/usr/bin/plutil", ["-lint", plistURL.path])
+        let lint = ContinuousClock.now - lintStart
+
+        // 语法检查：脚本是拼出来的，括号 / 引号错了只会在输完密码后才炸
+        let scriptURL = sandbox.appending(path: "install.sh")
+        try? Data(script.utf8).write(to: scriptURL)
+        let syntax = SystemNetworkProbe.runCommandSynchronously("/bin/sh", ["-n", scriptURL.path]) ?? ""
+        let syntaxOK = syntax.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        print("BENCH helper scriptGen=\(ms(generated)) isInstalledCheck=\(ms(check)) installed=\(installed)"
+            + " copyKernel=\(ms(copy)) geodataCopy=\(ms(geodataCopy)) cmpKernel=\(ms(cmp)) plistLint=\(ms(lint))"
+            + " script=\(script.utf8.count)B syntax=\(syntaxOK ? "ok" : "FAIL(\(syntax))")")
+        print("BENCH helper exec / uninstall 需要密码，未测（脚本非交互部分见上）")
+        return syntaxOK ? 0 : 1
     }
 
     // MARK: - 格式化

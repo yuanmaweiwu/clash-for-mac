@@ -142,6 +142,10 @@ enum HelperInstaller {
 
     /// 安装脚本全文。helper 路径来自 `HelperLayout`；内核与 geodata 来自用户目录
     /// （ADR-0012，路径在生成时写死，脚本仍不接受参数）。
+    ///
+    /// `set -eu` 已经保证「任何一步失败即中止」，所以用逐行命令（可读、可加条件），
+    /// 不再用一长串 `&&`。重复内容用 `cmp -s` 跳过：重装时不用再拷 56MB 内核，
+    /// 也避免覆盖仍被 mihomo 打开的文件（`ETXTBSY`）。
     /// - Parameter bundleURL: 只为自检 / 审阅可注入，正常运行不传。
     static func installScript(bundleURL: URL = Bundle.main.bundleURL) -> String {
         let helperSource = bundleURL.appending(path: HelperLayout.bundledHelperRelativePath).path
@@ -164,26 +168,34 @@ enum HelperInstaller {
 
         PLIST_BODY=\(shellQuoted(launchDaemonPlist))
 
-        test -f "$HELPER_SRC" \\
-          && test -f "$KERNEL_SRC" \\
-          && mkdir -p /Library/PrivilegedHelperTools \\
-          && mkdir -p "$SUPPORT_DIR" \\
-          && chown root:wheel /Library/PrivilegedHelperTools "$SUPPORT_DIR" \\
-          && chmod 0755 /Library/PrivilegedHelperTools "$SUPPORT_DIR" \\
-          && (launchctl bootout system/\(HelperLayout.machServiceName) 2>/dev/null || true) \\
-          && cp -f "$HELPER_SRC" "$HELPER_DST" \\
-          && cp -f "$KERNEL_SRC" "$KERNEL_DST" \\
-          && ( for f in geoip.metadb geosite.dat; do if [ -f "$KERNEL_SRC_DIR/$f" ]; then cp -f "$KERNEL_SRC_DIR/$f" "$SUPPORT_DIR/$f"; fi; done ) \\
-          && ( chmod 0644 "$SUPPORT_DIR"/geoip.metadb "$SUPPORT_DIR"/geosite.dat 2>/dev/null || true ) \\
-          && chown root:wheel "$HELPER_DST" "$KERNEL_DST" \\
-          && chmod 0755 "$HELPER_DST" "$KERNEL_DST" \\
-          && printf '%s\\n' "$PLIST_BODY" > "$PLIST" \\
-          && chown root:wheel "$PLIST" \\
-          && chmod 0644 "$PLIST" \\
-          && plutil -lint "$PLIST" > /dev/null \\
-          && launchctl bootstrap system "$PLIST" \\
-          && launchctl enable system/\(HelperLayout.machServiceName) \\
-          && echo 'OK'
+        # 内容一致就不覆盖：重装省掉大文件拷贝，也不碰正在运行的可执行文件
+        copy_if_changed() {
+          if [ -f "$2" ] && cmp -s "$1" "$2"; then return 0; fi
+          cp -f "$1" "$2"
+        }
+
+        test -f "$HELPER_SRC"
+        test -f "$KERNEL_SRC"
+        mkdir -p /Library/PrivilegedHelperTools
+        mkdir -p "$SUPPORT_DIR"
+        chown root:wheel /Library/PrivilegedHelperTools "$SUPPORT_DIR"
+        chmod 0755 /Library/PrivilegedHelperTools "$SUPPORT_DIR"
+        launchctl bootout system/\(HelperLayout.machServiceName) 2>/dev/null || true
+        copy_if_changed "$HELPER_SRC" "$HELPER_DST"
+        copy_if_changed "$KERNEL_SRC" "$KERNEL_DST"
+        for f in geoip.metadb geosite.dat; do
+          if [ -f "$KERNEL_SRC_DIR/$f" ]; then copy_if_changed "$KERNEL_SRC_DIR/$f" "$SUPPORT_DIR/$f"; fi
+        done
+        chmod 0644 "$SUPPORT_DIR"/geoip.metadb "$SUPPORT_DIR"/geosite.dat 2>/dev/null || true
+        chown root:wheel "$HELPER_DST" "$KERNEL_DST"
+        chmod 0755 "$HELPER_DST" "$KERNEL_DST"
+        printf '%s\\n' "$PLIST_BODY" > "$PLIST"
+        chown root:wheel "$PLIST"
+        chmod 0644 "$PLIST"
+        plutil -lint "$PLIST" > /dev/null
+        launchctl bootstrap system "$PLIST"
+        launchctl enable system/\(HelperLayout.machServiceName)
+        echo 'OK'
         """
     }
 
