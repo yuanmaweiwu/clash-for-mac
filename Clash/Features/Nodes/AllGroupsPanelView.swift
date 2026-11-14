@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 二级面板：全部策略组，点行切换是否固定到首屏（策略组管理，不选节点；§3.4）。
+/// 二级面板：全部策略组，点行切换首屏展示的那**一个**组（单选，不选节点；§3.4 / §4.7）。
 @MainActor
 struct AllGroupsPanelView: View {
     let model: PanelPreviewModel
@@ -15,10 +15,9 @@ struct AllGroupsPanelView: View {
                     ForEach(Array(model.allGroups.enumerated()), id: \.element.id) { _, group in
                         AllGroupsRowView(
                             group: group,
-                            isActive: group.id == model.activeGroupID,
+                            isSelected: group.id == model.displayedGroupID,
                             showsInactiveLabel: model.showsInactiveLabel(for: group),
-                            onTogglePin: { model.togglePin(group.id) },
-                            onOpen: { model.pushGroup(group.id) }
+                            onSelect: { model.display(groupID: group.id) }
                         )
                     }
                 }
@@ -56,7 +55,7 @@ struct AllGroupsPanelView: View {
 
             Spacer(minLength: Space.s)
 
-            Text("点行固定到首屏")
+            Text("点行切换展示的策略组")
                 .font(Typography.caption)
                 .foregroundStyle(Theme.textTertiary)
         }

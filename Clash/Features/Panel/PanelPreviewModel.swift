@@ -95,9 +95,8 @@ final class PanelPreviewModel {
     var groups: [ProxyGroupModel] { proxies.groups }
     /// 全部策略组（含 `GLOBAL`），供「全部策略组」二级页
     var allGroups: [ProxyGroupModel] { proxies.allGroups }
-    /// 当前操作的组：「全部策略组」的高亮；没操作过时默认首屏第一张卡
-    var activeGroupID: String? { selectedGroupID ?? homeGroups.first?.name }
-    @ObservationIgnored private var selectedGroupID: String?
+    /// 当前展示组 id：「全部策略组」的选中行 + 首屏唯一一张卡
+    var displayedGroupID: String? { displayedGroup?.name }
 
     var subscriptions: [ProfileEntry] { profiles.entries }
     var activeSubscriptionID: String? { profiles.activeProfileID }
@@ -275,18 +274,14 @@ final class PanelPreviewModel {
     var downRateText: String { TrafficFormat.rate(downRate) }
     var upRateText: String { TrafficFormat.rate(upRate) }
 
-    var pinnedGroups: [ProxyGroupModel] { proxies.pinnedGroups }
-    var pinnedGroupIDs: Set<String> { Set(pinnedGroups.map(\.id)) }
-
-    /// 首屏卡片：pin 的组（主组 + 用户固定顺序，最多 2 张），**不按是否被规则引用过滤**——用户固定了就该看见。
-    /// pin 为空时退回第一个生效组 → 配置里第一组。
-    var homeGroups: [ProxyGroupModel] {
-        let pinned = Array(pinnedGroups.prefix(2))
-        if !pinned.isEmpty { return pinned }
-        if let firstEffective = groups.first(where: { proxies.effectiveGroupNames.contains($0.name) }) {
-            return [firstEffective]
+    /// 首屏展示的策略组（单选）：用户选过的优先（`settings.displayedGroup`，跨启动保留）；
+    /// 组不存在 / 从没选过 → 第一个生效组 → 配置里第一组。
+    var displayedGroup: ProxyGroupModel? {
+        if let name = settings.displayedGroup,
+           let group = allGroups.first(where: { $0.name == name }) {
+            return group
         }
-        return groups.first.map { [$0] } ?? []
+        return groups.first(where: { proxies.effectiveGroupNames.contains($0.name) }) ?? groups.first
     }
 
     /// 首屏卡片 / 「全部策略组」行尾是否标「未生效」（规则快照可用、非 `GLOBAL`、且没被任何规则引用）
@@ -371,10 +366,6 @@ final class PanelPreviewModel {
     ///
     /// 订阅 / 设置 / 连接列表 / 全部策略组与内核相位无关，一律不动。
     private func pruneRouteIfTargetMissing() {
-        if let selectedGroupID,
-           !proxies.allGroups.contains(where: { $0.id == selectedGroupID }) {
-            self.selectedGroupID = nil
-        }
         guard case .nodes(let id) = route else { return }
         guard !proxies.allGroups.contains(where: { $0.id == id }) else { return }
         popToRoot()
@@ -872,7 +863,7 @@ final class PanelPreviewModel {
 
     func pushGroup(_ id: String) { route = .nodes(id) }
 
-    // MARK: - 节点与 pin
+    // MARK: - 节点与展示组
 
     func selectNode(groupID: String, nodeID: String) {
         // 测速中不允许切节点，避免列表顺序抖动
@@ -882,15 +873,16 @@ final class PanelPreviewModel {
               let node = group.nodes.first(where: { $0.id == nodeID }),
               node.isAvailable else { return }
 
-        selectedGroupID = groupID
         selectionTask?.cancel()
         selectionTask = Task { [weak self] in
             await self?.proxies.selectNode(group: groupID, node: nodeID)
         }
     }
 
-    func togglePin(_ groupID: String) {
-        proxies.togglePin(group: groupID)
+    /// 设为当前展示组（单选，替换旧的）；写 `settings.json` 的 `displayedGroup`，重启保留
+    func display(groupID: String) {
+        guard allGroups.contains(where: { $0.id == groupID }) else { return }
+        settings.displayedGroup = groupID
     }
 
     // MARK: - 订阅库（真实 `profiles/index.json`）
@@ -1209,14 +1201,9 @@ final class PanelPreviewModel {
         ruleService.applyPreviewRules()
     }
 
-    /// Preview 夹具：不启动内核，摆出两张卡（仅设计预览用）
+    /// Preview 夹具：不启动内核，摆出策略组（仅设计预览用）
     func applyPreviewGroups() {
         proxies.applyPreviewFixture()
-    }
-
-    /// Preview 夹具：把所有可 pin 的组都 pin 上
-    func pinAllPreviewGroups() {
-        proxies.previewPinAllGroups()
     }
 
     /// Preview 夹具：摆出几张活动连接（不请求内核）
@@ -1234,7 +1221,8 @@ extension PanelPreviewModel {
     /// 分组区自然高度（不扣 banner：banner 只压缩可视窗口，不压内容本身）
     var groupSectionContentHeight: CGFloat {
         if groups.isEmpty { return Metrics.emptyGroupCardHeight }
-        return Metrics.groupSectionHeight(forCards: homeGroups.count)
+        // 单选：永远只有一张卡（`displayedGroup` 在 groups 非空时必有兜底值）
+        return Metrics.groupSectionHeight(forCards: 1)
     }
 
     /// 可滚动尾区（网络检测 + 策略组）的完整内容高度

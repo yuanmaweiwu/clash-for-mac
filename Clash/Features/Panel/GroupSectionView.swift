@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// 分组区：只显示 pin 的组（最多 2 张），按内容自然高度排（§3.4）。
-/// 没被规则引用的组照常显示，只由卡片头加「未生效」提示。
+/// 分组区：只显示**一张**卡——当前展示组（单选），按内容自然高度排（§3.4）。
+/// 没被规则引用的组照常显示，只由卡片头加「未生效」提示；换组走「全部 ›」。
 ///
 /// 滚动交给外层「网络检测 + 策略组」共用容器（`PanelView.scrollTail`），
 /// 这里不再套 `ScrollView`：嵌套滚动在触控板上极易误触。
@@ -24,7 +24,7 @@ struct GroupSectionView: View {
                         model.openAllGroups()
                     }
 
-                    ForEach(Array(model.homeGroups.enumerated()), id: \.element.id) { index, group in
+                    if let group = model.displayedGroup {
                         GroupCardView(
                             group: group,
                             showsInactiveLabel: model.showsInactiveLabel(for: group),
@@ -33,7 +33,6 @@ struct GroupSectionView: View {
                                 model.selectNode(groupID: group.id, nodeID: nodeID)
                             }
                         )
-                        .padding(.top, index == 0 ? 0 : Space.l)
                     }
                 }
             }

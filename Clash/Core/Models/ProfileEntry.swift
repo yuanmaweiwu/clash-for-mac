@@ -48,8 +48,6 @@ struct ProfileEntry: Codable, Identifiable, Sendable, Equatable {
     var lastError: String?
     /// `subscription-userinfo` 映射；缺字段留空，不猜
     var subscriptionInfo: ProfileSubscriptionInfo?
-    /// 首屏 pin 的组名：只是 UI 偏好，不注入 runtime
-    var pinnedGroups: [String]
     /// `Profile-Web-Page-Url`：订阅管理页（续费入口）；旧索引没有该字段
     var webPageURL: String?
 
@@ -62,7 +60,6 @@ struct ProfileEntry: Codable, Identifiable, Sendable, Equatable {
         lastAttemptAt: Date? = nil,
         lastError: String? = nil,
         subscriptionInfo: ProfileSubscriptionInfo? = nil,
-        pinnedGroups: [String] = [],
         webPageURL: String? = nil
     ) {
         self.id = id
@@ -73,13 +70,12 @@ struct ProfileEntry: Codable, Identifiable, Sendable, Equatable {
         self.lastAttemptAt = lastAttemptAt
         self.lastError = lastError
         self.subscriptionInfo = subscriptionInfo
-        self.pinnedGroups = pinnedGroups
         self.webPageURL = webPageURL
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, source, updatedAt, autoUpdateHours, lastAttemptAt, lastError
-        case subscriptionInfo, pinnedGroups, webPageURL
+        case subscriptionInfo, webPageURL
     }
 
     /// 手写解码：索引里允许只有 `id/name/source/autoUpdateHours`（架构 §4.1 的 `p_02` 就是这种）
@@ -93,7 +89,6 @@ struct ProfileEntry: Codable, Identifiable, Sendable, Equatable {
         lastAttemptAt = try container.decodeIfPresent(Date.self, forKey: .lastAttemptAt)
         lastError = try container.decodeIfPresent(String.self, forKey: .lastError)
         subscriptionInfo = try container.decodeIfPresent(ProfileSubscriptionInfo.self, forKey: .subscriptionInfo)
-        pinnedGroups = try container.decodeIfPresent([String].self, forKey: .pinnedGroups) ?? []
         webPageURL = try container.decodeIfPresent(String.self, forKey: .webPageURL)
     }
 
@@ -108,7 +103,6 @@ struct ProfileEntry: Codable, Identifiable, Sendable, Equatable {
         try container.encode(lastAttemptAt, forKey: .lastAttemptAt)
         try container.encode(lastError, forKey: .lastError)
         try container.encode(subscriptionInfo, forKey: .subscriptionInfo)
-        try container.encode(pinnedGroups, forKey: .pinnedGroups)
         try container.encode(webPageURL, forKey: .webPageURL)
     }
 }

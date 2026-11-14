@@ -12,11 +12,7 @@ struct ProxyGroupModel: Identifiable, Sendable, Equatable {
     var nodes: [ProxyNodeModel]
     /// 组自身最近一次延迟；nil = 未测速 / 超时
     var delay: Int?
-    /// 是否 pin 到首屏（UI 偏好，进内存，后续落 `profiles/index.json`）
-    var isPinned: Bool
-    /// 是否可切换固定状态：主组（默认常驻）与 `GLOBAL` 都不可切换
-    var canPin: Bool
-    /// `GLOBAL`：只在「全部策略组」二级页出现，不进首屏
+    /// `GLOBAL`：内核合成的全局组，可被选为展示组，但不算「生效组」
     let isGlobal: Bool
 
     var id: String { name }

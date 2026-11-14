@@ -140,9 +140,6 @@ enum UIPreviewHarness {
             if page == "root-failed" {
                 model.previewFailure()
             }
-            if environment["CLASH_PREVIEW_PINNED"] != "0", page != "root-single" {
-                model.pinAllPreviewGroups()
-            }
             return model
         }
     }

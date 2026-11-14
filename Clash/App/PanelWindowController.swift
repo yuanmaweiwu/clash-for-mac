@@ -93,7 +93,7 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
             PanelView(model: model, onClose: { [weak self] in self?.hide() })
         ))
         hosting.onContentSizeChange = { [weak self] _ in
-            // 内容变高变矮（pin 切换 / 二级页）：窗口跟着改，保持顶边不动
+            // 内容变高变矮（空态 / 二级页）：窗口跟着改，保持顶边不动
             DispatchQueue.main.async {
                 self?.resizeToFitContent()
             }

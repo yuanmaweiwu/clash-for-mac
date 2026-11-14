@@ -61,13 +61,15 @@ final class SettingsStore {
         var customMirrorPrefix: String = ""
         /// 代理模式：`PATCH /configs` 只改内核运行时，重建 runtime 必须靠它恢复
         var mode: ProxyMode = .rule
+        /// 首屏展示的策略组（单选）；nil = 用第一个生效组。组被删后按回退规则处理
+        var displayedGroup: String?
 
         init() {}
 
         private enum CodingKeys: String, CodingKey {
             case mixedPort, allowLAN, keepKernelOnProxyOff, subscriptionUserAgent
             case autoUpdateHours, logLevel, launchAtLogin
-            case kernelDownloadMode, customMirrorPrefix, mode
+            case kernelDownloadMode, customMirrorPrefix, mode, displayedGroup
         }
 
         init(from decoder: Decoder) throws {
@@ -90,6 +92,7 @@ final class SettingsStore {
             customMirrorPrefix = try container.decodeIfPresent(String.self, forKey: .customMirrorPrefix)
                 ?? defaults.customMirrorPrefix
             mode = try container.decodeIfPresent(ProxyMode.self, forKey: .mode) ?? defaults.mode
+            displayedGroup = try container.decodeIfPresent(String.self, forKey: .displayedGroup)
         }
     }
 
@@ -105,6 +108,8 @@ final class SettingsStore {
     var kernelDownloadMode: KernelDownloadMode { didSet { persistIfReady() } }
     var customMirrorPrefix: String { didSet { persistTextIfReady() } }
     var mode: ProxyMode { didSet { persistIfReady() } }
+    /// 首屏展示的策略组（单选）；nil = 未选过 / 组已被删，按「第一个生效组」回退
+    var displayedGroup: String? { didSet { persistIfReady() } }
 
     /// 最近一次写盘失败的原因（UI 提示用；写成功后清空）
     private(set) var lastError: String?
@@ -137,6 +142,7 @@ final class SettingsStore {
         self.kernelDownloadMode = defaults.kernelDownloadMode
         self.customMirrorPrefix = defaults.customMirrorPrefix
         self.mode = defaults.mode
+        self.displayedGroup = defaults.displayedGroup
 
         load()
         isReady = true
@@ -163,6 +169,7 @@ final class SettingsStore {
         snapshot.kernelDownloadMode = kernelDownloadMode
         snapshot.customMirrorPrefix = customMirrorPrefix
         snapshot.mode = mode
+        snapshot.displayedGroup = displayedGroup
         return snapshot
     }
 
@@ -203,6 +210,8 @@ final class SettingsStore {
         kernelDownloadMode = decoded.kernelDownloadMode
         customMirrorPrefix = decoded.customMirrorPrefix.trimmingCharacters(in: .whitespacesAndNewlines)
         mode = decoded.mode
+        let displayed = decoded.displayedGroup?.trimmingCharacters(in: .whitespacesAndNewlines)
+        displayedGroup = (displayed?.isEmpty == false) ? displayed : nil
     }
 
     /// 损坏兜底：留证据（`settings.corrupt-*.json`）→ 回默认值 → 重写干净文件

@@ -196,7 +196,7 @@ enum Metrics {
     static let panelWidth: CGFloat = 340
     /// 面板左右外边距：几何锁定（153 + 10 + 153 + 12×2 = 340）
     static let panelPadding: CGFloat = Space.l
-    /// 双卡满态自然高度（上限 680）
+    /// 二级页固定高（首屏按内容自适应，上限 680）
     static let panelHeight: CGFloat = 678
     /// 内容高度上限
     static let panelHeightMax: CGFloat = 680
@@ -242,8 +242,6 @@ enum Metrics {
             - (panelPadding + statusBarHeight + sectionGap + controlHeight + sectionGap + chartCardHeight + sectionGap)
             - (Space.m + footerHeight + panelPadding)
     }
-    /// 双卡满态：28 + 136 + 12 + 136
-    static let groupSectionFullHeight: CGFloat = 312
     static let emptyGroupCardHeight: CGFloat = 132
     static let footerHeight: CGFloat = 32
     static let bannerHeight: CGFloat = 36

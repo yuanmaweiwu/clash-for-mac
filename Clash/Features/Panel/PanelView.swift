@@ -225,8 +225,8 @@ struct PanelView: View {
     PanelView(model: PanelPreviewModel(autoStartsKernel: false))
 }
 
-#Preview("首层 · 双卡 + 失败") {
-    PanelView(model: panelPreviewModel(pinnedFailure: true))
+#Preview("首层 · 失败") {
+    PanelView(model: panelPreviewModel(failed: true))
 }
 
 #Preview("空态") {
@@ -235,7 +235,7 @@ struct PanelView: View {
 
 /// Preview 夹具：直接摆出评审批次里的几种面板形态。
 @MainActor
-private func panelPreviewModel(pinnedFailure: Bool = false, empty: Bool = false) -> PanelPreviewModel {
+private func panelPreviewModel(failed: Bool = false, empty: Bool = false) -> PanelPreviewModel {
     // 用到的是公开 init，预览不读真实 `profiles/index.json`
     let directory = URL.temporaryDirectory.appending(
         path: "clash-preview-\(empty ? "empty" : "default")",
@@ -253,8 +253,7 @@ private func panelPreviewModel(pinnedFailure: Bool = false, empty: Bool = false)
     if !empty {
         model.applyPreviewGroups()
     }
-    if pinnedFailure {
-        model.pinAllPreviewGroups()
+    if failed {
         model.previewFailure()
     }
     return model

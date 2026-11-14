@@ -7,7 +7,7 @@ import Observation
 /// UI 只读本类，不直接碰 `ClashAPIClient`。
 ///
 /// 边界：
-/// - `GLOBAL` 是内核合成的容器组，放进 `allGroups` 供「全部策略组」二级页，但默认不 pin、不进首屏
+/// - `GLOBAL` 是内核合成的容器组，放进 `allGroups` 供「全部策略组」二级页；可被选为展示组
 /// - 组内嵌套组（组的 `all` 里出现另一个组名）按普通条目处理：选中它就是让父组指向子组
 /// - 机场的信息节点（到期时间 / 流量用量 …）在 `makeGroup` 里被 `ProxyNodeFilter` 丢掉：
 ///   只是展示与可选项，不影响内核配置；过滤后没有节点的组整组不出现
@@ -35,32 +35,11 @@ final class ProxyService {
     /// 空集有两种来源：规则一条都没指向策略组（全是 DIRECT / REJECT…），
     /// 或者规则列表还没拉到。用 `hasRuleSnapshot` 区分，UI 据此决定是否启用「生效组」过滤。
     private(set) var effectiveGroupNames: Set<String> = []
-    /// 是否成功拿到过规则快照。false 时（内核没有 `/rules` / 请求失败）UI 退回旧的 pin / 第一组行为
+    /// 是否成功拿到过规则快照。false 时 UI 只用第一组兜底（不判断是否生效）
     private(set) var hasRuleSnapshot = false
 
     /// 首屏 / 列表用的策略组（不含 `GLOBAL`），内核配置顺序
     var groups: [ProxyGroupModel] { allGroups.filter { !$0.isGlobal } }
-
-    /// 首屏 / 列表用的 pin 组：主组恒在最前，其余按用户固定的先后（配置顺序兜底）
-    var pinnedGroups: [ProxyGroupModel] {
-        var result = allGroups.filter { $0.isPinned && !$0.canPin }
-        var seen = Set(result.map(\.name))
-
-        for name in pinOrder {
-            guard !seen.contains(name),
-                  let group = allGroups.first(where: { $0.name == name }),
-                  group.isPinned else { continue }
-            result.append(group)
-            seen.insert(name)
-        }
-
-        // 防御：没有登记固定顺序的 pin（预览夹具 / 未来落盘的旧偏好）按配置顺序补在后面
-        for group in allGroups where group.isPinned && !seen.contains(group.name) {
-            result.append(group)
-            seen.insert(group.name)
-        }
-        return result
-    }
 
     @ObservationIgnored private let kernel: KernelService
     /// active profile 的来源：延迟缓存按 profile 分桶；nil（预览 / 自检）时只用内核内存态
@@ -73,10 +52,6 @@ final class ProxyService {
     /// 当作「上次测速」展示：mihomo 的 URLTest / Fallback 组会在启动时自动做健康检查，
     /// 那些 history 不是用户点的测速，不能覆盖用户上次真正测出来的缓存。
     @ObservationIgnored private var lastRefreshSessionKey: String?
-    /// pin 是 UI 偏好：现在只在内存，后续落 `profiles/index.json` 的 `pinnedGroups`
-    @ObservationIgnored private var pinnedNames: Set<String> = []
-    /// 用户固定的先后（不含主组）；首屏按这个顺序排，主组恒在最前
-    @ObservationIgnored private var pinOrder: [String] = []
 
     init(
         kernel: KernelService,
@@ -298,23 +273,6 @@ final class ProxyService {
         }
     }
 
-    // MARK: - pin
-
-    func togglePin(group: String) {
-        guard let index = allGroups.firstIndex(where: { $0.name == group }),
-              allGroups[index].canPin else { return }
-
-        let pinned = !allGroups[index].isPinned
-        allGroups[index].isPinned = pinned
-        pinOrder.removeAll { $0 == group }
-        if pinned {
-            pinnedNames.insert(group)
-            pinOrder.append(group)
-        } else {
-            pinnedNames.remove(group)
-        }
-    }
-
     // MARK: - 映射
 
     private func apply(proxies: [String: ProxyEntry], preferCache: Bool) {
@@ -338,15 +296,6 @@ final class ProxyService {
             ) {
                 built.append(group)
             }
-        }
-
-        // §3.4：主组 = 过滤后仍存活的第一个 `select` 组（默认 pin、不可取消）
-        let mainGroupName = built.first { !$0.isGlobal && $0.type == "Selector" }?.name
-            ?? built.first { !$0.isGlobal }?.name
-        for index in built.indices where !built[index].isGlobal {
-            let isMain = built[index].name == mainGroupName
-            built[index].isPinned = isMain || pinnedNames.contains(built[index].name)
-            built[index].canPin = !isMain
         }
 
         allGroups = built
@@ -413,8 +362,6 @@ final class ProxyService {
             now: now,
             nodes: nodes,
             delay: entry.lastDelay,
-            isPinned: false,
-            canPin: !isGlobal,
             isGlobal: isGlobal
         )
     }
@@ -489,7 +436,7 @@ final class ProxyService {
     }
 
     #if DEBUG
-    /// Preview 夹具：不启动内核，摆出两张同结构的卡（仅设计预览用，不参与运行）
+    /// Preview 夹具：不启动内核，摆出三个组（含 `GLOBAL`；仅设计预览用，不参与运行）
     func applyPreviewFixture() {
         func node(_ name: String, _ state: ProxyDelayState) -> ProxyNodeModel {
             ProxyNodeModel(name: name, type: "Shadowsocks", isGroup: false, delayState: state, isAvailable: true)
@@ -512,8 +459,6 @@ final class ProxyService {
                     node("澳洲 09", .ok(312))
                 ],
                 delay: 32,
-                isPinned: true,
-                canPin: false,
                 isGlobal: false
             ),
             ProxyGroupModel(
@@ -529,8 +474,6 @@ final class ProxyService {
                     node("韩国 06", .ok(95))
                 ],
                 delay: 32,
-                isPinned: false,
-                canPin: true,
                 isGlobal: false
             ),
             // GLOBAL 在真机上由内核合成，这里一并摆出来：预览「全部策略组」时能看到「全局」标签
@@ -540,21 +483,12 @@ final class ProxyService {
                 now: "节点选择",
                 nodes: [node("节点选择", .ok(32)), node("自动选择", .ok(64))],
                 delay: 32,
-                isPinned: false,
-                canPin: false,
                 isGlobal: true
             )
         ]
         effectiveGroupNames = ["节点选择"]
         hasRuleSnapshot = true
         hasLoaded = true
-    }
-
-    /// Preview 夹具：把所有可 pin 的组都 pin 上（摆双卡形态）
-    func previewPinAllGroups() {
-        for index in allGroups.indices where allGroups[index].canPin {
-            allGroups[index].isPinned = true
-        }
     }
     #endif
 }

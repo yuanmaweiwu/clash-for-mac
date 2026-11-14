@@ -1,26 +1,25 @@
 import SwiftUI
 
-/// 全部策略组的一行 48pt（两行：组名 + 节点数）：hover / 当前组用同一套胶囊。
+/// 全部策略组的一行 48pt（两行：组名 + 节点数）：单选，选中行用与节点行同款的
+/// `surface/row-selected` 胶囊 + 加粗名称（§4.7）。
 ///
-/// 这一页是**策略组管理（pin）**：点整行 = 切换是否固定到首屏；进去选节点走首屏卡片头的「还有 N 个 ›」。
-/// 唯一例外是 `GLOBAL`：全局模式下它是选节点的唯一入口，点行仍进全局节点列表，行尾标「全局」。
-/// 固定状态不用图标：已固定 → 名称加粗 + 行尾「已固定」，未固定 → 常规字重、行尾不加字。
+/// 点整行 = 设为当前展示组（替换旧的，不叠加）；首屏永远只展示这一张卡。
+/// 行尾只放状态文字：「全局」/「未生效」，不再有星标与「已固定」。
 /// 整行是按钮（键盘可 Tab、可 Space 触发、有焦点环）。
 @MainActor
 struct AllGroupsRowView: View {
     let group: ProxyGroupModel
-    let isActive: Bool
-    /// 该组没有被任何规则引用（§4.7）：行尾提示，仅作说明，不影响 pin
+    /// 是否是当前展示组
+    let isSelected: Bool
+    /// 该组没有被任何规则引用（§4.7）：行尾提示，仅作说明
     let showsInactiveLabel: Bool
-    let onTogglePin: () -> Void
-    /// `GLOBAL` 专用：打开全局节点列表（唯一还保留的节点入口）
-    let onOpen: () -> Void
+    let onSelect: () -> Void
 
     @State private var isHovering = false
     @FocusState private var isRowFocused: Bool
 
     var body: some View {
-        Button(action: handleTap) {
+        Button(action: onSelect) {
             rowBody
         }
         .buttonStyle(PressableButtonStyle())
@@ -28,7 +27,7 @@ struct AllGroupsRowView: View {
         .focusEffectDisabled()
         .accessibilityLabel(Text(group.name))
         .accessibilityValue(Text(rowValue))
-        .accessibilityHint(Text(rowHint))
+        .accessibilityHint(Text("按下切换展示的策略组"))
         .overlay {
             if isRowFocused {
                 RoundedRectangle(cornerRadius: Metrics.radiusRow + 2, style: .continuous)
@@ -40,16 +39,15 @@ struct AllGroupsRowView: View {
         .background { rowBackground }
         .onHover { isHovering = $0 }
         .animation(.easeInOut(duration: 0.14), value: isHovering)
-        .animation(.easeInOut(duration: 0.18), value: isActive)
-        .animation(.easeInOut(duration: 0.18), value: group.isPinned)
+        .animation(.easeInOut(duration: 0.18), value: isSelected)
     }
 
-    /// 名称 + 节点数在左，状态标签在行尾竖向居中；右侧不再给图标留热区
+    /// 名称 + 节点数在左，状态标签在行尾竖向居中
     private var rowBody: some View {
         HStack(spacing: Space.m) {
             VStack(alignment: .leading, spacing: Space.hair) {
                 Text(group.name)
-                    .font(group.isPinned ? Typography.title : Typography.body)
+                    .font(isSelected ? Typography.title : Typography.body)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                 Text("\(group.nodes.count) 个节点")
@@ -72,46 +70,27 @@ struct AllGroupsRowView: View {
         .contentShape(Rectangle())
     }
 
-    /// 行点击：`GLOBAL` 进全局节点列表（全局模式的唯一入口），其余组切换固定
-    private func handleTap() {
-        if group.isGlobal {
-            onOpen()
-        } else if group.canPin {
-            onTogglePin()
-        }
-    }
-
-    /// 「已固定 · 未生效」/ 只有其中一项 / 都没有（未固定的生效组）；`GLOBAL` 固定显示「全局」
+    /// `GLOBAL` 标「全局」；其它组只标「未生效」（生效组行尾留空）
     private var statusText: String? {
         if group.isGlobal { return "全局" }
-        var parts: [String] = []
-        if group.isPinned { parts.append("已固定") }
-        if showsInactiveLabel { parts.append("未生效") }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        return showsInactiveLabel ? "未生效" : nil
     }
 
     @ViewBuilder
     private var rowBackground: some View {
-        if isActive || isHovering {
+        if isSelected || isHovering {
             RoundedRectangle(cornerRadius: Metrics.radiusRow, style: .continuous)
-                .fill(isActive ? Theme.rowSelected : Theme.rowHover)
+                .fill(isSelected ? Theme.rowSelected : Theme.rowHover)
                 .padding(.horizontal, Metrics.pillInsetH)
                 .padding(.vertical, Metrics.listPillInsetV)
         }
     }
 
-    /// 读屏先报固定状态与生效状态，再报节点数；`GLOBAL` 只报「全局组」
+    /// 读屏先报是否当前展示，再报节点数与是否生效
     private var rowValue: String {
-        if group.isGlobal { return "全局组，\(group.nodes.count) 个节点" }
-        var parts = [group.isPinned ? "已固定到首屏" : "未固定"]
+        var parts = [isSelected ? "当前展示" : "未展示"]
         if showsInactiveLabel { parts.append("未生效") }
         parts.append("\(group.nodes.count) 个节点")
         return parts.joined(separator: "，")
-    }
-
-    private var rowHint: String {
-        if group.isGlobal { return "按下查看全局节点" }
-        guard group.canPin else { return "主组固定显示" }
-        return "按下切换是否固定到首屏"
     }
 }
