@@ -125,6 +125,14 @@ Shared/       App 与 helper 之间的 XPC 协议
 - 无开发者签名与公证，首次打开需要右键
 - 目前只支持 mihomo 内核
 
+## 关于「纯 AI 开发」
+
+本项目的代码、测试、夹具与文档由 AI 编码代理在人工需求与验收下完成：
+
+- **人负责**：产品范围、交互与视觉取舍、真机验收、发布决策
+- **AI 负责**：实现与重构、真机自检夹具、性能与内存测量、文档与提交信息
+- **可追溯**：每一轮改动都有审核记录（`docs/AUDIT-*.md`、`docs/CODE-REVIEW.md`）与对应的单元测试（`Scripts/unit-tests.sh`）
+
 ## Star History
 
 <!-- 仓库名不是 yuanmaweiwu/Clash 时，替换下面两处 slug -->
