@@ -259,19 +259,15 @@ final class KernelProvisioner {
         try await runExclusive {
             let fileManager = FileManager.default
             if !fileManager.fileExists(atPath: AppPaths.geoIPDatabaseURL.path) {
-                try await self.downloadGeodataFile(name: "geoip.metadb", to: AppPaths.geoIPDatabaseURL, required: true)
-            }
-            if !fileManager.fileExists(atPath: AppPaths.geoSiteDatabaseURL.path) {
-                do {
-                    try await self.downloadGeodataFile(
-                        name: "geosite.dat",
-                        to: AppPaths.geoSiteDatabaseURL,
-                        required: false
-                    )
-                } catch {
-                    // 尽力而为：`GEOSITE,` 规则会退化，但内核仍可启动
-                    Self.logger.warning("geosite.dat 下载失败，继续启动：\(String(describing: error), privacy: .public)")
+                if let error = await self.downloadGeodataFile(name: "geoip.metadb", to: AppPaths.geoIPDatabaseURL) {
+                    if case .checksumMismatch = error { throw self.fail(error) }
+                    throw self.fail(.allSourcesUnreachable)
                 }
+            }
+            if !fileManager.fileExists(atPath: AppPaths.geoSiteDatabaseURL.path),
+               let error = await self.downloadGeodataFile(name: "geosite.dat", to: AppPaths.geoSiteDatabaseURL) {
+                // 尽力而为：`GEOSITE,` 规则会退化，但内核仍可启动
+                Self.logger.warning("geosite.dat 下载失败，继续启动：\(error.logDescription, privacy: .public)")
             }
         }
         Self.logger.notice("ensureGeodata end")
@@ -548,7 +544,10 @@ final class KernelProvisioner {
 
     // MARK: - geodata
 
-    private func downloadGeodataFile(name: String, to destination: URL, required: Bool) async throws {
+    /// 依次试下载源；成功写盘并返回 nil，全部失败返回最后一个错误。
+    ///
+    /// 是否致命由调用方决定：`geoip.metadb` 缺了内核起不来，`geosite.dat` 只影响 `GEOSITE,` 规则。
+    private func downloadGeodataFile(name: String, to destination: URL) async -> KernelProvisionError? {
         let sources = KernelDownloadSelection.resolve().sources
         let fileManager = FileManager.default
         let tmpURL = AppPaths.kernelDirectory.appending(path: ".\(name)-\(UUID().uuidString).tmp")
@@ -580,7 +579,7 @@ final class KernelProvisioner {
                 Self.logger.notice(
                     "geodata 下载成功 \(name, privacy: .public) source=\(sourceName, privacy: .public)"
                 )
-                return
+                return nil
             } catch {
                 lastError = Self.mapDownloadError(error)
                 Self.logger.notice(
@@ -588,14 +587,7 @@ final class KernelProvisioner {
                 )
             }
         }
-
-        if required {
-            if case .checksumMismatch = lastError {
-                throw fail(lastError)
-            }
-            throw fail(.allSourcesUnreachable)
-        }
-        Self.logger.warning("\(name) 所有源均失败，继续启动：\(lastError.logDescription, privacy: .public)")
+        return lastError
     }
 
     // MARK: - 状态
