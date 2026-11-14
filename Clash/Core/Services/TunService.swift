@@ -581,12 +581,12 @@ final class TunService {
 
     /// 等 mixed-port 真正释放：刚停掉本地内核时，进程退出 / TIME_WAIT 会让第一次探测失败
     private func waitForPortRelease(_ port: Int) async -> Bool {
-        for attempt in 0..<10 {
+        // 10 次探测、9 次间隔：最后一探之后不再白等 200ms
+        for _ in 0..<9 {
             if PortAllocator.isAvailable(port: port) { return true }
-            if attempt == 9 { break }
             try? await Task.sleep(for: .milliseconds(200))
         }
-        return false
+        return PortAllocator.isAvailable(port: port)
     }
 
     /// 轮询 `/version`；成功即就绪
