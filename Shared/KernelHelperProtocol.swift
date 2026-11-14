@@ -4,7 +4,9 @@ import Foundation
 /// （`adr/0008` §版本升级）。加方法 / 改语义必须 +1。
 ///
 /// v2（TUN）：新增 `applyRuntimeConfig`，配置正文改由 App 经 XPC 送达（不再让 helper 读 App 目录）。
-let HelperVersion = 2
+/// v3（2026-11-14）：helper 启动时回收 root 孤儿内核；`startKernel` 复用进程前比对
+/// `runtime.yaml` 与进程启动时间，配置更新则重启（协议不变，行为变，故 +1）。
+let HelperVersion = 3
 
 /// 运行配置正文上限。Yams 解析要整段读进内存，超过这个量级只可能是误传 / 恶意输入。
 /// App 与 helper 用同一个常量，两边都能在发送前 / 写入前拒绝。
