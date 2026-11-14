@@ -34,8 +34,6 @@ final class HelperClient {
     private static let logger = Logger(subsystem: "com.clash.app", category: "helper")
 
     private var connection: NSXPCConnection?
-    /// 连接是否被认为可用；`invalidationHandler` / `interruptionHandler` 会置回 false
-    private(set) var isConnected = false
 
     // MARK: - 白名单方法
 
@@ -45,7 +43,6 @@ final class HelperClient {
     /// 上层不做判断、交给 `startKernel` 报具体原因。
     func probe() async throws -> HelperRuntimeSnapshot {
         let raw: String = try await call { proxy, reply in proxy.ping(reply) }
-        isConnected = true
         guard let snapshot = HelperRuntimeSnapshot(wireValue: raw) else {
             Self.logger.error("helper 返回无法解析的版本：\(raw, privacy: .public)")
             throw HelperClientError.versionMismatch(expected: HelperVersion, actual: nil)
@@ -79,7 +76,6 @@ final class HelperClient {
         let result: (Bool, String?) = try await call { proxy, reply in
             proxy.applyRuntimeConfig(bytes) { ok, message in reply((ok, message)) }
         }
-        isConnected = true
         guard result.0 else {
             throw HelperClientError.helperRejected(reason: result.1 ?? "运行配置写入失败")
         }
@@ -90,7 +86,6 @@ final class HelperClient {
     func startKernel() async throws -> String? {        let result: (Bool, String?) = try await call { proxy, reply in
             proxy.startKernel { ok, message in reply((ok, message)) }
         }
-        isConnected = true
         guard result.0 else {
             throw HelperClientError.helperRejected(reason: result.1 ?? "内核启动失败")
         }
@@ -99,7 +94,6 @@ final class HelperClient {
 
     func stopKernel() async throws {
         let stopped: Bool = try await call { proxy, reply in proxy.stopKernel(reply) }
-        isConnected = true
         guard stopped else {
             throw HelperClientError.helperRejected(reason: "内核未能退出，请稍后重试")
         }
@@ -110,7 +104,6 @@ final class HelperClient {
         let state: (Bool, String?) = try await call { proxy, reply in
             proxy.kernelState { running, pid in reply((running, pid)) }
         }
-        isConnected = true
         return state.0 ? state.1 : nil
     }
 
@@ -130,7 +123,6 @@ final class HelperClient {
         newConnection.interruptionHandler = { [weak self] in
             Task { @MainActor [weak self] in
                 Self.logger.notice("helper 连接中断")
-                self?.isConnected = false
             }
         }
         newConnection.resume()
@@ -140,7 +132,6 @@ final class HelperClient {
 
     /// 丢弃旧连接：下次调用重新建连（helper 重启后能自愈）
     private func teardown() {
-        isConnected = false
         connection?.invalidate()
         connection = nil
     }
