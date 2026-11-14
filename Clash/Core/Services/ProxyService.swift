@@ -40,7 +40,27 @@ final class ProxyService {
 
     /// 首屏 / 列表用的策略组（不含 `GLOBAL`），内核配置顺序
     var groups: [ProxyGroupModel] { allGroups.filter { !$0.isGlobal } }
-    var pinnedGroups: [ProxyGroupModel] { allGroups.filter(\.isPinned) }
+
+    /// 首屏 / 列表用的 pin 组：主组恒在最前，其余按用户固定的先后（配置顺序兜底）
+    var pinnedGroups: [ProxyGroupModel] {
+        var result = allGroups.filter { $0.isPinned && !$0.canPin }
+        var seen = Set(result.map(\.name))
+
+        for name in pinOrder {
+            guard !seen.contains(name),
+                  let group = allGroups.first(where: { $0.name == name }),
+                  group.isPinned else { continue }
+            result.append(group)
+            seen.insert(name)
+        }
+
+        // 防御：没有登记固定顺序的 pin（预览夹具 / 未来落盘的旧偏好）按配置顺序补在后面
+        for group in allGroups where group.isPinned && !seen.contains(group.name) {
+            result.append(group)
+            seen.insert(group.name)
+        }
+        return result
+    }
 
     @ObservationIgnored private let kernel: KernelService
     /// active profile 的来源：延迟缓存按 profile 分桶；nil（预览 / 自检）时只用内核内存态
@@ -55,6 +75,8 @@ final class ProxyService {
     @ObservationIgnored private var lastRefreshSessionKey: String?
     /// pin 是 UI 偏好：现在只在内存，后续落 `profiles/index.json` 的 `pinnedGroups`
     @ObservationIgnored private var pinnedNames: Set<String> = []
+    /// 用户固定的先后（不含主组）；首屏按这个顺序排，主组恒在最前
+    @ObservationIgnored private var pinOrder: [String] = []
 
     init(
         kernel: KernelService,
@@ -284,8 +306,10 @@ final class ProxyService {
 
         let pinned = !allGroups[index].isPinned
         allGroups[index].isPinned = pinned
+        pinOrder.removeAll { $0 == group }
         if pinned {
             pinnedNames.insert(group)
+            pinOrder.append(group)
         } else {
             pinnedNames.remove(group)
         }
@@ -510,7 +534,7 @@ final class ProxyService {
                 isGlobal: false
             )
         ]
-        effectiveGroupNames = Set(allGroups.map(\.name))
+        effectiveGroupNames = ["节点选择"]
         hasRuleSnapshot = true
         hasLoaded = true
     }

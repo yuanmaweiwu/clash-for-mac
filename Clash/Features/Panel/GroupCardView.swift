@@ -5,6 +5,8 @@ import SwiftUI
 @MainActor
 struct GroupCardView: View {
     let group: ProxyGroupModel
+    /// 该组没被任何规则引用（§3.4）：卡头右侧提示，仅作说明，不影响选择
+    let showsInactiveLabel: Bool
     let onOpen: () -> Void
     let onSelect: (String) -> Void
 
@@ -67,6 +69,14 @@ struct GroupCardView: View {
 
                 Spacer(minLength: Space.s)
 
+                if showsInactiveLabel {
+                    Text("未生效")
+                        .font(Typography.caption)
+                        .foregroundStyle(Theme.textTertiary)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+
                 Text(headerTrailingText)
                     .font(Typography.caption)
                     .foregroundStyle(Theme.textSecondary)
@@ -103,10 +113,17 @@ struct GroupCardView: View {
         .onHover { isHeaderHovering = $0 }
         .animation(.easeInOut(duration: 0.12), value: isHeaderHovering)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(group.extraCount > 0
-            ? "\(group.name)，还有 \(group.extraCount) 个节点"
-            : "\(group.name)，当前 \(headerTrailingText)"))
+        .accessibilityLabel(Text(cardAccessibilityLabel))
         .accessibilityHint("按下查看全部节点")
         .accessibilityAddTraits(.isButton)
+    }
+
+    /// 「未生效」必须读得出来：选中 / 数量之外先说状态，避免只看到节点名误以为在生效
+    private var cardAccessibilityLabel: String {
+        let status = showsInactiveLabel ? "，未生效" : ""
+        if group.extraCount > 0 {
+            return "\(group.name)\(status)，还有 \(group.extraCount) 个节点"
+        }
+        return "\(group.name)\(status)，当前 \(headerTrailingText)"
     }
 }

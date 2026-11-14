@@ -1,34 +1,33 @@
 import SwiftUI
 
-/// 全部策略组的一行 48pt（两行：组名 + 节点数）：hover / 当前组用同一套胶囊，
-/// 当前组只加粗 + 底色，不加 ✓；星标控制是否固定到首屏（主组禁用）。
+/// 全部策略组的一行 48pt（两行：组名 + 节点数）：hover / 当前组用同一套胶囊。
 ///
-/// 整行是按钮（键盘可 Tab、可 Space 触发、有焦点环）；星标叠在行尾，自己也是一个按钮。
+/// 这一页是**策略组管理（pin）**，不是节点选择页：点整行 = 切换是否固定到首屏；
+/// 进去选节点走首屏卡片头的「还有 N 个 ›」。
+/// 固定状态不用图标：已固定 → 名称加粗 + 行尾「已固定」，未固定 → 常规字重、行尾不加字。
+/// 整行是按钮（键盘可 Tab、可 Space 触发、有焦点环）。
 @MainActor
 struct AllGroupsRowView: View {
     let group: ProxyGroupModel
     let isActive: Bool
-    /// 该组没有被任何规则引用（§4.7）：行尾提示，仅作说明，不影响 pin 与选择
+    /// 该组没有被任何规则引用（§4.7）：行尾提示，仅作说明，不影响 pin
     let showsInactiveLabel: Bool
     let onTogglePin: () -> Void
-    let onOpen: () -> Void
 
     @State private var isHovering = false
     @FocusState private var isRowFocused: Bool
-    @FocusState private var isStarFocused: Bool
 
     var body: some View {
-        Button(action: onOpen) {
+        // 主组不可取消固定：行失效，避免「点了没反应」却看不出原因
+        Button(action: { if group.canPin { onTogglePin() } }) {
             rowBody
         }
         .buttonStyle(PressableButtonStyle())
         .focused($isRowFocused)
         .focusEffectDisabled()
         .accessibilityLabel(Text(group.name))
-        .accessibilityValue(Text(showsInactiveLabel
-            ? "\(group.nodes.count) 个节点，未生效"
-            : "\(group.nodes.count) 个节点"))
-        .accessibilityHint(Text("按下查看节点"))
+        .accessibilityValue(Text(rowValue))
+        .accessibilityHint(Text(rowHint))
         .overlay {
             if isRowFocused {
                 RoundedRectangle(cornerRadius: Metrics.radiusRow + 2, style: .continuous)
@@ -36,23 +35,20 @@ struct AllGroupsRowView: View {
                     .padding(-2)
             }
         }
-        .overlay(alignment: .trailing) {
-            starButton
-                .padding(.trailing, Space.s)
-        }
         .frame(height: Metrics.listRowHeight)
         .background { rowBackground }
         .onHover { isHovering = $0 }
         .animation(.easeInOut(duration: 0.14), value: isHovering)
         .animation(.easeInOut(duration: 0.18), value: isActive)
+        .animation(.easeInOut(duration: 0.18), value: group.isPinned)
     }
 
-    /// 文字区右侧给星标留 28pt 热区 + 6pt 呼吸
+    /// 名称 + 节点数在左，状态标签在行尾竖向居中；右侧不再给图标留热区
     private var rowBody: some View {
         HStack(spacing: Space.m) {
             VStack(alignment: .leading, spacing: Space.hair) {
                 Text(group.name)
-                    .font(isActive ? Typography.title : Typography.body)
+                    .font(group.isPinned ? Typography.title : Typography.body)
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                 Text("\(group.nodes.count) 个节点")
@@ -62,18 +58,25 @@ struct AllGroupsRowView: View {
 
             Spacer(minLength: Space.s)
 
-            if showsInactiveLabel {
-                Text("未生效")
+            if let statusText {
+                Text(statusText)
                     .font(Typography.caption)
                     .foregroundStyle(Theme.textTertiary)
                     .lineLimit(1)
                     .fixedSize()
             }
         }
-        .padding(.leading, Metrics.cardPadding)
-        .padding(.trailing, Metrics.cardPadding + Metrics.hitTarget)
+        .padding(.horizontal, Metrics.cardPadding)
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
+    }
+
+    /// 「已固定 · 未生效」/ 只有其中一项 / 都没有（未固定的生效组）
+    private var statusText: String? {
+        var parts: [String] = []
+        if group.isPinned { parts.append("已固定") }
+        if showsInactiveLabel { parts.append("未生效") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     @ViewBuilder
@@ -86,38 +89,17 @@ struct AllGroupsRowView: View {
         }
     }
 
-    private var starButton: some View {
-        Button(action: onTogglePin) {
-            Image(systemName: group.isPinned ? "star.fill" : "star")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(starColor)
-                .frame(width: Metrics.hitTarget, height: Metrics.hitTarget)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(PressableButtonStyle())
-        .disabled(!group.canPin)
-        .focused($isStarFocused)
-        .focusEffectDisabled()
-        .overlay {
-            if isStarFocused {
-                RoundedRectangle(cornerRadius: Metrics.radiusRow + 1, style: .continuous)
-                    .strokeBorder(Theme.focus, lineWidth: 2)
-                    .padding(-1)
-            }
-        }
-        .help(starHelp)
-        .accessibilityLabel(Text(group.isPinned ? "取消固定 \(group.name)" : "固定 \(group.name)"))
+    /// 读屏先报固定状态与生效状态，再报节点数
+    private var rowValue: String {
+        var parts = [group.isPinned ? "已固定到首屏" : "未固定"]
+        if showsInactiveLabel { parts.append("未生效") }
+        parts.append("\(group.nodes.count) 个节点")
+        return parts.joined(separator: "，")
     }
 
-    /// 未生效组固定了也不会上首屏（首屏只收生效组）；提示说清楚，避免用户以为星标失灵
-    private var starHelp: String {
+    private var rowHint: String {
+        if group.isGlobal { return "全局组不可固定" }
         guard group.canPin else { return "主组固定显示" }
-        if showsInactiveLabel { return "该组未被规则引用，不会出现在首屏" }
-        return group.isPinned ? "取消固定" : "固定到首屏"
-    }
-
-    private var starColor: Color {
-        if !group.canPin { return Theme.textTertiary }
-        return group.isPinned ? Theme.accent : Theme.textSecondary
+        return "按下切换是否固定到首屏"
     }
 }

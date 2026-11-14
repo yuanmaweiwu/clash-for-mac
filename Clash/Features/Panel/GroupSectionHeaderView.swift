@@ -5,8 +5,6 @@ import SwiftUI
 /// 标题本身不是控件；右侧入口有 28pt 命中区，hover 时文字转正文色。
 @MainActor
 struct GroupSectionHeaderView: View {
-    /// 标题右侧提示（例如「当前规则未使用策略组」）；nil = 不显示
-    let note: String?
     let onOpenAll: () -> Void
 
     @State private var isHovering = false
@@ -17,13 +15,6 @@ struct GroupSectionHeaderView: View {
             Text("策略组")
                 .font(Typography.section)
                 .foregroundStyle(Theme.textSecondary)
-
-            if let note {
-                Text(note)
-                    .font(Typography.caption)
-                    .foregroundStyle(Theme.textTertiary)
-                    .lineLimit(1)
-            }
 
             Spacer(minLength: Space.s)
 

@@ -278,38 +278,18 @@ final class PanelPreviewModel {
     var pinnedGroups: [ProxyGroupModel] { proxies.pinnedGroups }
     var pinnedGroupIDs: Set<String> { Set(pinnedGroups.map(\.id)) }
 
-    /// 首屏卡片：只显示**被规则引用**的组（§3.4），最多 2 张。
-    ///
-    /// 生效组 ∩ 已 pin 的组；交集为空时退回配置顺序里的第一个生效组。
-    /// 规则拉不到 / 规则一条都没指向策略组时保持旧行为（pin 的组 → 第一组）。
+    /// 首屏卡片：pin 的组（主组 + 用户固定顺序，最多 2 张），**不按是否被规则引用过滤**——用户固定了就该看见。
+    /// pin 为空时退回第一个生效组 → 配置里第一组。
     var homeGroups: [ProxyGroupModel] {
-        guard proxies.hasRuleSnapshot, !proxies.effectiveGroupNames.isEmpty else {
-            return legacyHomeGroups
-        }
-
-        let effective = proxies.effectiveGroupNames
-        let pinnedEffective = pinnedGroups.filter { effective.contains($0.name) }
-        if !pinnedEffective.isEmpty { return Array(pinnedEffective.prefix(2)) }
-        if let first = groups.first(where: { effective.contains($0.name) }) { return [first] }
-        return legacyHomeGroups
-    }
-
-    /// 旧行为：pin 的组（主组常在国内），再退回配置里第一组
-    private var legacyHomeGroups: [ProxyGroupModel] {
         let pinned = Array(pinnedGroups.prefix(2))
         if !pinned.isEmpty { return pinned }
+        if let firstEffective = groups.first(where: { proxies.effectiveGroupNames.contains($0.name) }) {
+            return [firstEffective]
+        }
         return groups.first.map { [$0] } ?? []
     }
 
-    /// 首屏标题右侧提示：规则一条都没指向策略组（例如全是 DIRECT / REJECT）
-    var groupSectionNote: String? {
-        guard proxies.hasRuleSnapshot,
-              proxies.effectiveGroupNames.isEmpty,
-              !groups.isEmpty else { return nil }
-        return "当前规则未使用策略组"
-    }
-
-    /// 「全部策略组」行尾是否标「未生效」（规则快照可用、非 `GLOBAL`、且没被任何规则引用）
+    /// 首屏卡片 / 「全部策略组」行尾是否标「未生效」（规则快照可用、非 `GLOBAL`、且没被任何规则引用）
     func showsInactiveLabel(for group: ProxyGroupModel) -> Bool {
         guard proxies.hasRuleSnapshot, !group.isGlobal else { return false }
         return !proxies.effectiveGroupNames.contains(group.name)

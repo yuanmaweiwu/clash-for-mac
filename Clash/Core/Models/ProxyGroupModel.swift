@@ -14,7 +14,7 @@ struct ProxyGroupModel: Identifiable, Sendable, Equatable {
     var delay: Int?
     /// 是否 pin 到首屏（UI 偏好，进内存，后续落 `profiles/index.json`）
     var isPinned: Bool
-    /// 星标是否可点：主组（默认常驻）与 `GLOBAL` 都不可点
+    /// 是否可切换固定状态：主组（默认常驻）与 `GLOBAL` 都不可切换
     var canPin: Bool
     /// `GLOBAL`：只在「全部策略组」二级页出现，不进首屏
     let isGlobal: Bool

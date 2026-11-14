@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 二级面板：全部策略组，右侧星标控制是否固定到首屏（§3.4）。
+/// 二级面板：全部策略组，点行切换是否固定到首屏（策略组管理，不选节点；§3.4）。
 @MainActor
 struct AllGroupsPanelView: View {
     let model: PanelPreviewModel
@@ -17,8 +17,7 @@ struct AllGroupsPanelView: View {
                             group: group,
                             isActive: group.id == model.activeGroupID,
                             showsInactiveLabel: model.showsInactiveLabel(for: group),
-                            onTogglePin: { model.togglePin(group.id) },
-                            onOpen: { model.pushGroup(group.id) }
+                            onTogglePin: { model.togglePin(group.id) }
                         )
                     }
                 }
@@ -56,7 +55,7 @@ struct AllGroupsPanelView: View {
 
             Spacer(minLength: Space.s)
 
-            Text("星标固定到首屏")
+            Text("点行固定到首屏")
                 .font(Typography.caption)
                 .foregroundStyle(Theme.textTertiary)
         }
