@@ -120,6 +120,12 @@ final class TunService {
     @ObservationIgnored private var baseline: SystemNetworkSnapshot?
     /// helper 内核是否**可能**在跑（spawn 成功但还没被 `KernelService` 接管的那段时间也算）
     @ObservationIgnored private var hasHelperKernel = false
+    /// `phase == .on` 时的 controller 端点：心跳 / 面板打开时用它复核内核是否还活着
+    @ObservationIgnored private var livenessEndpoint: (port: Int, secret: String)?
+    /// 30s 活性心跳：只在 `phase == .on` 期间存活，`disable()` / `fail()` / `deinit` 停掉
+    @ObservationIgnored private var heartbeatTask: Task<Void, Never>?
+    /// 心跳间隔：足够便宜（一次 XPC），又能把「面板显示已启用但内核已死」压到 30s 内
+    private static let livenessInterval: Duration = .seconds(30)
 
     init(
         settings: SettingsStore,
@@ -133,6 +139,10 @@ final class TunService {
         self.client = client
 
         reapOrphanKernelIfNeeded()
+    }
+
+    deinit {
+        heartbeatTask?.cancel()
     }
 
     // MARK: - 派生状态
@@ -542,6 +552,8 @@ final class TunService {
 
         phase = .on
         failureMessage = nil
+        livenessEndpoint = (ports[0], secret)
+        startLivenessHeartbeat()
         Self.logger.notice("TUN 已开启 controller=127.0.0.1:\(ports[0]) version=\(version, privacy: .public)")
     }
 
@@ -588,6 +600,63 @@ final class TunService {
         return Int(d.components.seconds * 1000 + d.components.attoseconds / 1_000_000_000_000_000)
     }
 
+    // MARK: - 活性校验（AUDIT A3）
+
+    /// 面板打开时校验一次：避免「打开面板看到假的已启用」（内核可能被 kill / 被别的实例回收）。
+    /// 失败后状态机自己落到 `.failed` + banner，无需调用方处理返回值。
+    func verifyLiveness() async {
+        guard phase == .on, let endpoint = livenessEndpoint else { return }
+        guard await isKernelAlive(endpoint) else {
+            handleKernelGone()
+            return
+        }
+    }
+
+    private func startLivenessHeartbeat() {
+        heartbeatTask?.cancel()
+        heartbeatTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.livenessInterval)
+                guard !Task.isCancelled, let self else { return }
+                await self.verifyLiveness()
+            }
+        }
+    }
+
+    private func stopLivenessHeartbeat() {
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
+        livenessEndpoint = nil
+    }
+
+    /// 内核是否还活着：先问 helper（拿得到 pid 即活着），拿不到再用已接管的 API 复核一次。
+    /// 只有**两者都失败**才判定退出——XPC / 单次 HTTP 抖动不能把用户踢回失败态。
+    private func isKernelAlive(_ endpoint: (port: Int, secret: String)) async -> Bool {
+        if let pid = (try? await client.kernelState()) ?? nil, !pid.isEmpty { return true }
+        let probe = ClashAPIClient(port: endpoint.port, secret: endpoint.secret, timeout: 2)
+        do {
+            _ = try await probe.version(timeout: 2)
+            return true
+        } catch {
+            Self.logger.notice("活性校验：helper 无 pid 且 API 不可达（\(String(describing: error), privacy: .public)）")
+            return false
+        }
+    }
+
+    /// 心跳 / 面板校验发现内核已退出：释放端点并落到失败态，再由 `fail()` 回落本地内核。
+    ///
+    /// 不用 `fail()` 直接收尾：那里刻意保留 `hasHelperKernel` / 端点（失败可能发生在内核
+    /// 仍在跑时）。这里两路校验都失败 = 内核确定不在，必须释放，否则面板一直拿死端点取数。
+    private func handleKernelGone() {
+        guard phase == .on else { return }
+        stopLivenessHeartbeat()
+        hasHelperKernel = false
+        kernel.releaseExternalKernel()
+        let reason = "TUN 内核已退出（可能被其它进程关闭），请重新开启"
+        Self.logger.error("\(reason, privacy: .public)：helper 无 pid 且 API 不可达")
+        fail(.startup(reason))
+    }
+
     // MARK: - 关闭
 
     /// 关闭：`stopKernel`（XPC 等确认）→ 释放端点 → 校验默认路由 / DNS → off
@@ -598,6 +667,7 @@ final class TunService {
     func disable(restartLocalKernel: Bool = true) async {
         guard isOn || isHelperKernelRunning else { return }
 
+        stopLivenessHeartbeat()
         phase = .stopping
         // 只有「确认退出」才允许继续往下走（含置 off / 释放端点）
         guard await stopHelperKernel(HelperKernelRunner(client: client)) else { return }
@@ -623,6 +693,7 @@ final class TunService {
     // MARK: - 失败与回落
 
     private func fail(_ failure: TunFailure) {
+        stopLivenessHeartbeat()
         phase = .failed(failure)
         failureMessage = failure.userMessage
         installPrompt = nil

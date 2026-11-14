@@ -90,8 +90,10 @@ final class AppEnvironment {
 
     // MARK: - 面板入口（状态栏左键 / 右键菜单 / ⌘, 共用）
 
-    /// 确保面板显示；已显示就不动（不 toggle）
+    /// 确保面板显示；已显示就不动（不 toggle）。
+    /// 每次打开都校验一次 TUN 活性：内核可能已被外部 kill，不能让面板停在假的「已启用」。
     func showPanel() {
+        Task { [tun] in await tun.verifyLiveness() }
         guard !panel.isVisible else {
             Self.logger.notice("面板已在锚点上，忽略重复打开")
             return
