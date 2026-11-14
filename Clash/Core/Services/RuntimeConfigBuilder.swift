@@ -29,6 +29,8 @@ enum RuntimeConfigBuilder {
         var dnsPort: Int
         var secret: String
         var logLevel: String = "info"
+        /// 代理模式：`PATCH /configs` 只改运行时，重建 runtime 时以设置为准
+        var mode: ProxyMode = .rule
         /// 是否以 TUN 模式运行（`true` 时 helper 以 root 启动内核）
         var tunEnabled: Bool = false
         var tunStack: TunStack = .gvisor
@@ -157,11 +159,14 @@ enum RuntimeConfigBuilder {
             root["bind-address"] = "127.0.0.1"
         }
 
-        if let mode = root["mode"] as? String, !mode.isEmpty {
-            root["mode"] = mode
-        } else {
-            root["mode"] = "rule"
-        }
+        // 模式由 App 设置决定：内核重启后不能因为订阅写死 `rule` / `global` 而回默认
+        root["mode"] = injected.mode.rawValue
+
+        // 选中节点 / fake-ip 由内核写进 `-d` 目录的 `cache.db`，重启沿用
+        var profile = root["profile"] as? [String: Any] ?? [:]
+        profile["store-selected"] = true
+        profile["store-fake-ip"] = true
+        root["profile"] = profile
 
         root["log-level"] = injected.logLevel
         root["external-controller"] = "127.0.0.1:\(injected.controllerPort)"

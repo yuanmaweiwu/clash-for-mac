@@ -36,13 +36,27 @@ final class ProxyService {
     var pinnedGroups: [ProxyGroupModel] { allGroups.filter(\.isPinned) }
 
     @ObservationIgnored private let kernel: KernelService
+    /// active profile 的来源：延迟缓存按 profile 分桶；nil（预览 / 自检）时只用内核内存态
+    @ObservationIgnored private let profileStore: ProfileStore?
+    /// 内核重启后用来补齐 `history` 的本地缓存
+    @ObservationIgnored private let latencyCache: LatencyCache
     @ObservationIgnored private var client: ClashAPIClient?
     @ObservationIgnored private var clientKey: String?
+    /// 上一次成功拉 `/proxies` 的内核会话（端口 + secret）。新会话的第一次刷新把缓存值
+    /// 当作「上次测速」展示：mihomo 的 URLTest / Fallback 组会在启动时自动做健康检查，
+    /// 那些 history 不是用户点的测速，不能覆盖用户上次真正测出来的缓存。
+    @ObservationIgnored private var lastRefreshSessionKey: String?
     /// pin 是 UI 偏好：现在只在内存，后续落 `profiles/index.json` 的 `pinnedGroups`
     @ObservationIgnored private var pinnedNames: Set<String> = []
 
-    init(kernel: KernelService) {
+    init(
+        kernel: KernelService,
+        profileStore: ProfileStore? = nil,
+        latencyCache: LatencyCache = .shared
+    ) {
         self.kernel = kernel
+        self.profileStore = profileStore
+        self.latencyCache = latencyCache
     }
 
     // MARK: - 读取
@@ -60,10 +74,14 @@ final class ProxyService {
         defer { isRefreshing = false }
 
         var loaded = false
+        // 端口 / secret 变了 = 新内核会话：第一次刷新优先展示本地缓存（标为陈旧）
+        let sessionKey = "\(kernel.port ?? -1):\(kernel.secret ?? "")"
+        let isNewSession = sessionKey != lastRefreshSessionKey
         do {
-            apply(proxies: try await client.proxies())
+            apply(proxies: try await client.proxies(), preferCache: isNewSession)
             lastError = nil
             loaded = true
+            lastRefreshSessionKey = sessionKey
         } catch {
             lastError = Self.message(for: error)
         }
@@ -86,6 +104,7 @@ final class ProxyService {
         lastError = nil
         client = nil
         clientKey = nil
+        lastRefreshSessionKey = nil
     }
 
     // MARK: - 选节点
@@ -139,13 +158,77 @@ final class ProxyService {
 
     private func apply(delays: [String: Int], group: String) {
         guard let index = allGroups.firstIndex(where: { $0.name == group }) else { return }
+        let testedAt = Date()
         for nodeIndex in allGroups[index].nodes.indices {
             let name = allGroups[index].nodes[nodeIndex].name
             guard let delay = delays[name] else { continue }
             // 本次没测到的条目保留原值；测到 0 视为超时（与「没测过」区分开）
             allGroups[index].nodes[nodeIndex].delayState = delay > 0 ? .ok(delay) : .timeout
+            allGroups[index].nodes[nodeIndex].isStale = false
+            allGroups[index].nodes[nodeIndex].lastTestedAt = testedAt
         }
         allGroups[index].delay = allGroups[index].nodes.compactMap(\.delay).min()
+
+        latencyCache.record(profileID: profileStore?.activeProfileID, delays: delays, testedAt: testedAt)
+    }
+
+    /// 单点测速：结果同时写回内存与延迟缓存（当前 UI 只有批量入口，方法保留给后续单点操作）
+    func testNode(group: String, nodeID: String) async {
+        guard !isTesting, testingGroup == nil else { return }
+        guard allGroups.contains(where: { $0.name == group }),
+              let client = apiClient() else { return }
+
+        isTesting = true
+        testingGroup = group
+        defer {
+            isTesting = false
+            testingGroup = nil
+        }
+
+        do {
+            let delay = try await client.testDelay(
+                proxy: nodeID,
+                timeout: Self.testTimeoutMilliseconds,
+                url: Self.testURL
+            )
+            guard let current = allGroups.firstIndex(where: { $0.name == group }),
+                  let currentIndex = allGroups[current].nodes.firstIndex(where: { $0.name == nodeID }) else {
+                return
+            }
+            let testedAt = Date()
+            allGroups[current].nodes[currentIndex].delayState = delay > 0 ? .ok(delay) : .timeout
+            allGroups[current].nodes[currentIndex].isStale = false
+            allGroups[current].nodes[currentIndex].lastTestedAt = testedAt
+            allGroups[current].delay = allGroups[current].nodes.compactMap(\.delay).min()
+            latencyCache.record(
+                profileID: profileStore?.activeProfileID,
+                node: nodeID,
+                delay: delay,
+                testedAt: testedAt
+            )
+            lastError = nil
+        } catch {
+            lastError = Self.message(for: error)
+        }
+    }
+
+    /// `/proxies` 里带 `history` 的条目（含策略组自身的测速历史）写入缓存。
+    ///
+    /// 用内核给的 `history.time` 作为测速时间；老版本没有 time 就退回本次拉取时间。
+    /// - Parameter skipping: 新会话首帧用缓存展示的节点；它们的 history 可能来自内核
+    ///   启动时的自动健康检查，不能覆盖用户上次主动测出的缓存值。
+    private func recordHistory(in proxies: [String: ProxyEntry], skipping: Set<String> = []) {
+        guard let profileID = profileStore?.activeProfileID else { return }
+        let fallback = Date()
+        for (name, entry) in proxies where !skipping.contains(name) {
+            guard let last = entry.history?.last else { continue }
+            latencyCache.record(
+                profileID: profileID,
+                node: name,
+                delay: last.delay,
+                testedAt: last.time ?? fallback
+            )
+        }
     }
 
     // MARK: - 模式
@@ -186,12 +269,12 @@ final class ProxyService {
 
     // MARK: - 映射
 
-    private func apply(proxies: [String: ProxyEntry]) {
+    private func apply(proxies: [String: ProxyEntry], preferCache: Bool) {
         let orderedNames = Self.orderedGroupNames(in: proxies)
 
         var built = orderedNames.compactMap { name -> ProxyGroupModel? in
             guard let entry = proxies[name] else { return nil }
-            return makeGroup(name: name, entry: entry, proxies: proxies)
+            return makeGroup(name: name, entry: entry, proxies: proxies, preferCache: preferCache)
         }
 
         // GLOBAL 只进「全部策略组」；被过滤空的组不再作为条目出现
@@ -202,6 +285,7 @@ final class ProxyService {
                 entry: global,
                 proxies: proxies,
                 excluding: droppedGroups,
+                preferCache: preferCache,
                 isGlobal: true
             ) {
                 built.append(group)
@@ -219,6 +303,13 @@ final class ProxyService {
 
         allGroups = built
         hasLoaded = true
+
+        // `/proxies` 里带 history 的节点写缓存；新会话首帧展示的缓存值不覆盖，
+        // 否则内核启动时 URLTest / Fallback 的自动健康检查会把用户上次测速结果冲掉
+        let staleNames = Set(built.flatMap { group in
+            group.nodes.filter(\.isStale).map(\.name)
+        })
+        recordHistory(in: proxies, skipping: preferCache ? staleNames : [])
     }
 
     /// 单组的映射；`nil` = 过滤掉信息节点后没有任何可选项（整组不显示，避免空卡）
@@ -227,18 +318,38 @@ final class ProxyService {
         entry: ProxyEntry,
         proxies: [String: ProxyEntry],
         excluding excludedNames: Set<String> = [],
+        preferCache: Bool = false,
         isGlobal: Bool = false
     ) -> ProxyGroupModel? {
         let nodes = (entry.all ?? []).compactMap { nodeName -> ProxyNodeModel? in
             guard let node = proxies[nodeName], !excludedNames.contains(nodeName) else { return nil }
             // 机场塞的信息节点（到期时间 / 流量用量 / 官网…）：只能展示，绝不能可选
             guard !ProxyNodeFilter.isInfoNode(nodeName) else { return nil }
+
+            // 内核本次启动的 `history` 是内存态：没有就用上次落盘的缓存，并标成陈旧。
+            // 新会话首帧（`preferCache`）即使 history 已经出现，也先展示用户上次的测速结果：
+            // URLTest / Fallback 组启动时的自动健康检查不是用户主动测的。
+            var delayState = node.delayState
+            var isStale = false
+            var lastTestedAt: Date?
+            var hasHistory = true
+            if case .unknown = delayState { hasHistory = false }
+
+            if preferCache || !hasHistory,
+               let cached = latencyCache.entry(profileID: profileStore?.activeProfileID, node: nodeName) {
+                delayState = cached.delay > 0 ? .ok(cached.delay) : .timeout
+                isStale = true
+                lastTestedAt = cached.testedAt
+            }
+
             return ProxyNodeModel(
                 name: nodeName,
                 type: node.type ?? "",
                 isGroup: node.isGroup,
-                delayState: node.delayState,
-                isAvailable: node.alive ?? true
+                delayState: delayState,
+                isAvailable: node.alive ?? true,
+                isStale: isStale,
+                lastTestedAt: lastTestedAt
             )
         }
         guard !nodes.isEmpty else { return nil }

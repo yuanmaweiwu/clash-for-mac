@@ -28,7 +28,38 @@ struct ProxyEntry: Decodable, Sendable, Equatable {
     }
 }
 
-/// 延迟历史的一条（`{"time": "...", "delay": 123}`）
+/// 延迟历史的一条（`{"time": "...", "delay": 123}`）。
+///
+/// `time` 用于把「上次测速时间」一起写进延迟缓存；解析失败按缺失处理，
+/// 不影响延迟本身（缓存侧会退回「本次拉取时间」）。
 struct ProxyHistoryEntry: Decodable, Sendable, Equatable {
     let delay: Int
+    let time: Date?
+
+    private enum CodingKeys: String, CodingKey {
+        case delay, time
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        delay = try container.decode(Int.self, forKey: .delay)
+        if let text = try container.decodeIfPresent(String.self, forKey: .time) {
+            time = Self.parse(text)
+        } else {
+            time = nil
+        }
+    }
+
+    private static func parse(_ text: String) -> Date? {
+        fractionalFormatter.date(from: text) ?? plainFormatter.date(from: text)
+    }
+
+    /// 内核 `history[].time` 是 RFC3339（有的版本带毫秒，有的不带）
+    nonisolated(unsafe) private static let fractionalFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    nonisolated(unsafe) private static let plainFormatter = ISO8601DateFormatter()
 }

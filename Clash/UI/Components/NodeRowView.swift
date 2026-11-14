@@ -24,7 +24,7 @@ struct NodeRowView: View {
 
     var body: some View {
         Button(action: action) {
-            rowContent
+            rowLabel
         }
         .buttonStyle(PressableButtonStyle())
         .disabled(!isAvailable)
@@ -45,9 +45,19 @@ struct NodeRowView: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
+    /// 陈旧值 hover 提示「上次测速：N 分钟前」；新鲜值不加多余 tooltip
+    @ViewBuilder
+    private var rowLabel: some View {
+        if let hint = node.staleHint {
+            rowContent.help(hint)
+        } else {
+            rowContent
+        }
+    }
+
     private var rowContent: some View {
         HStack(spacing: Space.s) {
-            LatencyDotView(state: node.delayState)
+            LatencyDotView(state: node.delayState, isStale: node.isStale)
 
             Text(node.name)
                 .font(isSelected ? Typography.title : Typography.body)
@@ -91,13 +101,16 @@ struct NodeRowView: View {
 
     private var accessibilityValue: String {
         if isTesting { return "测速中" }
+
+        let staleNote = node.isStale ? "（\(node.staleHint ?? "上次测速")）" : ""
+        let selectedNote = isSelected ? "，已选中" : ""
         switch node.delayState {
         case let .ok(latency):
-            return isSelected ? "延迟 \(latency) 毫秒，已选中" : "延迟 \(latency) 毫秒"
+            return "延迟 \(latency) 毫秒\(staleNote)\(selectedNote)"
         case .timeout:
-            return isSelected ? "超时，已选中" : "超时"
+            return "超时\(staleNote)\(selectedNote)"
         case .unknown:
-            return isSelected ? "未测速，已选中" : "未测速"
+            return "未测速\(selectedNote)"
         }
     }
 }

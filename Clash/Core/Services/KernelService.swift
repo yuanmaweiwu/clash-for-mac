@@ -186,7 +186,8 @@ final class KernelService {
             controllerPort: ports[0],
             dnsPort: ports[1],
             secret: RuntimeConfigBuilder.makeSecret(),
-            logLevel: settings.logLevel.cliValue
+            logLevel: settings.logLevel.cliValue,
+            mode: settings.mode
         )
         let runtimeURL = try await RuntimeConfigBuilder.build(from: profileURL, injected: injected)
         Self.logger.notice("使用配置 profile=\(ProfileLocator.displayName(for: profileURL), privacy: .public)")

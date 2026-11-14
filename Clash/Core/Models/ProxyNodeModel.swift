@@ -30,6 +30,10 @@ struct ProxyNodeModel: Identifiable, Sendable, Equatable {
     var delayState: ProxyDelayState
     /// 内核 `alive`；拿不到时按可用处理（否则整组都点不动）
     var isAvailable: Bool
+    /// 延迟来自本地缓存（内核本次启动没带 `history`）：显示加 `~`，不当作新鲜值染色
+    var isStale: Bool = false
+    /// 该延迟的测速时间（新鲜值与缓存值都有；只有缓存值会展示成「上次测速」）
+    var lastTestedAt: Date? = nil
 
     var id: String { name }
 
@@ -38,9 +42,22 @@ struct ProxyNodeModel: Identifiable, Sendable, Equatable {
 
     var latencyText: String {
         switch delayState {
-        case let .ok(delay): return "\(delay) ms"
+        case let .ok(delay): return isStale ? "~\(delay) ms" : "\(delay) ms"
         case .timeout: return "超时"
         case .unknown: return "—"
         }
+    }
+
+    /// hover 提示：陈旧值告诉用户这是多久以前的测速结果
+    var staleHint: String? {
+        guard isStale else { return nil }
+        guard let lastTestedAt else { return "上次测速：时间未知" }
+
+        let minutes = Int(max(0, Date().timeIntervalSince(lastTestedAt)) / 60)
+        if minutes < 1 { return "上次测速：刚刚" }
+        if minutes < 60 { return "上次测速：\(minutes) 分钟前" }
+        let hours = minutes / 60
+        if hours < 24 { return "上次测速：\(hours) 小时前" }
+        return "上次测速：\(hours / 24) 天前"
     }
 }

@@ -53,6 +53,8 @@ final class ProfileStore {
     @ObservationIgnored private let now: () -> Date
     /// 订阅 UA 的唯一来源（ADR-0006）；nil 时退回默认 `mihomo/<内核版本>`
     @ObservationIgnored private let settings: SettingsStore?
+    /// 删订阅时同步清掉该 profile 的延迟缓存；nil（自检 / 预览临时库）不碰真实缓存文件
+    @ObservationIgnored private let latencyCache: LatencyCache?
 
     private static let logger = Logger(subsystem: "com.clash.app", category: "profiles")
     private static let defaultAutoUpdateHours = 24
@@ -63,18 +65,21 @@ final class ProfileStore {
     ///   - directory: `profiles/` 目录（自检 harness 用临时目录）
     ///   - now: 注入时钟，测试可固定时间
     ///   - settings: 设置来源；设置里的 UA 非空时作为首选（仍保留 422 换 UA 重试）
+    ///   - latencyCache: 生产路径传 `LatencyCache.shared`；自检 / 预览的临时库传 nil
     ///   - loadsImmediately: false 时保持 `.loading`，由调用方稍后 `reload()`（演示 / 自检延迟加载）
     init(
         directory: URL = AppPaths.profilesDirectory,
         indexURL: URL? = nil,
         now: @escaping () -> Date = Date.init,
         settings: SettingsStore? = nil,
+        latencyCache: LatencyCache? = nil,
         loadsImmediately: Bool = true
     ) {
         self.directory = directory
         self.indexURL = indexURL ?? directory.appending(path: "index.json")
         self.now = now
         self.settings = settings
+        self.latencyCache = latencyCache
         if loadsImmediately { reload() }
     }
 
@@ -316,6 +321,8 @@ final class ProfileStore {
         activeProfileID = nil
         loadState = .ready
         lastError = nil
+        // 数据目录已被整体删除：只清内存，不再写回 latency-cache.json
+        latencyCache?.discardAll()
     }
 
     // MARK: - 切换 / 重命名 / 删除
@@ -365,6 +372,8 @@ final class ProfileStore {
         }
 
         entries.remove(at: index)
+        // 缓存按 profile 分桶：订阅没了，这桶数据也必须立刻从 latency-cache.json 消失
+        latencyCache?.removeProfile(id)
 
         var change: ProfileActivationChange = .none
         if wasActive {

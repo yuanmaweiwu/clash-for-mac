@@ -94,6 +94,11 @@ enum AppPaths {
         supportDirectory.appending(path: "systemproxy-snapshot.json")
     }
 
+    /// 节点延迟缓存（内核 `history` 是内存态，退出后靠这里恢复）
+    static var latencyCacheURL: URL {
+        supportDirectory.appending(path: "latency-cache.json")
+    }
+
     /// 当前启动使用的 runtime 配置（无 profile 时的最小可用配置）
     static var runtimeConfigURL: URL {
         runtimeDirectory.appending(path: "runtime.yaml")

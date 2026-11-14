@@ -2,7 +2,7 @@
 import Foundation
 
 /// 代理模式分段（§4.3）
-enum ProxyMode: String, CaseIterable, Identifiable, Sendable {
+enum ProxyMode: String, CaseIterable, Codable, Identifiable, Sendable {
     case rule
     case global
     case direct

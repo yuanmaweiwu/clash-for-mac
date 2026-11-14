@@ -71,8 +71,9 @@ final class PanelPreviewModel {
         }
     }
 
-    /// 内核当前模式（`GET /configs` 为准）
-    var mode: ProxyMode { proxies.mode }
+    /// 内核当前模式（`GET /configs` 为准）；内核还没拉到数据时先显示设置里持久化的值，
+    /// 避免重启瞬间面板从「全局」闪回「规则」。
+    var mode: ProxyMode { proxies.hasLoaded ? proxies.mode : settings.mode }
 
     /// 失败文案：TUN / 代理操作失败优先，其次内核启动失败
     var errorMessage: String? { tun.bannerMessage ?? connectionError ?? kernel.lastError?.userMessage }
@@ -188,17 +189,25 @@ final class PanelPreviewModel {
         // 设置只允许一份实例：内核注入端口 / 模型读端口 / 设置窗口写端口必须是同一个对象
         let resolvedSettings = settings ?? kernel?.settings ?? SettingsStore()
         let resolvedKernel = kernel ?? KernelService(settings: resolvedSettings)
+        let resolvedProfileStore = profileStore ?? ProfileStore(
+            settings: resolvedSettings,
+            latencyCache: .shared
+        )
 
         self.settings = resolvedSettings
         self.kernel = resolvedKernel
-        self.profiles = profileStore ?? ProfileStore(settings: resolvedSettings)
+        self.profiles = resolvedProfileStore
         self.systemProxy = systemProxy
         self.tun = tun ?? TunService(
             settings: resolvedSettings,
             systemProxy: systemProxy,
             kernel: resolvedKernel
         )
-        self.proxies = ProxyService(kernel: resolvedKernel)
+        self.proxies = ProxyService(
+            kernel: resolvedKernel,
+            profileStore: resolvedProfileStore,
+            latencyCache: .shared
+        )
         self.traffic = TrafficService(kernel: resolvedKernel)
         self.connections = ConnectionService(kernel: resolvedKernel)
         self.logStore = LogStore(kernel: resolvedKernel)
@@ -717,8 +726,10 @@ final class PanelPreviewModel {
         }
 
         // 4. 删目录：整个 App 数据根（settings.json / profiles / runtime / kernel / logs / 快照）
-        //    文本设置可能还有 300ms 合并写在路上：先落盘，否则删完目录它会把 settings.json 写回来
+        //    文本设置可能还有 300ms 合并写在路上：先落盘，否则删完目录它会把 settings.json 写回来；
+        //    延迟缓存同理（1s 合并写），先 flush 掉在途任务，避免删完目录又被它重建
         settings.flushPendingWrite()
+        LatencyCache.shared.flush()
         let fileManager = FileManager.default
         let targets: [(String, URL)] = [
             ("应用数据", AppPaths.supportDirectory),
@@ -755,12 +766,15 @@ final class PanelPreviewModel {
 
     // MARK: - 代理模式
 
-    /// 分段点击 → `PATCH /configs`；失败由 service 回滚
+    /// 分段点击 → `PATCH /configs`；成功后写入设置（内核重启时用来重建 runtime），失败由 service 回滚
     func selectMode(_ newMode: ProxyMode) {
         guard proxies.mode != newMode else { return }
         modeTask?.cancel()
         modeTask = Task { [weak self] in
-            await self?.proxies.setMode(newMode)
+            guard let self else { return }
+            await self.proxies.setMode(newMode)
+            guard !Task.isCancelled, self.proxies.mode == newMode else { return }
+            self.settings.mode = newMode
         }
     }
 

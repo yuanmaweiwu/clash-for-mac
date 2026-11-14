@@ -59,13 +59,15 @@ final class SettingsStore {
         var kernelDownloadMode: KernelDownloadMode = .automatic
         /// 仅 `.custom` 使用：前缀 + 原始 GitHub URL 原样拼接
         var customMirrorPrefix: String = ""
+        /// 代理模式：`PATCH /configs` 只改内核运行时，重建 runtime 必须靠它恢复
+        var mode: ProxyMode = .rule
 
         init() {}
 
         private enum CodingKeys: String, CodingKey {
             case mixedPort, allowLAN, keepKernelOnProxyOff, subscriptionUserAgent
             case autoUpdateHours, logLevel, launchAtLogin
-            case kernelDownloadMode, customMirrorPrefix
+            case kernelDownloadMode, customMirrorPrefix, mode
         }
 
         init(from decoder: Decoder) throws {
@@ -87,6 +89,7 @@ final class SettingsStore {
             ) ?? defaults.kernelDownloadMode
             customMirrorPrefix = try container.decodeIfPresent(String.self, forKey: .customMirrorPrefix)
                 ?? defaults.customMirrorPrefix
+            mode = try container.decodeIfPresent(ProxyMode.self, forKey: .mode) ?? defaults.mode
         }
     }
 
@@ -101,6 +104,7 @@ final class SettingsStore {
     var launchAtLogin: Bool { didSet { persistIfReady() } }
     var kernelDownloadMode: KernelDownloadMode { didSet { persistIfReady() } }
     var customMirrorPrefix: String { didSet { persistTextIfReady() } }
+    var mode: ProxyMode { didSet { persistIfReady() } }
 
     /// 最近一次写盘失败的原因（UI 提示用；写成功后清空）
     private(set) var lastError: String?
@@ -132,6 +136,7 @@ final class SettingsStore {
         self.launchAtLogin = defaults.launchAtLogin
         self.kernelDownloadMode = defaults.kernelDownloadMode
         self.customMirrorPrefix = defaults.customMirrorPrefix
+        self.mode = defaults.mode
 
         load()
         isReady = true
@@ -157,6 +162,7 @@ final class SettingsStore {
         snapshot.launchAtLogin = launchAtLogin
         snapshot.kernelDownloadMode = kernelDownloadMode
         snapshot.customMirrorPrefix = customMirrorPrefix
+        snapshot.mode = mode
         return snapshot
     }
 
@@ -196,6 +202,7 @@ final class SettingsStore {
         launchAtLogin = decoded.launchAtLogin
         kernelDownloadMode = decoded.kernelDownloadMode
         customMirrorPrefix = decoded.customMirrorPrefix.trimmingCharacters(in: .whitespacesAndNewlines)
+        mode = decoded.mode
     }
 
     /// 损坏兜底：留证据（`settings.corrupt-*.json`）→ 回默认值 → 重写干净文件

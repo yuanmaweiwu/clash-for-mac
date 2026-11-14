@@ -436,6 +436,7 @@ final class TunService {
             dnsPort: ports[1],
             secret: secret,
             logLevel: settings.logLevel.cliValue,
+            mode: settings.mode,
             tunEnabled: true,
             tunStack: .gvisor
         )

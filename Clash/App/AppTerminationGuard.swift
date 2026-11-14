@@ -165,8 +165,9 @@ final class AppTerminationGuard {
         guard !alreadyStarted else { return }
 
         let began = Date()
-        // 文本设置是 300ms 合并写：退出前把最后一段输入落盘
+        // 文本设置是 300ms 合并写、延迟缓存是 1s 合并写：退出前都落盘
         settings.flushPendingWrite()
+        LatencyCache.shared.flush()
         systemProxy.disableSynchronouslyForTermination()
 
         // helper 是 launchd 常驻，不会随 App 退出；TUN 的内核还在就会一直接管流量，
