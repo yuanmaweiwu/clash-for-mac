@@ -104,7 +104,8 @@ final class TunService {
     private static let logger = Logger(subsystem: "com.clash.app", category: "tun")
     /// 等 `/version` 就绪的预算（与 `KernelService` 一致）
     private static let readinessTimeout: Duration = .seconds(8)
-    private static let readinessPollInterval: Duration = .milliseconds(100)
+    /// 就绪轮询粒度：内核通常 300–800ms 起来，100ms 粒度会白等最多 100ms；50ms 更贴合
+    private static let readinessPollInterval: Duration = .milliseconds(50)
     /// 「等待授权」的预算：超时后放弃等待（osascript 不会被我们打断，见 `awaitInstallOutcome`）
     static let authorizationTimeout: Duration = .seconds(180)
 
@@ -446,9 +447,12 @@ final class TunService {
             Self.logger.notice("上一个 TUN 内核已停止 pid=\(existingPID, privacy: .public)")
         }
 
-        // 3. 别家 TUN / VPN 已在接管流量：不抢路由，直接给可执行建议
+        // 3. 别家 TUN / VPN 已在接管流量：不抢路由，直接给可执行建议。
+        //    基线（关闭 TUN 后判断路由 / DNS 是否复原）与冲突检测并发：两者互不依赖，
+        //    且都必须发生在 spawn 之前（抓的是「TUN 之前的网络状态」）。
+        let baselineTask = Task { await SystemNetworkProbe.capture() }
         let conflictStart = LatencyTrace.shared.begin()
-        let conflict = await TunConflictDetector.detect()
+        let conflict = await TunConflictDetector.detect(baseline: { await baselineTask.value })
         LatencyTrace.shared.record("conflict", from: conflictStart)
         if let conflict {
             Self.logger.error("TUN 冲突：\(conflict.summary, privacy: .public)")
@@ -539,8 +543,8 @@ final class TunService {
             return
         }
 
-        // 7. 抓基线：关闭时用它判断路由 / DNS 是否复原
-        baseline = await SystemNetworkProbe.capture()
+        // 7. 基线：第 3 步就已经并发开始抓（关闭时用它判断路由 / DNS 是否复原）
+        baseline = await baselineTask.value
 
         // AUDIT: 真机诊断——送进去的端点是否与实际监听一致
         Self.logger.notice("AUDIT 准备 spawn 配置=\(yaml.utf8.count)bytes controller=127.0.0.1:\(ports[0]) dns=:\(ports[1]) mixed=\(mixedPort) secretLen=\(secret.count)")
@@ -592,12 +596,13 @@ final class TunService {
         Self.logger.notice("TUN 已开启 controller=127.0.0.1:\(ports[0]) version=\(version, privacy: .public)")
     }
 
-    /// 等 mixed-port 真正释放：刚停掉本地内核时，进程退出 / TIME_WAIT 会让第一次探测失败
+    /// 等 mixed-port 真正释放：刚停掉本地内核时，进程退出 / TIME_WAIT 会让第一次探测失败。
+    /// 先立即探一次（端口本来就空=零等待），再 50ms 粒度轮询，总预算仍是 ~1.8s。
     private func waitForPortRelease(_ port: Int) async -> Bool {
-        // 10 次探测、9 次间隔：最后一探之后不再白等 200ms
-        for _ in 0..<9 {
+        if PortAllocator.isAvailable(port: port) { return true }
+        for _ in 0..<35 {
+            try? await Task.sleep(for: .milliseconds(50))
             if PortAllocator.isAvailable(port: port) { return true }
-            try? await Task.sleep(for: .milliseconds(200))
         }
         return PortAllocator.isAvailable(port: port)
     }

@@ -37,6 +37,8 @@ enum LatencyBenchHarness {
                 failures += await runProxy(port: settings.mixedPort)
             } else if mode == "tun" {
                 failures += await runTun(tun: tun, kernel: kernel)
+            } else if mode == "tun-parts" {
+                failures += await runTunParts(settings: settings)
             } else if mode == "helper" {
                 failures += runHelperScript()
             } else {
@@ -196,6 +198,64 @@ enum LatencyBenchHarness {
         return false
     }
 
+    // MARK: - TUN 分阶段（不需要 helper 的部分）
+
+    /// TUN 开不起来（helper 缺 geodata）时，至少把「冲突检测 + 基线采集 + 生成配置」测准：
+    /// 这三段是每次开 TUN 都要跑的固定开销，且不依赖 root helper。
+    private static func runTunParts(settings: SettingsStore) async -> Int {
+        let profile = ProfileLocator.locate()
+        var serial: [Double] = []
+        var concurrent: [Double] = []
+        var conflict: [Double] = []
+        var baseline: [Double] = []
+        var build: [Double] = []
+
+        for _ in 0..<3 {
+            // 优化前：冲突检测（内部自己抓一次基线）→ 再抓一次基线，串行
+            var began = ContinuousClock.now
+            _ = await TunConflictDetector.detect()
+            let conflictMs = msValue(ContinuousClock.now - began)
+            began = ContinuousClock.now
+            _ = await SystemNetworkProbe.capture()
+            let baselineMs = msValue(ContinuousClock.now - began)
+            conflict.append(conflictMs)
+            baseline.append(baselineMs)
+            serial.append(conflictMs + baselineMs)
+
+            // 优化后：基线并发开始抓，冲突检测复用同一份（不再重复跑 route / netstat）
+            began = ContinuousClock.now
+            let baselineTask = Task { await SystemNetworkProbe.capture() }
+            _ = await TunConflictDetector.detect(baseline: { await baselineTask.value })
+            let baselineValue = await baselineTask.value
+            concurrent.append(msValue(ContinuousClock.now - began))
+
+            let injected = RuntimeConfigBuilder.Injected(
+                mixedPort: settings.mixedPort,
+                allowLAN: false,
+                controllerPort: 19090,
+                dnsPort: 15353,
+                secret: "bench-secret",
+                logLevel: "info",
+                mode: .rule,
+                tunEnabled: true,
+                tunStack: .gvisor
+            )
+            began = ContinuousClock.now
+            _ = try? await RuntimeConfigBuilder.yaml(from: profile, injected: injected)
+            build.append(msValue(ContinuousClock.now - began))
+            _ = baselineValue
+        }
+
+        print("BENCH tun-parts conflict=\(median(conflict)) baseline=\(median(baseline))"
+            + " serial=\(median(serial)) concurrent=\(median(concurrent)) buildYaml=\(median(build))")
+        return 0
+    }
+
+    private static func median(_ values: [Double]) -> String {
+        guard !values.isEmpty else { return "0.0" }
+        return String(format: "%.1f", values.sorted()[values.count / 2])
+    }
+
     // MARK: - 组件安装脚本
 
     /// 只测不弹密码的部分：装好前置检查里能测的耗时 + 脚本生成。
@@ -216,10 +276,14 @@ enum LatencyBenchHarness {
 
     // MARK: - 格式化
 
-    private static func ms(_ duration: Duration) -> String {
+    private static func msValue(_ duration: Duration) -> Double {
         let seconds = Double(duration.components.seconds)
             + Double(duration.components.attoseconds) / 1_000_000_000_000_000_000
-        return String(format: "%.1f", seconds * 1000)
+        return seconds * 1000
+    }
+
+    private static func ms(_ duration: Duration) -> String {
+        String(format: "%.1f", msValue(duration))
     }
 }
 #endif

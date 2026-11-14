@@ -54,11 +54,19 @@ enum SystemNetworkProbe {
     /// 只读命令正常 <100ms；给 3s 上限，进程卡住时杀掉，避免整个 App 挂死
     private static let commandTimeout: TimeInterval = 3
 
-    /// UI 路径（开 / 关 TUN）：三个只读命令在后台跑，主线程只拿结果做对比。
+    /// UI 路径（开 / 关 TUN）：三个只读命令**并发**跑，主线程只拿结果做对比。
+    /// （串行时 3 条命令 ≈ 30ms，并发后 ≈ 10ms；冲突检测还要再抓一次，合并起来更划算）
     static func capture() async -> SystemNetworkSnapshot {
-        await Task.detached(priority: .userInitiated) {
-            captureSynchronously()
-        }.value
+        async let route = Task.detached(priority: .userInitiated) { defaultRoute() }.value
+        async let servers = Task.detached(priority: .userInitiated) { nameServers() }.value
+        async let routes = Task.detached(priority: .userInitiated) { tunnelRoutes() }.value
+        let (defaultInfo, dns, tunnels) = await (route, servers, routes)
+        return SystemNetworkSnapshot(
+            defaultInterface: defaultInfo.interface,
+            defaultGateway: defaultInfo.gateway,
+            nameServers: dns,
+            tunnelRoutes: tunnels
+        )
     }
 
     /// **同步版本只给退出路径**（`willTerminate` / 信号处理）：那里无法 `await`，

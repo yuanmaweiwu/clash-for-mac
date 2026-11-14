@@ -30,13 +30,24 @@ enum TunConflictDetector {
     private static let logger = Logger(subsystem: "com.clash.app", category: "tun")
     private static let ifconfigPath = "/sbin/ifconfig"
 
-    static func detect() async -> TunConflict? {
-        let snapshot = await SystemNetworkProbe.capture()
+    /// - Parameter baseline: 复用的网络基线（TUN 开启流程已并发抓过一份，避免重复跑
+    ///   `route` / `netstat`）。`nil` 时自己抓。
+    static func detect(baseline: (@Sendable () async -> SystemNetworkSnapshot)? = nil) async -> TunConflict? {
+        // 两件事互不依赖：`ifconfig -a` 与基线快照并发跑
+        async let tunnels = activeTunnels()
+        let snapshot: SystemNetworkSnapshot
+        if let baseline {
+            snapshot = await baseline()
+        } else {
+            snapshot = await SystemNetworkProbe.capture()
+        }
+        let active = await tunnels
+
         if let interface = snapshot.defaultInterface, interface.hasPrefix("utun") {
             return TunConflict(interface: interface, summary: "默认路由已指向 \(interface)")
         }
 
-        if let tunnel = await activeTunnels().first {
+        if let tunnel = active.first {
             return TunConflict(interface: tunnel.interface, summary: "\(tunnel.interface) 已配置 \(tunnel.address)")
         }
         return nil
