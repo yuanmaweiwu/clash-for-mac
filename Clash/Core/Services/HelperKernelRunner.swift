@@ -74,14 +74,24 @@ final class HelperKernelRunner: KernelRunner {
 
     // MARK: - 停止
 
+    /// 协议门面：失败只记日志（`KernelRunner.stop()` 无 throws）。
+    /// 需要「确认退出」语义的调用方（`TunService`）必须用 `stopThrowing()`。
     func stop() async {
         do {
-            try await client.stopKernel()
-            running = false
+            try await stopThrowing()
         } catch {
             // 停不下来时保守地标记仍在运行：宁可让上层以为「还开着」也不要谎报已停
             Self.logger.error("停止 TUN 内核失败：\(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    /// 停止并要求 helper **确认退出**；失败抛错且 `running` 保持 true。
+    ///
+    /// 为什么单独开一个方法：XPC 停失败时 root 内核仍在接管流量，此时若上层把状态
+    /// 置成「已关闭」，用户会以为 TUN 关了但实际流量还被劫持（P0）。
+    func stopThrowing() async throws {
+        try await client.stopKernel()
+        running = false
         lastExitCode = nil
     }
 

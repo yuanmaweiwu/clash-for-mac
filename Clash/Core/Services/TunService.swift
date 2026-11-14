@@ -494,8 +494,7 @@ final class TunService {
             _ = try await runner.start(configData: Data(yaml.utf8))
             hasHelperKernel = true
         } catch {
-            await runner.stop()
-            hasHelperKernel = false
+            guard await stopHelperKernel(runner) else { return }
             fail(.startup(Self.describe(error)))
             return
         }
@@ -506,9 +505,9 @@ final class TunService {
             version = try await waitUntilReady(port: ports[0], secret: secret)
         } catch {
             Self.logger.notice("AUDIT 就绪失败，准备 stop runner")
-            await runner.stop()
-            hasHelperKernel = false
-            Self.logger.notice("AUDIT stop runner 返回")
+            // 停不掉就不能继续往下走：先确认退出，再决定 banner 说什么
+            guard await stopHelperKernel(runner) else { return }
+            Self.logger.notice("AUDIT stop runner 已确认退出")
             // root 的 kernel.log 是 0600，用户读不到：把最可能的真实原因（geodata 缺失导致
             // 内核在等在线下载）写进 banner，而不是只留一句「未就绪」
             let geodataHint = await Self.geodataTimeoutHint(profileURL: profileURL)
@@ -588,18 +587,8 @@ final class TunService {
         guard isOn || isHelperKernelRunning else { return }
 
         phase = .stopping
-        do {
-            try await client.stopKernel()
-        } catch {
-            // 停不掉就不能假装关掉：TUN 还在接管流量，保留端点让面板说实话
-            let reason = "无法停止 TUN 内核（\(Self.describe(error))），请重试"
-            phase = .failed(.startup(reason))
-            failureMessage = "TUN 未关闭：\(reason)"
-            return
-        }
-
-        hasHelperKernel = false
-        kernel.releaseExternalKernel()
+        // 只有「确认退出」才允许继续往下走（含置 off / 释放端点）
+        guard await stopHelperKernel(HelperKernelRunner(client: client)) else { return }
 
         if let baseline {
             let differences = await SystemNetworkProbe.capture().differences(from: baseline)
@@ -624,14 +613,45 @@ final class TunService {
     private func fail(_ failure: TunFailure) {
         phase = .failed(failure)
         failureMessage = failure.userMessage
-        hasHelperKernel = false
         installPrompt = nil
-        kernel.releaseExternalKernel()
+        // 刻意不动 `hasHelperKernel` / 不 `releaseExternalKernel()`：
+        // 「内核已退出」只能由 `stopHelperKernel` 确认后改写。这里的失败可能发生在
+        // root 内核仍在运行的场景（停止失败 / 就绪超时），无条件置 off 会谎报。
         Self.logger.error("TUN 失败：\(failure.userMessage, privacy: .public)")
 
         // 起不来就回落系统代理模式：本地内核拉回来，用户还能继续用面板
         Task { [weak self] in
             await self?.restartLocalKernelIfNeeded()
+        }
+    }
+
+    /// 停 helper 内核并要求 helper **确认退出**；返回是否确认已退出。
+    ///
+    /// 停不掉时以 helper 的真实状态（`kernelState()`）为准：还活着就保留 `.failed` +
+    /// 「内核可能仍在运行」，绝不显示「未启用」。
+    @discardableResult
+    private func stopHelperKernel(_ runner: HelperKernelRunner) async -> Bool {
+        do {
+            try await runner.stopThrowing()
+            hasHelperKernel = false
+            kernel.releaseExternalKernel()
+            return true
+        } catch {
+            let stillRunning = (try? await client.kernelState()) ?? nil
+            if let stillRunning {
+                // 内核还在跑：TUN 没关掉，流量仍被接管。保留端点，让面板说实话。
+                hasHelperKernel = true
+                let reason = "内核可能仍在运行（pid=\(stillRunning)）：TUN 未真正关闭，请再点一次 TUN 或重启 App"
+                phase = .failed(.startup(reason))
+                failureMessage = reason
+                Self.logger.error("无法停止 TUN 内核 pid=\(stillRunning, privacy: .public)：\(error.localizedDescription, privacy: .public)")
+                return false
+            }
+            // helper 说没有内核：视为已退出
+            hasHelperKernel = false
+            kernel.releaseExternalKernel()
+            Self.logger.notice("stopKernel 报错但 helper 侧已无内核，按已关闭处理：\(error.localizedDescription, privacy: .public)")
+            return true
         }
     }
 
