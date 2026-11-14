@@ -66,6 +66,8 @@ struct GroupCardView: View {
                 Text(group.name)
                     .font(Typography.title)
                     .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
 
                 Spacer(minLength: Space.s)
 
