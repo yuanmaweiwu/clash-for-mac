@@ -704,7 +704,6 @@ struct SettingsPanelView: View {
             Text(title)
                 .font(Typography.section)
                 .foregroundStyle(Theme.textSecondary)
-                .padding(.leading, Space.xs)
 
             VStack(alignment: .leading, spacing: 0) {
                 content()
