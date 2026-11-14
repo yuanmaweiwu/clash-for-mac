@@ -113,7 +113,7 @@ struct SubscriptionTileView: View {
             .padding(.horizontal, Space.xs)
             .frame(minWidth: 16, minHeight: 14)
             .background {
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                RoundedRectangle(cornerRadius: Metrics.radiusControl, style: .continuous)
                     .fill(Theme.track)
             }
             .accessibilityHidden(true)
