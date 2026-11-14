@@ -222,6 +222,8 @@ enum Metrics {
     // 规则列表（§4.11）：行高比二级列表 48 更紧，一屏多露几条
     static let ruleRowHeight: CGFloat = 40
     static let ruleBadgeHeight: CGFloat = 18
+    /// 类型徽标定宽列：payload 左缘对齐（104 容得下最长的 `DOMAIN-KEYWORD`）
+    static let ruleBadgeColumnWidth: CGFloat = 104
     /// 行尾策略名上限：超出尾部截断，把宽度让给 payload（中间截断）
     static let ruleTargetMaxWidth: CGFloat = 104
 

@@ -49,6 +49,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 等内核就绪再展开：截图要的是正常态，不是启动瞬间的「内核未运行」。
     private func openPanelForCaptureIfRequested() {
         guard let route = ProcessInfo.processInfo.environment["CLASH_PANEL_ROUTE"] else { return }
+        // `CLASH_PANEL_APPEARANCE=dark|light`：只改本进程外观，不动系统设置
+        if let appearance = ProcessInfo.processInfo.environment["CLASH_PANEL_APPEARANCE"] {
+            NSApp.appearance = NSAppearance(named: appearance == "dark" ? .darkAqua : .aqua)
+        }
         Task { @MainActor in
             let environment = AppEnvironment.shared
             for _ in 0..<60 where environment.model.phase != .running {
