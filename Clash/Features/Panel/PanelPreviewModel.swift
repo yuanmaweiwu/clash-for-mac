@@ -123,10 +123,11 @@ final class PanelPreviewModel {
 
     /// 面板显隐（唯一入口 `PanelWindowController`）：收起时流量不再发布给 UI，
     /// 避免隐藏窗口跟着每秒采样离屏重绘（GPU 表面会被一直占着）。
-    /// 显示时顺手检查网络检测：超过 60s 没测过就自动测一轮（§3.2）。
+    ///
+    /// 网络检测**不在这里触发**：四个磁贴只在用户点刷新时才重测，打开面板显示上次结果
+    /// （同一进程内的 `NetworkProbeService` 缓存），没测过就是 `—`。
     func setPanelVisible(_ visible: Bool) {
         traffic.setPanelVisible(visible)
-        if visible { networkProbes.testIfStale() }
     }
 
     // MARK: 连接列表（`/connections`）

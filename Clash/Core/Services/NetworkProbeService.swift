@@ -53,11 +53,8 @@ final class NetworkProbeService {
 
     /// 请求超时（§3.2：5s）；探测在非隔离上下文跑，这里必须 `nonisolated`
     nonisolated static let timeout: TimeInterval = 5
-    /// 自动重测的陈旧阈值：面板每次显示时超过 60s 未测就测一次
-    nonisolated static let staleInterval: TimeInterval = 60
-
     private(set) var states: [Target: State]
-    /// 上一次跑完整轮的时间；`nil` = 本次运行还没测过
+    /// 上一次跑完整轮的时间；`nil` = 本次运行还没测过（面板显示「未测」）
     private(set) var lastTestedAt: Date?
     private(set) var isTesting = false
 
@@ -71,18 +68,8 @@ final class NetworkProbeService {
         states[target] ?? .idle
     }
 
-    /// 面板显示时调用：超过 60s 未测（或从没测过）就自动测一轮
-    func testIfStale(now: Date = Date()) {
-        guard !isTesting else { return }
-        guard let lastTestedAt else {
-            testAll()
-            return
-        }
-        guard now.timeIntervalSince(lastTestedAt) >= Self.staleInterval else { return }
-        testAll()
-    }
-
-    /// 并发测四个目标；已在测时忽略（防连点叠出多轮、结果互相覆盖）
+    /// 并发测四个目标；**只由用户点磁贴 / 刷新触发**（打开面板、面板重新显示都不自动测）。
+    /// 已在测时忽略（防连点叠出多轮、结果互相覆盖）
     func testAll() {
         guard !isTesting else { return }
         isTesting = true
