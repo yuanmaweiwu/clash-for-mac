@@ -21,6 +21,9 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
     private static let screenInset: CGFloat = 8
     /// 同一次点击里「失焦关闭」与「按钮 action」的先后判定窗口
     private static let resignCoalesceInterval: TimeInterval = 0.3
+    /// `show` 上屏后这段时间内的失焦一律不算「用户点了别处」：
+    /// 点状态栏图标收尾时 AppKit 会把 key 交还状态栏窗口，面板刚上屏就会被收走
+    private static let resignGraceInterval: TimeInterval = 0.5
 
     private let panel: PanelWindow
     /// SwiftUI 树第一次上屏时才建（见 `ensureContentView`）：挂上 `NSHostingView`
@@ -32,12 +35,27 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
     var onVisibilityChange: ((Bool) -> Void)?
     /// 最近一次失焦关闭的时间
     private var lastResignAt = Date.distantPast
+    /// 这次失焦是「点状态栏图标」导致的：一次点击里 `resignKey` 先于按钮 action，
+    /// action 到时面板已经收了，要按「关」处理而不是又开一次
+    private var pendingResignClose = false
+    /// `show` 上屏那一刻
+    private var shownAt = Date.distantPast
+    /// `show` 还没返回（判断失焦是不是与 show 同一轮）
+    private var isShowing = false
+    /// 上屏后补 key 的次数（每次 `show` 重置）
+    private var keyReassertCount = 0
+    /// 状态栏图标当前是否含鼠标（判断这次失焦是不是点图标造成的）
+    var isMouseOverStatusItem: (() -> Bool)?
 
+    /// 面板事实上的可见性：只认窗口自己
     var isVisible: Bool { panel.isVisible }
 
-    /// 面板刚因为这次点击失焦关掉（点状态栏图标时 `resignKey` 会先于按钮 action）
-    var isVisibleRecently: Bool {
-        Date().timeIntervalSince(lastResignAt) < Self.resignCoalesceInterval
+    /// 消费一次「刚被这次点击失焦关掉」。一次性：判过即清，
+    /// 旧的一次失焦不会把后面每一次点击都吞掉
+    func consumeResignClose() -> Bool {
+        guard pendingResignClose else { return false }
+        pendingResignClose = false
+        return Date().timeIntervalSince(lastResignAt) < Self.resignCoalesceInterval
     }
 
     init(model: PanelPreviewModel) {
@@ -105,6 +123,11 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
     func show(relativeTo button: NSStatusBarButton?) {
         // 锚点取不到时不要静默 return：⌘, / 菜单唤起时若按钮还没进窗口，
         // 面板会"消失"或落到别处。这里退回屏幕右上角，保证位置可预期。
+        isShowing = true
+        defer {
+            isShowing = false
+            shownAt = Date()
+        }
         ensureContentView()
         let size = contentSize()
         let screen = button?.window?.screen ?? NSScreen.main
@@ -131,27 +154,61 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
             origin.y = max(origin.y, visible.minY + Self.screenInset)
         }
 
-        Self.logger.notice("面板定位 x=\(origin.x, privacy: .public) y=\(origin.y, privacy: .public) 尺寸=\(size.width, privacy: .public)×\(size.height, privacy: .public) 屏幕=\(screen?.localizedName ?? "nil", privacy: .public)")
+        Self.logger.notice("面板定位 x=\(origin.x, privacy: .public) y=\(origin.y, privacy: .public) 尺寸=\(size.width, privacy: .public)×\(size.height, privacy: .public) 屏幕=\(screen?.localizedName ?? "nil", privacy: .public) 锚点=\(button == nil ? "nil" : "有", privacy: .public)")
         // 先把流量缓冲补进模型，再上屏：首帧就是完整波形，不会闪一下「暂无流量」
+        pendingResignClose = false
+        keyReassertCount = 0
         onVisibilityChange?(true)
         // 定位这一下可能有高度变化：先把锚点清掉，落位后再记新的顶边
         panel.topAnchor = nil
         panel.setFrame(NSRect(origin: origin, size: size), display: true)
         panel.topAnchor = origin.y + size.height
         panel.makeKeyAndOrderFront(nil)
+        // `makeKeyAndOrderFront` 在个别状态下（App 未激活 / 有别的 key 窗口）可能只排了队
+        // 却没真正上屏：兜一层 `orderFrontRegardless`，保证左键必定看得见面板
+        if !panel.isVisible {
+            Self.logger.notice("makeKeyAndOrderFront 后窗口仍不可见，改用 orderFrontRegardless")
+            panel.orderFrontRegardless()
+        }
         // 面板刚显示时也补一次：路由可能是在隐藏状态下改的（⌘, / 菜单），
         // 隐着的时候没有绘制周期，内容还停在旧尺寸上
         syncHostingLayout()
+        let frameText = NSStringFromRect(panel.frame)
+        let windowVisible = panel.isVisible
+        let isKey = panel.isKeyWindow
+        Self.logger.notice("面板已上屏 frame=\(frameText, privacy: .public) isVisible=\(windowVisible, privacy: .public) isKey=\(isKey, privacy: .public)")
         #if DEBUG
         printCaptureRegionIfRequested(screen: screen)
         #endif
     }
 
     func hide() {
+        // 只认窗口事实：只要真可见就收起
         guard panel.isVisible else { return }
+        let frameText = NSStringFromRect(panel.frame)
+        Self.logger.notice("面板收起 frame=\(frameText, privacy: .public)")
         panel.orderOut(nil)
         // 下屏之后再清空：清空状态一帧都不用画
         onVisibilityChange?(false)
+    }
+
+    /// 上屏后把 key 抢回来（有次数上限）。
+    ///
+    /// 点状态栏图标时，AppKit 在点击收尾阶段把 key 交还状态栏窗口：面板会随即
+    /// `windowDidResignKey`。这一下不是用户点了别处，但面板若因此丢掉 key，
+    /// 之后「点桌面关闭」就收不到了（已经不是 key，不会再收到失焦）。所以补一次。
+    private func reassertKeyIfNeeded(reason: String) {
+        guard panel.isVisible, !panel.isKeyWindow else { return }
+        guard keyReassertCount < 2 else {
+            Self.logger.notice("补 key 已达上限，面板仍未持有 key（\(reason, privacy: .public)）")
+            return
+        }
+        keyReassertCount += 1
+        let attempt = keyReassertCount
+        Self.logger.notice("面板未持有 key（\(reason, privacy: .public)），第 \(attempt, privacy: .public) 次补 makeKeyAndOrderFront")
+        panel.makeKeyAndOrderFront(nil)
+        let regained = panel.isKeyWindow
+        Self.logger.notice("补 key 结果 isKey=\(regained, privacy: .public)")
     }
 
     private func resizeToFitContent() {
@@ -259,7 +316,34 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
 
     /// 点面板外部（别的 App / 桌面）就收起来
     func windowDidResignKey(_ notification: Notification) {
+        let sinceShown = Date().timeIntervalSince(shownAt)
+        let inShow = isShowing
+        let stillVisible = panel.isVisible
+        let appActive = NSApp.isActive
+        let overIcon = isMouseOverStatusItem?() ?? false
+        let keyWindowName = NSApp.keyWindow.map { String(describing: type(of: $0)) } ?? "nil"
+        Self.logger.notice(
+            "面板失焦：距上屏 \(sinceShown * 1000, format: .fixed(precision: 1), privacy: .public)ms show未返回=\(inShow, privacy: .public) 仍可见=\(stillVisible, privacy: .public) 鼠标在图标=\(overIcon, privacy: .public) App激活=\(appActive, privacy: .public) keyWindow=\(keyWindowName, privacy: .public)"
+        )
+        // `orderOut` 之后 AppKit 还会补一次失焦：那是自己收起的回声，不参与合并
+        guard stillVisible else {
+            pendingResignClose = false
+            return
+        }
+        // 上屏宽限内的失焦是「点状态栏图标收尾」而不是「点了别处」：
+        // 忽略它并补回 key，否则面板刚开就被自己收掉
+        guard !inShow, sinceShown >= Self.resignGraceInterval else {
+            Self.logger.notice("失焦落在上屏宽限内，忽略并补回 key")
+            pendingResignClose = false
+            DispatchQueue.main.async { [weak self] in
+                self?.reassertKeyIfNeeded(reason: "失焦宽限")
+            }
+            return
+        }
         lastResignAt = Date()
+        // 失焦是「点状态栏图标」造成的才记一笔：点桌面 / 别的 App 收起时，
+        // 下一次点图标是要**打开**面板，不能被这次失焦吞掉
+        pendingResignClose = isMouseOverStatusItem?() ?? false
         hide()
     }
 
@@ -275,6 +359,7 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
     /// 面板内容自己 `window.close()`（例如打开日志窗口后）也要恢复按钮普通态
     func windowWillClose(_ notification: Notification) {
         lastResignAt = Date()
+        pendingResignClose = isMouseOverStatusItem?() ?? false
         onVisibilityChange?(false)
     }
 }

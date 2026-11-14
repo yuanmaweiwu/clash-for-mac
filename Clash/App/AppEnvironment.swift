@@ -92,7 +92,10 @@ final class AppEnvironment {
 
     /// 确保面板显示；已显示就不动（不 toggle）
     func showPanel() {
-        guard !panel.isVisible else { return }
+        guard !panel.isVisible else {
+            Self.logger.notice("面板已在锚点上，忽略重复打开")
+            return
+        }
         panel.show(relativeTo: statusItemAnchor?())
     }
 

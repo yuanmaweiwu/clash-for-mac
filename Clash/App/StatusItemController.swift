@@ -33,6 +33,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         // 面板的锚点与显隐入口都在 App 组合根上：⌘, / 菜单项 / 左键共用同一条路径
         AppEnvironment.shared.statusItemAnchor = { [weak self] in self?.statusItem.button }
+        // 失焦时判断是不是点在图标上（同一次点击里 `resignKey` 会先于按钮 action）
+        panel.isMouseOverStatusItem = { [weak self] in
+            guard let self, let button = self.statusItem.button, let window = button.window else {
+                return false
+            }
+            let frame = window.convertToScreen(button.convert(button.bounds, to: nil))
+            return frame.contains(NSEvent.mouseLocation)
+        }
         panel.onVisibilityChange = { [weak self] isVisible in
             // 收起时停止把流量采样发布给 UI（隐藏窗口不重绘），打开时一次补齐
             self?.model.setPanelVisible(isVisible)
@@ -163,12 +171,20 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     private func togglePanel() {
-        if panel.isVisible {
+        let isVisible = panel.isVisible
+        // 先取走「刚被这次点击失焦关掉」的标记：用过即清，不会跨点击累积
+        let justResigned = panel.consumeResignClose()
+        Self.logger.notice(
+            "左键 toggle：面板可见=\(isVisible, privacy: .public) 刚失焦关闭=\(justResigned, privacy: .public)"
+        )
+        if isVisible {
+            Self.logger.notice("左键 toggle → 收起面板")
             panel.hide()
-        } else if panel.isVisibleRecently {
+        } else if justResigned {
             // 这次点击刚把面板弄失焦（点状态栏图标时 `resignKey` 先于按钮 action）→ 按「关」处理
-            Self.logger.debug("状态栏点击与失焦关闭重合，按关闭处理")
+            Self.logger.notice("状态栏点击与失焦关闭重合，按关闭处理")
         } else {
+            Self.logger.notice("左键 toggle → 打开面板")
             AppEnvironment.shared.showPanel()
         }
     }
