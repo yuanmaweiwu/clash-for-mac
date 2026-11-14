@@ -46,6 +46,8 @@ final class PanelPreviewModel {
     @ObservationIgnored let settings: SettingsStore
     /// 规则列表（`GET /rules`，进页面拉一次 + 缓存）
     @ObservationIgnored private let ruleService: RuleService
+    /// 节点测速编排（Task / 提示 / 闪烁）
+    @ObservationIgnored private let speed: SpeedTestController
     /// 网络检测（URLSession 直连四个固定目标，5s 超时）
     @ObservationIgnored private let networkProbes = NetworkProbeService()
 
@@ -104,9 +106,9 @@ final class PanelPreviewModel {
     /// 刚导入成功的那一条：回到订阅列表时短暂高亮，让用户看见结果
     private(set) var recentlyImportedProfileID: String?
     private(set) var subscriptionNotice: String?
-    private(set) var speedNotice: String?
-    /// 测速完成后的「刚刚更新」短暂提示
-    private(set) var speedResultFlash = false
+    /// 测速提示 / 完成闪烁：由 `SpeedTestController` 持有，这里只转发
+    var speedNotice: String? { speed.notice }
+    var speedResultFlash: Bool { speed.resultFlash }
 
     /// 实时速率（字节 / 秒）与 60 点曲线，均来自 `TrafficService`
     var downRate: Double { traffic.down }
@@ -163,9 +165,6 @@ final class PanelPreviewModel {
     @ObservationIgnored private var subscriptionTask: Task<Void, Never>?
     @ObservationIgnored private var importHighlightTask: Task<Void, Never>?
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
-    @ObservationIgnored private var speedTask: Task<Void, Never>?
-    @ObservationIgnored private var speedNoticeTask: Task<Void, Never>?
-    @ObservationIgnored private var speedFlashTask: Task<Void, Never>?
     @ObservationIgnored private var selectionTask: Task<Void, Never>?
     @ObservationIgnored private var modeTask: Task<Void, Never>?
     @ObservationIgnored private var proxyRefreshTask: Task<Void, Never>?
@@ -198,15 +197,17 @@ final class PanelPreviewModel {
             systemProxy: systemProxy,
             kernel: resolvedKernel
         )
-        self.proxies = ProxyService(
+        let resolvedProxies = ProxyService(
             kernel: resolvedKernel,
             profileStore: resolvedProfileStore,
             latencyCache: .shared
         )
+        self.proxies = resolvedProxies
         self.traffic = TrafficService(kernel: resolvedKernel)
         self.connections = ConnectionService(kernel: resolvedKernel)
         self.logStore = LogStore(kernel: resolvedKernel)
         self.ruleService = RuleService(kernel: resolvedKernel)
+        self.speed = SpeedTestController(proxies: resolvedProxies)
         self.connectionState = systemProxy.isEnabled ? .on : .off
 
         // 内核一就绪就拉真实策略组；停止 / 失败即清空
@@ -1120,49 +1121,11 @@ final class PanelPreviewModel {
 
     // MARK: - 节点测速（真实 `/group/{name}/delay`）
 
-    func isSpeedTesting(_ groupID: String) -> Bool { proxies.testingGroup == groupID }
+    func isSpeedTesting(_ groupID: String) -> Bool { speed.isTesting(groupID) }
 
     func testAllNodes(in groupID: String) {
-        guard proxies.testingGroup == nil else { return }
         guard let group = groups.first(where: { $0.id == groupID }) else { return }
-
-        guard !group.nodes.isEmpty else {
-            showSpeedNotice("没有可测速的节点")
-            return
-        }
-
-        speedTask?.cancel()
-        speedTask = Task { [weak self] in
-            guard let self else { return }
-            await self.proxies.testAll(group: groupID)
-            guard !Task.isCancelled else { return }
-
-            if let error = self.proxies.lastError {
-                self.showSpeedNotice(error)
-            } else {
-                self.flashSpeedResult()
-            }
-        }
-    }
-
-    private func flashSpeedResult() {
-        speedResultFlash = true
-        speedFlashTask?.cancel()
-        speedFlashTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(1.5))
-            guard let self, !Task.isCancelled else { return }
-            self.speedResultFlash = false
-        }
-    }
-
-    private func showSpeedNotice(_ text: String) {
-        speedNotice = text
-        speedNoticeTask?.cancel()
-        speedNoticeTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(2.5))
-            guard let self, !Task.isCancelled else { return }
-            self.speedNotice = nil
-        }
+        speed.testAll(in: groupID, hasNodes: !group.nodes.isEmpty)
     }
 
     // MARK: - 流量（真实 `/traffic` WS）
