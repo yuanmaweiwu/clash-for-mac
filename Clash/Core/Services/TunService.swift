@@ -421,14 +421,37 @@ final class TunService {
             return
         }
 
-        // 2. 别家 TUN / VPN 已在接管流量：不抢路由，直接给可执行建议
+        // 2. helper 侧预检（AUDIT A6）：上一次 `stopKernel` 失败 / App 崩溃后，helper 可能
+        //    还持有一个旧内核，而本进程的 `phase` 是 off / failed ——「App 不知道」。
+        //    `KernelSupervisor.startLocked()` 见到运行中的进程会直接复用、**不重载
+        //    runtime.yaml**，于是新 controller 端口永远等不到 `/version`（8s 超时），
+        //    而且这 8s 之后还会把本来能用的旧内核杀掉。
+        //    必须放在冲突检测**之前**：旧内核的 utun 会被误判成「别家 TUN」，先停掉才能
+        //    看到真实的网络状态；也顺便让 mixed-port 提前释放。
+        if let existingPID = (try? await client.kernelState()) ?? nil, !existingPID.isEmpty {
+            Self.logger.notice("启动前发现 helper 已有内核 pid=\(existingPID, privacy: .public)，先停掉")
+            try? await client.stopKernel()
+            let remainingPID = (try? await client.kernelState()) ?? nil
+            if let remainingPID, !remainingPID.isEmpty {
+                fail(.startup("上一个 TUN 内核未能停止（pid=\(remainingPID)），请重试"))
+                return
+            }
+            hasHelperKernel = false
+            guard await waitForPortRelease(settings.mixedPort) else {
+                fail(.startup("端口 \(settings.mixedPort) 已被占用，请先释放"))
+                return
+            }
+            Self.logger.notice("上一个 TUN 内核已停止 pid=\(existingPID, privacy: .public)")
+        }
+
+        // 3. 别家 TUN / VPN 已在接管流量：不抢路由，直接给可执行建议
         if let conflict = await TunConflictDetector.detect() {
             Self.logger.error("TUN 冲突：\(conflict.summary, privacy: .public)")
             fail(.conflict(conflict.userMessage))
             return
         }
 
-        // 3. GeoIP / GeoSite 数据库：缺了内核会去 jsdelivr 下载（国内 90s 超时 → 表现为
+        // 3.5 GeoIP / GeoSite 数据库：缺了内核会去 jsdelivr 下载（国内 90s 超时 → 表现为
         //    「8 秒未就绪」），先拦下。两侧分开处理：
         //    - 用户目录缺 → `ensureGeodataIfNeeded` 已跑过仍缺，是下载失败，给网络原因
         //    - helper 运行目录缺 → 只有「重新安装组件」能拷入，走说明卡，不是死路
@@ -688,6 +711,19 @@ final class TunService {
             await restartLocalKernelIfNeeded()
         }
     }
+
+    #if DEBUG
+    /// 自检夹具（`CLASH_AUDIT_B1`）：模拟「helper 仍有内核、但 App 已经失忆」——
+    /// 不调用 `stopKernel`，只把本地状态清回 off，用来验证启动前预检（AUDIT A6）。
+    /// 真实场景是上一次 stopKernel 失败后用户直接重试。
+    func simulateForgottenHelperKernelForAudit() {
+        stopLivenessHeartbeat()
+        hasHelperKernel = false
+        kernel.releaseExternalKernel()
+        phase = .off
+        failureMessage = nil
+    }
+    #endif
 
     // MARK: - 失败与回落
 

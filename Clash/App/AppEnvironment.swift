@@ -46,7 +46,7 @@ final class AppEnvironment {
         #if DEBUG
         // 真机 TUN 自检（会真的起 root 内核）：命中时不让面板自动起本地内核，避免抢端口
         let smokeMode = TunSmokeHarness.requestedMode()
-        let auditRequested = AuditBatch1Harness.isRequested
+        let auditRequested = AuditBatch1Harness.isRequested || AuditBatch2Harness.isRequested
         #else
         let smokeMode: String? = nil
         let auditRequested = false
@@ -79,6 +79,12 @@ final class AppEnvironment {
 
         #if DEBUG
         AuditBatch1Harness.runIfRequested(
+            kernel: kernel,
+            tun: tun,
+            systemProxy: systemProxy,
+            model: model
+        )
+        AuditBatch2Harness.runIfRequested(
             kernel: kernel,
             tun: tun,
             systemProxy: systemProxy,
