@@ -8,8 +8,8 @@ import SwiftUI
 /// - 最下：满宽度 3pt 用量条（左右各 10pt 内边距内）
 /// - 缺 `expire` → 左侧留白，用量照常右对齐；缺用量 → 只留商家名；空库 → 只显示「未添加」
 ///
-/// 用量条是**数据可视化**（§8.5 的例外）：3pt、`surface/track` + `accent`，
-/// 只做辅助判断，数字永远同时给出，不靠颜色或长度单独承载信息。
+/// 用量条是**数据可视化**（§8.5 的例外）：3pt、`surface/track` + `dataUsage`（固定数据色，
+/// 不跟随系统强调色），只做辅助判断，数字永远同时给出，不靠颜色或长度单独承载信息。
 @MainActor
 struct SubscriptionTileView: View {
     let content: SubscriptionTileContent
@@ -99,11 +99,14 @@ struct SubscriptionTileView: View {
             .accessibilityHidden(true)
     }
 
-    /// 用量色阶（§4.2）：≥100% `error`，>90% `warning`，其余 `accent` / 正文色
+    /// 用量色阶（§4.2）：≥100% `error`，>90% `warning`，其余 `dataUsage` / 正文色。
+    ///
+    /// 正常档**不用 `accent`**：强调色是「选中 / 激活」的语言，且会随系统设置变绿变紫；
+    /// 用量是数据，配色必须稳定（§2.4）。
     private func usageColors(_ fraction: Double) -> (fill: Color, text: Color) {
         if fraction >= 1 { return (Theme.error, Theme.error) }
         if fraction > 0.9 { return (Theme.warning, Theme.warning) }
-        return (Theme.accent, Theme.textPrimary)
+        return (Theme.dataUsage, Theme.textPrimary)
     }
 
     private var countBadge: some View {

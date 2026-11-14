@@ -135,6 +135,12 @@ enum Theme {
 
     static let trafficDown = Color(nsColor: clashDynamicColor(light: clashRGB(0x007AFF), dark: clashRGB(0x0A84FF)))
     static let trafficUp = Color(nsColor: clashDynamicColor(light: clashRGB(0x30B0C7), dark: clashRGB(0x40C8E0)))
+
+    /// 订阅用量条：**固定数据色**，与 `traffic/down` 同值但语义不同（配额用量 ≠ 网速）。
+    ///
+    /// 单独出一个 token 而不是直接复用 `trafficDown`：以后调网速配色不该顺带改用量条。
+    /// 关键是**不跟随系统强调色**——用户把强调色改成绿 / 紫，用量条仍是这层蓝。
+    static let dataUsage = Color(nsColor: clashDynamicColor(light: clashRGB(0x007AFF), dark: clashRGB(0x0A84FF)))
 }
 
 // MARK: - 字体（系统字体，固定字号，不接 Dynamic Type）
