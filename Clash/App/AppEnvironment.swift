@@ -47,7 +47,7 @@ final class AppEnvironment {
         // 真机 TUN 自检（会真的起 root 内核）：命中时不让面板自动起本地内核，避免抢端口
         let smokeMode = TunSmokeHarness.requestedMode()
         let auditRequested = AuditBatch1Harness.isRequested || AuditBatch2Harness.isRequested
-            || CleanupHarness.isRequested
+            || CleanupHarness.isRequested || LatencyBenchHarness.isRequested
         #else
         let smokeMode: String? = nil
         let auditRequested = false
@@ -79,6 +79,7 @@ final class AppEnvironment {
         Self.logger.info("Clash 启动（v0.2 系统代理 + TUN）")
 
         #if DEBUG
+        LatencyBenchHarness.runIfRequested(kernel: kernel, tun: tun, settings: settings)
         CleanupHarness.runIfRequested(model: model)
         AuditBatch1Harness.runIfRequested(
             kernel: kernel,

@@ -614,17 +614,26 @@ private enum Networksetup {
     /// 采集 → 落盘 → 逐服务写入 → 读回校验；任一步失败按快照回滚。
     /// 快照写盘失败时直接抛错：此时系统代理一个字都没改。
     static func activate(port: Int, snapshotURL: URL, failVerification: Bool = false) throws {
+        let total = LatencyTrace.shared.begin()
+        defer { LatencyTrace.shared.record("total", from: total) }
+
+        let captureStart = LatencyTrace.shared.begin()
         let snapshot = try capture(kernelPort: port)
         try save(snapshot, to: snapshotURL)
+        LatencyTrace.shared.record("capture", from: captureStart)
 
+        let setStart = LatencyTrace.shared.begin()
         do {
             for service in snapshot.services {
                 try setProxy(service.name, port: port)
             }
+            LatencyTrace.shared.record("set", from: setStart)
             if failVerification {
                 throw SystemProxyError.verificationFailed(service: snapshot.services.first?.name ?? "系统代理", detail: "自检注入")
             }
+            let verifyStart = LatencyTrace.shared.begin()
             try verifyProxied(snapshot.services.map(\.name), port: port)
+            LatencyTrace.shared.record("verify", from: verifyStart)
         } catch {
             rollback(snapshot, snapshotURL: snapshotURL)
             throw error
@@ -678,10 +687,23 @@ private enum Networksetup {
 
     /// 读快照 → 逐项还原 → 读回校验 → 删快照
     static func deactivate(snapshotURL: URL) throws {
+        let total = LatencyTrace.shared.begin()
+        defer { LatencyTrace.shared.record("total", from: total) }
+
+        let captureStart = LatencyTrace.shared.begin()
         guard let snapshot = try load(from: snapshotURL) else {
             throw SystemProxyError.snapshotMissing
         }
-        try restore(snapshot)
+        LatencyTrace.shared.record("capture", from: captureStart)
+
+        let setStart = LatencyTrace.shared.begin()
+        try restoreServices(snapshot)
+        LatencyTrace.shared.record("set", from: setStart)
+
+        let verifyStart = LatencyTrace.shared.begin()
+        try verifyAllRestored(snapshot)
+        LatencyTrace.shared.record("verify", from: verifyStart)
+
         try removeSnapshot(at: snapshotURL)
     }
 
@@ -751,7 +773,7 @@ private enum Networksetup {
     }
 
     /// 逐服务还原；一个服务失败不阻断其余服务（尽量把能还原的都还原掉），最后再抛第一个错误
-    static func restore(_ snapshot: SystemProxySnapshot) throws {
+    static func restoreServices(_ snapshot: SystemProxySnapshot) throws {
         var firstError: SystemProxyError?
         for service in snapshot.services {
             do {
@@ -761,10 +783,25 @@ private enum Networksetup {
             }
         }
         if let firstError { throw firstError }
+    }
 
+    /// 逐服务读回校验；同样是「全部跑完再抛第一个错误」
+    static func verifyAllRestored(_ snapshot: SystemProxySnapshot) throws {
+        var firstError: SystemProxyError?
         for service in snapshot.services {
-            try verifyRestored(service)
+            do {
+                try verifyRestored(service)
+            } catch {
+                if firstError == nil { firstError = error as? SystemProxyError ?? .commandFailed(service: service.name, detail: String(describing: error)) }
+            }
         }
+        if let firstError { throw firstError }
+    }
+
+    /// 还原 + 校验（回滚 / 退出路径用）
+    static func restore(_ snapshot: SystemProxySnapshot) throws {
+        try restoreServices(snapshot)
+        try verifyAllRestored(snapshot)
     }
 
     static func restore(service: ServiceProxyState) throws {

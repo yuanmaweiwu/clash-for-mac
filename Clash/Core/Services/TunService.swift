@@ -380,6 +380,8 @@ final class TunService {
         failureMessage = nil
         restoreWarning = nil
         phase = .starting
+        let total = LatencyTrace.shared.begin()
+        defer { LatencyTrace.shared.record("total", from: total) }
 
         // 0. 内核可能已被「完全清理」删掉：启用前同样确保存在（ADR-0012）
         do {
@@ -445,7 +447,10 @@ final class TunService {
         }
 
         // 3. 别家 TUN / VPN 已在接管流量：不抢路由，直接给可执行建议
-        if let conflict = await TunConflictDetector.detect() {
+        let conflictStart = LatencyTrace.shared.begin()
+        let conflict = await TunConflictDetector.detect()
+        LatencyTrace.shared.record("conflict", from: conflictStart)
+        if let conflict {
             Self.logger.error("TUN 冲突：\(conflict.summary, privacy: .public)")
             fail(.conflict(conflict.userMessage))
             return
@@ -479,17 +484,21 @@ final class TunService {
 
         // 4. 互斥：系统代理与 TUN 不能同时接管流量
         if systemProxy.isEnabled {
+            let closeStart = LatencyTrace.shared.begin()
             do {
                 try await systemProxy.disable()
             } catch {
                 fail(.startup("无法关闭系统代理，请先手动关闭"))
                 return
             }
+            LatencyTrace.shared.record("closeProxy", from: closeStart)
         }
 
         // 5. 本地内核让位：两者用同一个 mixed-port
         if kernel.phase == .running || kernel.phase == .starting {
+            let stopStart = LatencyTrace.shared.begin()
             await kernel.stop()
+            LatencyTrace.shared.record("stopLocalKernel", from: stopStart)
         }
 
         // 6. 生成本轮端点与正文（端口 / secret 由 App 决定，随正文一起送 helper）
@@ -522,7 +531,9 @@ final class TunService {
 
         let yaml: String
         do {
+            let buildStart = LatencyTrace.shared.begin()
             yaml = try await RuntimeConfigBuilder.yaml(from: profileURL, injected: injected)
+            LatencyTrace.shared.record("buildYaml", from: buildStart)
         } catch {
             fail(.startup((error as? KernelError)?.userMessage ?? "生成运行配置失败"))
             return
@@ -548,7 +559,9 @@ final class TunService {
         // 9. 等 `/version`：spawn 成功不等于可用（端口冲突 / 配置错误都在这一步暴露）
         let version: String
         do {
+            let readyStart = LatencyTrace.shared.begin()
             version = try await waitUntilReady(port: ports[0], secret: secret)
+            LatencyTrace.shared.record("ready", from: readyStart)
         } catch {
             Self.logger.notice("AUDIT 就绪失败，准备 stop runner")
             // 停不掉就不能继续往下走：先确认退出，再决定 banner 说什么
@@ -689,13 +702,20 @@ final class TunService {
     func disable(restartLocalKernel: Bool = true) async {
         guard isOn || isHelperKernelRunning else { return }
 
+        let total = LatencyTrace.shared.begin()
+        defer { LatencyTrace.shared.record("total", from: total) }
+
         stopLivenessHeartbeat()
         phase = .stopping
         // 只有「确认退出」才允许继续往下走（含置 off / 释放端点）
+        let stopStart = LatencyTrace.shared.begin()
         guard await stopHelperKernel(HelperKernelRunner(client: client)) else { return }
+        LatencyTrace.shared.record("stopKernel", from: stopStart)
 
         if let baseline {
+            let verifyStart = LatencyTrace.shared.begin()
             let differences = await SystemNetworkProbe.capture().differences(from: baseline)
+            LatencyTrace.shared.record("verify", from: verifyStart)
             if !differences.isEmpty {
                 restoreWarning = "已关闭 TUN，但\(differences.joined(separator: "；"))。若仍无法上网，请重启网络或重启电脑"
                 Self.logger.error("TUN 关闭后网络未复原：\(differences.joined(separator: "；"), privacy: .public)")

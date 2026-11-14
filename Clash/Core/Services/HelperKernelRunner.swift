@@ -43,9 +43,11 @@ final class HelperKernelRunner: KernelRunner {
         let t0 = ContinuousClock.now
         try await client.applyRuntimeConfig(configData)
         let t1 = ContinuousClock.now
+        LatencyTrace.shared.record("applyConfig", duration: t1 - t0)
 
         let detail = try await client.startKernel()
         let t2 = ContinuousClock.now
+        LatencyTrace.shared.record("spawn", duration: t2 - t1)
         let pid = Self.pid(from: detail)
         running = true
         lastExitCode = nil
