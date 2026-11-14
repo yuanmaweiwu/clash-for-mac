@@ -31,9 +31,23 @@ final class HelperClient {
 
     static let shared = HelperClient()
 
-    private static let logger = Logger(subsystem: "com.clash.app", category: "helper")
+    private nonisolated static let logger = Logger(subsystem: "com.clash.app", category: "helper")
 
     private var connection: NSXPCConnection?
+
+    /// 连接用 mach service 名。生产固定 `HelperLayout.machServiceName`；
+    /// DEBUG 夹具可注入不存在的名字，跑「连接失败」那条错误回调路径（`CLASH_XPC_ERR_HARNESS`）。
+    private let machServiceName: String
+
+    #if DEBUG
+    init(serviceName: String = HelperLayout.machServiceName) {
+        machServiceName = serviceName
+    }
+    #else
+    private init() {
+        machServiceName = HelperLayout.machServiceName
+    }
+    #endif
 
     // MARK: - 白名单方法
 
@@ -112,7 +126,7 @@ final class HelperClient {
     private func currentConnection() -> NSXPCConnection {
         if let connection { return connection }
 
-        let newConnection = NSXPCConnection(machServiceName: HelperLayout.machServiceName, options: [])
+        let newConnection = NSXPCConnection(machServiceName: machServiceName, options: [])
         newConnection.remoteObjectInterface = NSXPCInterface(with: KernelHelperProtocol.self)
         newConnection.invalidationHandler = { [weak self] in
             Task { @MainActor [weak self] in
@@ -120,8 +134,8 @@ final class HelperClient {
                 self?.teardown()
             }
         }
-        newConnection.interruptionHandler = { [weak self] in
-            Task { @MainActor [weak self] in
+        newConnection.interruptionHandler = {
+            Task { @MainActor in
                 Self.logger.notice("helper 连接中断")
             }
         }

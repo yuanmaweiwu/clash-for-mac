@@ -30,6 +30,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #if DEBUG
         // 截图走查：设了 CLASH_PREVIEW_PAGE 就只摆夹具窗口，不创建状态栏 / 内核
         if UIPreviewHarness.runIfRequested() { return }
+        // XPC 错误路径夹具：不建状态栏 / 内核，只验证错误回调不崩
+        if XPCErrorHarness.runIfRequested() { return }
         #endif
         installMainMenu()
         // 组合根必须显式建好再交出去：以前靠 `ClashApp.init` 触发，
