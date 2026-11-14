@@ -420,11 +420,15 @@ final class PanelPreviewModel {
     /// 内核生命周期串行化：同一时刻只有一条 start / stop 链，
     /// 因此不会在 `isTransitioning` 期间并发 start。
     ///
-    /// 新操作排在链尾；排队期间若又来了更新的操作，旧操作直接让位（只保留最新意图）。
+    /// 新操作排在链尾；**正在跑的旧操作会被取消**（不是只跳过排队中的那些）：
+    /// 快速连切订阅时，旧操作可能正卡在 `kernel.start()` 的 8s 就绪 / 20s 流水线里，
+    /// 光换 `kernelTaskID` 要等它自己跑满超时，最终会看到 `startTimeout`。
+    /// 取消后 `KernelService.start()` 会安静让位，新操作才拿得到串行链。
     private func enqueueKernelOperation(_ operation: @escaping @MainActor () async -> Void) {
         kernelTaskID += 1
         let operationID = kernelTaskID
         let previous = kernelTask
+        previous?.cancel()
         kernelTask = Task { [weak self] in
             await previous?.value
             guard let self, self.kernelTaskID == operationID else { return }
@@ -1078,6 +1082,8 @@ final class PanelPreviewModel {
         enqueueKernelOperation { [weak self] in
             guard let self else { return }
             await self.kernel.stop()
+            // 切订阅比 stop 还快：已经有人排了更新的意图，就别再拉起旧配置
+            guard !Task.isCancelled else { return }
             await self.kernel.start()
         }
     }

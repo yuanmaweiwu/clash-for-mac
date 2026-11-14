@@ -93,6 +93,12 @@ final class KernelService {
         do {
             try await performStart()
         } catch {
+            // 被更新的请求取消：不要落 `.failed`（用户没看到失败，新一轮启动马上开始），
+            // 但必须把半开的 runner / 相位收干净，否则新请求会被 `isTransitioning` 挡住。
+            if Task.isCancelled || error is CancellationError {
+                await abortCancelledStart()
+                return
+            }
             // 占用者是本产品自己留下的内核（DerivedData / 另一份拷贝 / 强杀残留）：回收后
             // 自动重试一次，不该让用户为我们的孤儿买单。别家进程占用才需要用户动手。
             guard let kernelError = error as? KernelError,
@@ -106,9 +112,27 @@ final class KernelService {
             do {
                 try await performStart()
             } catch {
+                if Task.isCancelled || error is CancellationError {
+                    await abortCancelledStart()
+                    return
+                }
                 await failStart(with: error)
             }
         }
+    }
+
+    /// 启动被更新的请求取代：安静回到 `stopped`，不写 `lastError`
+    private func abortCancelledStart() async {
+        if phase != .running {
+            await runner?.stop()
+            client = nil
+            kernelVersion = nil
+            activeMixedPort = nil
+            activeLogLevel = nil
+            activeAllowLAN = nil
+            setPhase(.stopped)
+        }
+        Self.logger.notice("内核启动被取消（有更新的请求），已让位")
     }
 
     /// 一次完整的启动尝试：确保内核 → 确保 geodata → 启动流水线（带 20s 看门狗）。
@@ -139,32 +163,46 @@ final class KernelService {
     ///
     /// 整段有 20 秒看门狗（`pipelineTimeout`）：任何一步永久 await 都会被判定 `startTimeout`，
     /// 而不是让面板永远停在「启动中」。
+    ///
+    /// 用**结构化** task group（而不是两个游离 Task）：外层被取消（快速连切订阅时
+    /// `PanelPreviewModel` 会 cancel 旧请求）会立刻传播给流水线子任务，
+    /// `performPipeline` / `waitUntilReady` 里的 `Task.checkCancellation()` 就能让旧启动
+    /// **让位**，不必跑满 20s 再报 `startTimeout`。
     private func runPipelineWithDeadline(binaryURL: URL, profileURL: URL?) async throws {
-        let outcome = PipelineOutcome()
-        let task = Task { @MainActor in
-            do {
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
                 try await self.performPipeline(binaryURL: binaryURL, profileURL: profileURL)
-                outcome.result = .success(())
+            }
+            group.addTask {
+                try await Task.sleep(for: Self.pipelineTimeout)
+                throw KernelError.startTimeout
+            }
+
+            do {
+                _ = try await group.next()
+                group.cancelAll()
             } catch {
-                outcome.result = .failure(error)
+                group.cancelAll()
+                await self.handlePipelineFailure(error)
+                throw error
             }
         }
+    }
 
-        let deadline = ContinuousClock.now + Self.pipelineTimeout
-        while outcome.result == nil, ContinuousClock.now < deadline {
-            try? await Task.sleep(for: .milliseconds(50))
-        }
-
-        guard let result = outcome.result else {
+    /// 流水线失败 / 被取消的统一收尾：取消下载、停半开进程、只在真超时时记 error。
+    private func handlePipelineFailure(_ error: Error) async {
+        provisioner.cancelInFlight()
+        if let kernelError = error as? KernelError, kernelError == .startTimeout {
             Self.logger.error(
                 "启动流水线超过 \(Int(Self.pipelineTimeout.components.seconds)) 秒未到 running，判定超时"
             )
-            task.cancel()
-            provisioner.cancelInFlight()
-            await runner?.stop()
-            throw KernelError.startTimeout
+        } else if error is CancellationError {
+            Self.logger.notice("启动流水线被取消（有更新的请求），停止半开进程")
         }
-        try result.get()
+        // 子任务可能已经把 runner 拉起：取消后必须收掉，否则它会继续占着 mixed-port
+        if phase != .running {
+            await runner?.stop()
+        }
     }
 
     private func performPipeline(binaryURL: URL, profileURL: URL?) async throws {
@@ -416,7 +454,8 @@ final class KernelService {
             if let version = try? await client.version(timeout: Self.readinessRequestTimeout) {
                 return version.version
             }
-            try? await Task.sleep(for: Self.readinessPollInterval)
+            // 用 `try`：取消要能立刻打断轮询，而不是等这一轮 sleep 完再走下一次检查
+            try await Task.sleep(for: Self.readinessPollInterval)
         }
         throw KernelError.startTimeout
     }
@@ -431,42 +470,57 @@ final class KernelService {
     private func validateConfiguration(binaryURL: URL, configPath: URL) async throws {
         let directory = AppPaths.kernelDirectory
         let timeout = Self.configValidationTimeout
-        let outcome = await Task.detached(priority: .userInitiated) { () async -> ValidationOutcome in
-            let process = Process()
-            process.executableURL = binaryURL
-            process.arguments = ["-t", "-d", directory.path, "-f", configPath.path]
+        let box = ValidationProcessBox()
 
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = pipe
+        let outcome = await withTaskCancellationHandler {
+            await Task.detached(priority: .userInitiated) { () async -> ValidationOutcome in
+                let process = Process()
+                process.executableURL = binaryURL
+                process.arguments = ["-t", "-d", directory.path, "-f", configPath.path]
 
-            do {
-                try process.run()
-            } catch {
-                return ValidationOutcome(status: -1, output: error.localizedDescription)
-            }
+                let pipe = Pipe()
+                process.standardOutput = pipe
+                process.standardError = pipe
 
-            // `-t` 正常几十毫秒；卡住（例如同一工作目录的 cache.db 被另一个内核锁住）必须杀掉
-            let deadline = Date().addingTimeInterval(timeout)
-            while process.isRunning, Date() < deadline {
-                try? await Task.sleep(for: .milliseconds(100))
-            }
-            if process.isRunning {
-                process.terminate()
-                try? await Task.sleep(for: .milliseconds(500))
-                if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+                do {
+                    try process.run()
+                } catch {
+                    return ValidationOutcome(status: -1, output: error.localizedDescription)
+                }
+                box.attach(process)
+
+                // `-t` 正常几十毫秒；卡住（例如同一工作目录的 cache.db 被另一个内核锁住）必须杀掉
+                let deadline = Date().addingTimeInterval(timeout)
+                while process.isRunning, Date() < deadline {
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+                if process.isRunning {
+                    process.terminate()
+                    try? await Task.sleep(for: .milliseconds(500))
+                    if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+                    process.waitUntilExit()
+                    defer { box.detach() }
+                    // 因取消而终止 → 交给上面的 `Task.checkCancellation` 归类，不要误报 startTimeout
+                    return ValidationOutcome(
+                        status: -2,
+                        output: box.isCancelled ? "已取消" : "mihomo -t 超时（\(Int(timeout)) 秒）"
+                    )
+                }
+
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
                 process.waitUntilExit()
-                return ValidationOutcome(status: -2, output: "mihomo -t 超时（\(Int(timeout)) 秒）")
-            }
+                box.detach()
+                return ValidationOutcome(
+                    status: process.terminationStatus,
+                    output: String(decoding: data, as: UTF8.self)
+                )
+            }.value
+        } onCancel: {
+            // 结构化取消：直接 SIGTERM 掉 `-t`，否则旧请求要等它自然结束才能让位
+            box.cancel()
+        }
 
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            return ValidationOutcome(
-                status: process.terminationStatus,
-                output: String(decoding: data, as: UTF8.self)
-            )
-        }.value
-
+        try Task.checkCancellation()
         guard outcome.status != 0 else { return }
 
         // 超时单独归类：不要把「-t 卡住」说成配置错误
@@ -561,8 +615,40 @@ final class KernelService {
     #endif
 }
 
-/// 启动流水线的一次性结果盒：`start()` 用轮询看门狗等它，避免 "await 一个永不结束的 Task"。
-@MainActor
-private final class PipelineOutcome {
-    var result: Result<Void, Error>?
+/// `mihomo -t` 子进程的取消句柄：让「启动被更新请求取消」能立刻打断校验，
+/// 而不是等 10s 校验上限（快速连切订阅时这就是旧请求不让位的元凶之一）。
+private final class ValidationProcessBox: @unchecked Sendable {
+
+    private let lock = NSLock()
+    private var process: Process?
+    private var cancelled = false
+
+    func attach(_ process: Process) {
+        lock.lock()
+        self.process = process
+        let cancelNow = cancelled
+        lock.unlock()
+        // 取消发生在 attach 之前：补一次终止
+        if cancelNow { process.terminate() }
+    }
+
+    func detach() {
+        lock.lock()
+        process = nil
+        lock.unlock()
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        let process = self.process
+        lock.unlock()
+        process?.terminate()
+    }
+
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
 }
