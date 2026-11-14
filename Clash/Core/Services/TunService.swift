@@ -660,6 +660,9 @@ final class TunService {
         // 用「盘上现在有没有配置」判断，而不是 `kernel.hasProfile`：刚删掉最后一条订阅时
         // 后者还是 true，会把内核用空配置拉起来
         guard ProfileLocator.locate() != nil else { return }
+        // 刚停掉的 TUN 内核还在收尾时，7890 上可能残留它的连接（ESTABLISHED / FIN_WAIT），
+        // 直接抢会得到 portInUse。先等端口真正可绑，再拉本地内核。
+        _ = await waitForPortRelease(settings.mixedPort)
         await kernel.start()
     }
 

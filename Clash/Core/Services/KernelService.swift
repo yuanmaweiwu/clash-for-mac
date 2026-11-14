@@ -230,6 +230,11 @@ final class KernelService {
     private func ensurePortAvailable(_ port: Int) async throws {
         if PortAllocator.isAvailable(port: port) { return }
 
+        // 刚被停掉的内核（本产品 / TUN 的 root 内核）收尾时，7890 上可能还有连接处于
+        // FIN_WAIT / ESTABLISHED：此时 bind 会失败，但几百毫秒后就正常。给一次短暂宽限，
+        // 仍不可用才当成「别人的进程占着」。
+        if await waitForPort(port, within: .seconds(2)) { return }
+
         let occupant = await PortOccupantProbe.listener(onPort: port)
         Self.logger.error(
             "mixed-port \(port) 被占用：\(occupant?.summary ?? "未知进程", privacy: .public) path=\(occupant?.executablePath ?? "未知", privacy: .public)"
