@@ -21,7 +21,7 @@ import os
 ///
 /// ## 刻意不处理的边界
 /// - **`SIGKILL`（`kill -9`）拦不住**：进程收不到任何通知，直接消失。此时快照仍在盘上，
-///   由下次启动的 `SystemProxyService.restoreIfNeeded(kernelRunning:)` 兜底还原
+///   由下次启动的 `SystemProxyService.restoreIfNeeded()` 兜底还原
 ///   （实测：`kill -9` 后代理仍指向死端口，重启 App 即恢复）。
 /// - 关机 / 注销 / 重启：系统会先给 App 发 `SIGTERM`（`launchd` 的 `ExitTimeOut` 内），
 ///   本类即覆盖；**不为关机引入 helper / `launchd` 钩子之类的新机制**。

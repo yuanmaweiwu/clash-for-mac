@@ -391,7 +391,7 @@ final class PanelPreviewModel {
             guard let self else { return }
 
             // 新进程里内核还没跑：盘上留着的快照一定来自旧会话（指向已死端口），必须还原
-            await self.systemProxy.restoreIfNeeded(kernelRunning: false)
+            await self.systemProxy.restoreIfNeeded()
             guard !Task.isCancelled else { return }
 
             self.connectionState = self.systemProxy.isEnabled ? .on : .off

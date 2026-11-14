@@ -162,18 +162,15 @@ final class SystemProxyService {
         }
     }
 
-    /// App 启动兜底：快照存在 且 内核未运行 → 立即还原（`system-proxy` §6 不变式）。
+    /// App 启动兜底：快照存在就立即还原（`system-proxy` §6 不变式）。
     ///
     /// 这是**唯一拦不住的路径**的兜底：`SIGKILL`（`kill -9`）、掉电、内核 panic 时进程无法做任何
     /// 清理，代理会停在指向死端口的状态；下次启动必须由这里按快照还原回来。
-    func restoreIfNeeded(kernelRunning: Bool) async {
+    ///
+    /// 只在启动时调用：新进程里内核一定还没跑，盘上快照必然来自旧会话（指向已死端口）。
+    func restoreIfNeeded() async {
         guard hasSnapshot else {
             isEnabled = false
-            return
-        }
-        guard !kernelRunning else {
-            // 内核还活着，代理有效：等正常关闭时再还原
-            isEnabled = true
             return
         }
         do {

@@ -160,7 +160,7 @@ enum SystemProxyHarness {
             // 模拟「App 崩溃后重启」：新实例从快照读出「我们改过代理」
             let relaunched = SystemProxyService(snapshotURL: snapshotURL)
             failures += report("flag-from-snapshot", relaunched.isEnabled)
-            await relaunched.restoreIfNeeded(kernelRunning: false)
+            await relaunched.restoreIfNeeded()
             failures += report(
                 "restore-if-needed",
                 !relaunched.isEnabled && !relaunched.hasSnapshot,
