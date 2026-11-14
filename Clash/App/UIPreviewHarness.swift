@@ -127,8 +127,13 @@ enum UIPreviewHarness {
             )
 
         default:
+            // 临时 settings + 临时代理快照：夹具绝不碰用户的真实配置与系统代理快照
+            let directory = previewDirectory()
             let model = PanelPreviewModel(
-                settings: previewSettings(environment: environment),
+                systemProxy: SystemProxyService(
+                    snapshotURL: directory.appending(path: "systemproxy-snapshot.json")
+                ),
+                settings: previewSettings(environment: environment, directory: directory),
                 autoStartsKernel: false
             )
             model.applyPreviewGroups()
@@ -153,17 +158,28 @@ enum UIPreviewHarness {
         present(hosting, size: hosting.fittingSize, name: "tiles")
     }
 
-    /// `CLASH_PREVIEW_SETTINGS=custom-fields`：设置页要能看见「自定义 UA / 镜像前缀」两个输入框。
-    /// 用临时文件建一份设置，不读写用户配置。
-    private static func previewSettings(environment: [String: String]) -> SettingsStore? {
-        guard environment["CLASH_PREVIEW_SETTINGS"] == "custom-fields" else { return nil }
-        let url = URL.temporaryDirectory.appending(
-            path: "clash-preview-settings-\(UUID().uuidString).json"
+    /// 夹具专用临时目录：设置与系统代理快照都放这里，不读写用户真实文件
+    private static func previewDirectory() -> URL {
+        let directory = URL.temporaryDirectory.appending(
+            path: "clash-preview-\(UUID().uuidString)",
+            directoryHint: .isDirectory
         )
-        let settings = SettingsStore(fileURL: url)
-        settings.subscriptionUserAgent = "ClashMetaForAndroid/2.10.1"
-        settings.kernelDownloadMode = .custom
-        settings.customMirrorPrefix = "https://gh-proxy.com/"
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    /// 预览用设置：始终是临时文件；`CLASH_PREVIEW_SETTINGS=custom-fields` 时
+    /// 额外预填「自定义 UA / 镜像前缀」，好让设置页看见两个输入框。
+    private static func previewSettings(
+        environment: [String: String],
+        directory: URL
+    ) -> SettingsStore {
+        let settings = SettingsStore(fileURL: directory.appending(path: "settings.json"))
+        if environment["CLASH_PREVIEW_SETTINGS"] == "custom-fields" {
+            settings.subscriptionUserAgent = "ClashMetaForAndroid/2.10.1"
+            settings.kernelDownloadMode = .custom
+            settings.customMirrorPrefix = "https://gh-proxy.com/"
+        }
         return settings
     }
 
