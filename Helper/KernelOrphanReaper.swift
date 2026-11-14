@@ -25,9 +25,14 @@ enum KernelOrphanReaper {
     @discardableResult
     static func reapOrphans() -> [pid_t] {
         let orphans = allPIDs().filter { pid in
-            guard pid != getpid(), isAlive(pid), parentPID(of: pid) != getpid() else { return false }
-            guard let path = executablePath(of: pid) else { return false }
-            return canonical(path) == canonical(HelperLayout.kernelToolPath)
+            guard isAlive(pid) else { return false }
+            return shouldReap(
+                candidatePID: pid,
+                parentPID: parentPID(of: pid),
+                executablePath: executablePath(of: pid),
+                selfPID: getpid(),
+                kernelToolPath: HelperLayout.kernelToolPath
+            )
         }
 
         guard !orphans.isEmpty else { return [] }
@@ -52,6 +57,26 @@ enum KernelOrphanReaper {
             HelperLog.error("启动回收：仍有 \(remaining.count) 个残留内核无法退出 \(describe(remaining))")
         }
         return terminated
+    }
+
+    // MARK: - 判据（纯函数，`CLASH_HELPER_SELFCHECK=1` 会打印判定表）
+
+    /// 候选进程是不是「上一个 helper 留下的 root 内核」。
+    ///
+    /// 纯函数：只吃「pid / 父 pid / 可执行路径」三个事实，便于不 root、不起进程地验证。
+    /// - 排除自己与自己的子进程（helper 新启动时还没有子进程；这条是给将来复用兜底）
+    /// - 可执行路径解析符号链接后必须精确等于 `kernelToolPath`；**绝不按进程名模糊匹配**
+    ///   （会误杀 ClashX / Clash Verge 的内核）
+    static func shouldReap(
+        candidatePID: pid_t,
+        parentPID: pid_t?,
+        executablePath: String?,
+        selfPID: pid_t,
+        kernelToolPath: String
+    ) -> Bool {
+        guard candidatePID != selfPID, parentPID != selfPID else { return false }
+        guard let executablePath else { return false }
+        return canonical(executablePath) == canonical(kernelToolPath)
     }
 
     // MARK: - libproc（与 App 侧 `OrphanKernelReaper` 同一套写法，不引新依赖）

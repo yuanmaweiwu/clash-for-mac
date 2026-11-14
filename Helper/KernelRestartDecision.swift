@@ -58,6 +58,31 @@ enum HelperSelfCheck {
                 + "process=\(item.process.timeIntervalSince1970) expected=\(item.expected) actual=\(actual)")
             if !passed { failures += 1 }
         }
+
+        // A7 孤儿判定：只吃 libproc 的事实，纯函数可复跑
+        print("SELFCHECK KernelOrphanReaper.shouldReap 判定表")
+        let kernelPath = HelperLayout.kernelToolPath
+        let orphanCases: [(name: String, pid: pid_t, parent: pid_t?, path: String?, expected: Bool)] = [
+            ("同路径、非子进程 → 回收", 100, 1, kernelPath, true),
+            ("路径带冗余斜杠 → 回收", 100, 1, "/Library//PrivilegedHelperTools/mihomo", true),
+            ("候选就是自己 → 不回收", 42, 1, kernelPath, false),
+            ("候选是自己的子进程 → 不回收", 100, 42, kernelPath, false),
+            ("路径不同（别家内核）→ 不回收", 100, 1, "/usr/local/bin/mihomo", false),
+            ("取不到路径 → 不回收", 100, 1, nil, false),
+        ]
+        for item in orphanCases {
+            let actual = KernelOrphanReaper.shouldReap(
+                candidatePID: item.pid,
+                parentPID: item.parent,
+                executablePath: item.path,
+                selfPID: 42,
+                kernelToolPath: kernelPath
+            )
+            let passed = actual == item.expected
+            print("\(passed ? "PASS" : "FAIL") \(item.name)：expected=\(item.expected) actual=\(actual)")
+            if !passed { failures += 1 }
+        }
+
         print(failures == 0 ? "SELFCHECK DONE failures=0" : "SELFCHECK DONE failures=\(failures)")
         exit(failures == 0 ? 0 : 1)
     }
