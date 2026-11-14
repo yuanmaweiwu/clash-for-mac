@@ -196,6 +196,12 @@ final class TunService {
 
     private func requestEnable() {
         guard !isBusy else { return }
+        // 系统代理正在切换：此刻 `isEnabled` 仍是 false，放行就会漏掉「先关代理」，
+        // 最终变成两个接管同开。服务层以 `isTransitioning` 为准，不依赖 UI 派生的 busy。
+        guard !systemProxy.isTransitioning else {
+            failureMessage = "系统代理正在切换，请稍候"
+            return
+        }
         // 内核正在 start/stop：TUN 此刻抢同一个 mixed-port 只会得到「端口被占用」，
         // 而 kernel.stop() 会因过渡中直接返回。等内核稳定后用户再点一次。
         guard !kernel.isTransitioning else {
@@ -354,6 +360,12 @@ final class TunService {
     /// 开启主流程：版本/运行时 → 冲突检测 → 互斥关代理 → 本地内核让位 → 生成正文 →
     /// 送配置 → 启动 → 就绪 → 接管端点
     private func enableInternal(retryingAfterInstall: Bool) async {
+        // 系统代理仍在切换（例如刚点完「连接」）：先关代理这一步必须成立，
+        // 否则内核若已接管 7890，`disable()` 也会失败 → 两个接管同开。
+        guard !systemProxy.isTransitioning else {
+            fail(.startup("系统代理正在切换，请稍候"))
+            return
+        }
         failureMessage = nil
         restoreWarning = nil
         phase = .starting

@@ -800,8 +800,11 @@ final class PanelPreviewModel {
 
     /// 磁贴五态（§4.2）：未启用 / 需要授权 / 等待授权 / 已启用 / 失败
     var tunState: TunState { tun.tileState }
-    /// 过渡 / 授权中 / 升级内核：磁贴禁用，忽略重复点击
-    var isTunBusy: Bool { isUpdatingKernel || tun.isBusy }
+    /// 过渡 / 授权中 / 升级内核 / 系统代理正在切换：磁贴禁用，忽略重复点击。
+    ///
+    /// `connectionState.isBusy` 是必须的：点完「连接」后 `systemProxy.isEnabled` 在
+    /// activate 完成前仍是 false，只靠 TUN 自己的 busy 会放行 → 两个接管同开。
+    var isTunBusy: Bool { isUpdatingKernel || tun.isBusy || connectionState.isBusy }
     var isTunOn: Bool { tun.isOn }
 
     /// 点击 TUN：安装引导 / 启动 / 关闭都由 `TunService` 的状态机决定
