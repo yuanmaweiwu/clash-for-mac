@@ -27,17 +27,17 @@ final class PanelPreviewModel {
     // MARK: 内核 / 系统代理 / 模式 / TUN
 
     /// 真实内核生命周期；`phase` / `errorMessage` 都从这里转发
-    @ObservationIgnored private let kernel: KernelService
+    @ObservationIgnored let kernel: KernelService
     /// 真实系统代理（快照落盘 + 逐服务还原）
     @ObservationIgnored private let systemProxy: SystemProxyService
     /// 真实策略组 / 节点 / 模式
-    @ObservationIgnored private let proxies: ProxyService
+    @ObservationIgnored let proxies: ProxyService
     /// 真实订阅库（`profiles/index.json`）
     @ObservationIgnored private let profiles: ProfileStore
     /// 真实流量采样（`/traffic` WS）
     @ObservationIgnored private let traffic: TrafficService
     /// 真实连接列表（`/connections` 轮询）
-    @ObservationIgnored private let connections: ConnectionService
+    @ObservationIgnored let connections: ConnectionService
     /// TUN（helper 安装 / 授权 / root 内核启停）
     @ObservationIgnored let tun: TunService
     /// 日志窗口的缓冲与 `/logs` WS（窗口打开才连，关窗即停）
@@ -45,14 +45,16 @@ final class PanelPreviewModel {
     /// 应用设置（端口 / UA / 日志级别 / 关代理是否保留内核）
     @ObservationIgnored let settings: SettingsStore
     /// 规则列表（`GET /rules`，进页面拉一次 + 缓存）
-    @ObservationIgnored private let ruleService: RuleService
+    @ObservationIgnored let ruleService: RuleService
     /// 节点测速编排（Task / 提示 / 闪烁）
     @ObservationIgnored private let speed: SpeedTestController
+    /// 订阅写操作编排（切换 / 更新 / 导入 / 重启内核）
+    @ObservationIgnored let actions: SubscriptionActions
     /// 网络检测（URLSession 直连四个固定目标，5s 超时）
-    @ObservationIgnored private let networkProbes = NetworkProbeService()
+    @ObservationIgnored let networkProbes = NetworkProbeService()
 
     /// 系统代理磁贴的五态（§4.2）；启用 / 停用成功与否都以读回校验为准
-    private(set) var connectionState: ConnectionState = .off
+    var connectionState: ConnectionState = .off
     /// 系统代理操作的失败文案（优先于内核错误进 banner）
     private(set) var connectionError: String?
 
@@ -98,14 +100,13 @@ final class PanelPreviewModel {
 
     var subscriptions: [ProfileEntry] { profiles.entries }
     var activeSubscriptionID: String? { profiles.activeProfileID }
-    /// 正在更新 / 导入的那一条（行里显示「更新中」）
-    private(set) var updatingProfileID: String?
-    private(set) var isImportingProfile = false
-    /// 「添加订阅」页的失败文案：留在页内（输入框下的红字），不弹窗、不进 banner
-    private(set) var importError: String?
-    /// 刚导入成功的那一条：回到订阅列表时短暂高亮，让用户看见结果
-    private(set) var recentlyImportedProfileID: String?
-    private(set) var subscriptionNotice: String?
+
+    // 订阅写操作的 UI 状态由 `SubscriptionActions` 持有，这里只转发（View 不变）
+    var updatingProfileID: String? { actions.updatingProfileID }
+    var isImportingProfile: Bool { actions.isImportingProfile }
+    var importError: String? { actions.importError }
+    var recentlyImportedProfileID: String? { actions.recentlyImportedProfileID }
+    var subscriptionNotice: String? { actions.notice }
     /// 测速提示 / 完成闪烁：由 `SpeedTestController` 持有，这里只转发
     var speedNotice: String? { speed.notice }
     var speedResultFlash: Bool { speed.resultFlash }
@@ -162,15 +163,10 @@ final class PanelPreviewModel {
     @ObservationIgnored private var kernelTask: Task<Void, Never>?
     /// 串行链代号：新指令让旧指令让位，保证「只保留最新意图」
     @ObservationIgnored private var kernelTaskID = 0
-    @ObservationIgnored private var subscriptionTask: Task<Void, Never>?
-    @ObservationIgnored private var importHighlightTask: Task<Void, Never>?
-    @ObservationIgnored private var noticeTask: Task<Void, Never>?
     @ObservationIgnored private var selectionTask: Task<Void, Never>?
     @ObservationIgnored private var modeTask: Task<Void, Never>?
     @ObservationIgnored private var proxyRefreshTask: Task<Void, Never>?
     @ObservationIgnored private var connectionTask: Task<Void, Never>?
-    /// TUN 的「关 → 换配置 → 重开」串行链（只保留最新意图）
-    @ObservationIgnored private var tunReopenTask: Task<Void, Never>?
 
     init(
         kernel: KernelService? = nil,
@@ -192,11 +188,12 @@ final class PanelPreviewModel {
         self.kernel = resolvedKernel
         self.profiles = resolvedProfileStore
         self.systemProxy = systemProxy
-        self.tun = tun ?? TunService(
+        let resolvedTun = tun ?? TunService(
             settings: resolvedSettings,
             systemProxy: systemProxy,
             kernel: resolvedKernel
         )
+        self.tun = resolvedTun
         let resolvedProxies = ProxyService(
             kernel: resolvedKernel,
             profileStore: resolvedProfileStore,
@@ -208,7 +205,14 @@ final class PanelPreviewModel {
         self.logStore = LogStore(kernel: resolvedKernel)
         self.ruleService = RuleService(kernel: resolvedKernel)
         self.speed = SpeedTestController(proxies: resolvedProxies)
+        self.actions = SubscriptionActions(
+            profiles: resolvedProfileStore,
+            kernel: resolvedKernel,
+            systemProxy: systemProxy,
+            tun: resolvedTun
+        )
         self.connectionState = systemProxy.isEnabled ? .on : .off
+        actions.attach(host: self)
 
         // 内核一就绪就拉真实策略组；停止 / 失败即清空
         resolvedKernel.onPhaseChange = { [weak self] phase in
@@ -306,7 +310,7 @@ final class PanelPreviewModel {
     var showsEmptyGroupImportActions: Bool { !hasConfiguredProfile }
 
     /// 是否已有可用配置：订阅库有 active，或本次内核用了用户配置（DEBUG 的 `CLASH_PROFILE` 也算）
-    private var hasConfiguredProfile: Bool { activeSubscription != nil || kernel.hasProfile }
+    var hasConfiguredProfile: Bool { activeSubscription != nil || kernel.hasProfile }
 
     var activeSubscription: ProfileEntry? { profiles.activeProfile }
 
@@ -368,7 +372,7 @@ final class PanelPreviewModel {
     /// 路由指向的对象真的没了才回退（例如 `.nodes(id)` 的组在新一次刷新后消失）。
     ///
     /// 订阅 / 设置 / 连接列表 / 全部策略组与内核相位无关，一律不动。
-    private func pruneRouteIfTargetMissing() {
+    func pruneRouteIfTargetMissing() {
         guard case .nodes(let id) = route else { return }
         guard !proxies.allGroups.contains(where: { $0.id == id }) else { return }
         popToRoot()
@@ -419,7 +423,7 @@ final class PanelPreviewModel {
     /// 快速连切订阅时，旧操作可能正卡在 `kernel.start()` 的 8s 就绪 / 20s 流水线里，
     /// 光换 `kernelTaskID` 要等它自己跑满超时，最终会看到 `startTimeout`。
     /// 取消后 `KernelService.start()` 会安静让位，新操作才拿得到串行链。
-    private func enqueueKernelOperation(_ operation: @escaping @MainActor () async -> Void) {
+    func enqueueKernelOperation(_ operation: @escaping @MainActor () async -> Void) {
         kernelTaskID += 1
         let operationID = kernelTaskID
         let previous = kernelTask
@@ -543,7 +547,7 @@ final class PanelPreviewModel {
         }
     }
 
-    private func failConnection(_ stage: ConnectionState.Stage, error: Error) {
+    func failConnection(_ stage: ConnectionState.Stage, error: Error) {
         let message = (error as? SystemProxyError)?.userMessage ?? "代理操作失败"
         failConnection(stage, message: message)
     }
@@ -654,7 +658,7 @@ final class PanelPreviewModel {
         // TUN 内核由 helper 持有，本 App 既不能 stop 也不能按新设置重建：
         // 先关 → 用新设置重开（失败就停在关闭态，原因由 TUN banner 给）
         if tun.isHelperKernelRunning {
-            reopenTunAfterConfigChange()
+            actions.reopenTunAfterConfigChange()
             return
         }
         enqueueKernelOperation { [weak self] in
@@ -852,7 +856,7 @@ final class PanelPreviewModel {
 
     /// 添加订阅页（§4.10）：进入时清掉上一次的失败文案
     func openSubscriptionNewPage() {
-        importError = nil
+        actions.clearImportError()
         route = .subscriptionNew
     }
 
@@ -895,229 +899,9 @@ final class PanelPreviewModel {
     }
 
     // MARK: - 订阅库（真实 `profiles/index.json`）
-
-    /// 一次只跑一个订阅写操作：索引是共享状态，避免更新中被删 / 被切换
-    private var isProfileBusy: Bool { updatingProfileID != nil || isImportingProfile }
-
-    func activateSubscription(_ id: String) {
-        guard !isProfileBusy else { return }
-        do {
-            guard try profiles.activate(id: id) == .switched else { return }
-            // 切换 = 换 active + 重建 runtime + 重载；v0.3 用 stop → start 等效
-            restartKernelForProfileChange()
-        } catch {
-            showNotice(profileErrorMessage(error, fallback: "切换失败"))
-        }
-    }
-
-    func updateSubscription(_ id: String) {
-        guard !isProfileBusy, profiles.entry(id: id) != nil else { return }
-        updatingProfileID = id
-
-        subscriptionTask = Task { [weak self] in
-            guard let self else { return }
-            defer { self.updatingProfileID = nil }
-
-            do {
-                try await self.profiles.update(id: id)
-                // 更新的正是当前配置：内核在跑就重启以加载新内容
-                if id == self.profiles.activeProfileID {
-                    self.restartKernelForProfileChange()
-                }
-            } catch {
-                self.showNotice("\(self.profileErrorMessage(error, fallback: "更新失败")), 继续使用旧配置")
-            }
-        }
-    }
-
-    func renameSubscription(_ id: String, to newName: String) {
-        guard !isProfileBusy else { return }
-        do {
-            try profiles.rename(id: id, to: newName)
-        } catch {
-            showNotice(profileErrorMessage(error, fallback: "重命名失败"))
-        }
-    }
-
-    func deleteSubscription(_ id: String) {
-        guard !isProfileBusy, let removed = profiles.entry(id: id) else { return }
-        do {
-            switch try profiles.delete(id: id) {
-            case .cleared:
-                showNotice("已删除「\(removed.name)」，将停止内核")
-                stopKernelForProfileChange()
-            case .switched:
-                let next = activeSubscription?.name ?? "另一条"
-                showNotice("已删除「\(removed.name)」，已切换到「\(next)」")
-                restartKernelForProfileChange()
-            case .none:
-                break
-            }
-        } catch {
-            showNotice(profileErrorMessage(error, fallback: "删除失败"))
-        }
-    }
-
-    func importSubscription(urlString: String) {
-        guard !isProfileBusy else { return }
-        isImportingProfile = true
-        importError = nil
-
-        subscriptionTask = Task { [weak self] in
-            guard let self else { return }
-            defer { self.isImportingProfile = false }
-
-            do {
-                let entry = try await self.profiles.importURL(urlString)
-                self.finishImport(entry)
-                // 首次导入会自动激活：内核若在跑（用的是内置空配置）就重启一次
-                if entry.id == self.profiles.activeProfileID {
-                    self.restartKernelForProfileChange()
-                }
-            } catch {
-                self.failImport(error)
-            }
-        }
-    }
-
-    /// UI 层（`NSOpenPanel`）选完文件后把 URL 交给 store
-    func importLocalSubscription(fileURL: URL) {
-        guard !isProfileBusy else { return }
-        isImportingProfile = true
-        importError = nil
-
-        subscriptionTask = Task { [weak self] in
-            guard let self else { return }
-            defer { self.isImportingProfile = false }
-
-            do {
-                let entry = try await self.profiles.importFile(at: fileURL)
-                self.finishImport(entry)
-                if entry.id == self.profiles.activeProfileID {
-                    self.restartKernelForProfileChange()
-                }
-            } catch {
-                self.failImport(error)
-            }
-        }
-    }
-
-    /// 导入成功：回到订阅列表（若还在添加页）并短暂高亮新项
-    private func finishImport(_ entry: ProfileEntry) {
-        importError = nil
-        recentlyImportedProfileID = entry.id
-
-        importHighlightTask?.cancel()
-        importHighlightTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(2.5))
-            guard let self, !Task.isCancelled else { return }
-            self.recentlyImportedProfileID = nil
-        }
-
-        if route == .subscriptionNew {
-            route = .subscriptions
-        }
-    }
-
-    /// 导入失败：添加页内红字；从列表页发起时仍走原来的 3s 提示条
-    private func failImport(_ error: Error) {
-        let message = profileErrorMessage(error, fallback: "导入失败")
-        importError = message
-
-        if route != .subscriptionNew {
-            showNotice(message)
-        }
-    }
-
-    private func profileErrorMessage(_ error: Error, fallback: String) -> String {
-        (error as? ProfileStoreError)?.userMessage ?? fallback
-    }
-
-    /// TUN 开着时换配置（订阅 / 端口 / 日志级别 / LAN）：先关 → 就地按新配置重开。
-    ///
-    /// 为什么不在关闭态就收手：TUN 是用户的显式意图，切个订阅就得重新点一次是坏体验。
-    /// 为什么失败不重开：`TunService.enable()` 自己会在失败时回落本地内核并给 banner；
-    /// 半关状态下重开只会在旧内核上叠一份新配置。
-    private func reopenTunAfterConfigChange() {
-        tunReopenTask?.cancel()
-        tunReopenTask = Task { [weak self] in
-            guard let self else { return }
-            guard self.tun.isHelperKernelRunning else { return }
-
-            await self.tun.disable(restartLocalKernel: false)
-            guard !Task.isCancelled else { return }
-            // 没关干净（stopKernel 失败）就不重开：那说明 root 内核还在接管流量
-            guard !self.tun.isOn, !self.tun.isHelperKernelRunning else { return }
-
-            await self.tun.enable()
-        }
-    }
-
-    /// active 变了：先 stop 再 start，让 `KernelService` 按新 active 重建 runtime。
-    /// 走同一条串行链，running 时也不会并发 start；内核没在跑（如自动启动失败）时也能救回来。
-    private func restartKernelForProfileChange() {
-        guard hasConfiguredProfile else {
-            stopKernelForProfileChange()
-            return
-        }
-        // TUN 内核里跑的是旧正文：关掉后按新 active 重开。
-        // 只有「订阅确实切换成功」才会走到这里——拉取 / 校验失败时调用方不重启，
-        // TUN 保持原状（旧配置仍然有效），不会出现「用旧配置接管新流量」的半套状态。
-        if tun.isHelperKernelRunning {
-            reopenTunAfterConfigChange()
-            return
-        }
-        enqueueKernelOperation { [weak self] in
-            guard let self else { return }
-            await self.kernel.stop()
-            // 切订阅比 stop 还快：已经有人排了更新的意图，就别再拉起旧配置。
-            // 250ms 合并窗口：0.2s 连切时把中间选择全部折叠掉，只按最后一次启动
-            // （窗口内被取消 → 直接让位，一次真实 `kernel.start()` 都不跑）。
-            do {
-                try await Task.sleep(for: .milliseconds(250))
-            } catch {
-                return
-            }
-            guard !Task.isCancelled else { return }
-            await self.kernel.start()
-        }
-    }
-
-    /// 库空了：先撤系统代理（撤不干净就保留内核，避免代理指向死端口），再停内核
-    private func stopKernelForProfileChange() {
-        // 配置全被删了：快照不再对应任何配置，这里必须清空（这不是「内核查相位变化」，
-        // 而是路由 / 分组指向的对象真的不存在了）
-        proxies.clear()
-        pruneRouteIfTargetMissing()
-
-        if tun.isHelperKernelRunning {
-            Task { [weak self] in await self?.tun.disable() }
-            return
-        }
-        enqueueKernelOperation { [weak self] in
-            guard let self else { return }
-            if self.isSystemProxyOn {
-                do {
-                    try await self.systemProxy.disable()
-                    self.connectionState = .off
-                } catch {
-                    self.failConnection(.disable, error: error)
-                    return
-                }
-            }
-            await self.kernel.stop()
-        }
-    }
-
-    private func showNotice(_ text: String) {
-        subscriptionNotice = text
-        noticeTask?.cancel()
-        noticeTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(3))
-            guard let self, !Task.isCancelled else { return }
-            self.subscriptionNotice = nil
-        }
-    }
+    //
+    // 写操作（切换 / 更新 / 重命名 / 删除 / 导入）与内核重启编排都在 `SubscriptionActions`；
+    // 这里只保留 View 在用的同名入口，行为不变。
 
     // MARK: - 节点测速（真实 `/group/{name}/delay`）
 
@@ -1163,67 +947,4 @@ final class PanelPreviewModel {
         guard let id = activeSubscriptionID else { return }
         updateSubscription(id)
     }
-
-    #if DEBUG
-    /// Preview 夹具：直接摆出启动失败态（不启动内核）
-    func previewFailure() {
-        kernel.applyPreviewFailure()
-    }
-
-    /// Preview 夹具：不启动内核，摆出四种网络检测状态（不发真实请求）
-    func applyPreviewNetworkProbes() {
-        networkProbes.applyPreviewStates()
-    }
-
-    /// Preview 夹具：摆出几条典型规则（不请求内核）
-    func applyPreviewRules() {
-        ruleService.applyPreviewRules()
-    }
-
-    /// Preview 夹具：不启动内核，摆出策略组（仅设计预览用）
-    func applyPreviewGroups() {
-        proxies.applyPreviewFixture()
-    }
-
-    /// Preview 夹具：摆出几张活动连接（不请求内核）
-    func applyPreviewConnections() {
-        connections.applyPreviewConnections()
-    }
-    #endif
-}
-
-// MARK: - 布局派生值
-//
-// 面板高度 = 内容自然高度（§3.5）；banner 在固定头部占位，只从分组区里扣。
-
-extension PanelPreviewModel {
-    /// 分组区自然高度（不扣 banner：banner 只压缩可视窗口，不压内容本身）
-    var groupSectionContentHeight: CGFloat {
-        if groups.isEmpty { return Metrics.emptyGroupCardHeight }
-        // 单选：永远只有一张卡（`displayedGroup` 在 groups 非空时必有兜底值）
-        return Metrics.groupSectionHeight(forCards: 1)
-    }
-
-    /// 可滚动尾区（网络检测 + 策略组）的完整内容高度
-    var scrollTailContentHeight: CGFloat {
-        Metrics.probeSectionHeight + Metrics.sectionGap + groupSectionContentHeight
-    }
-
-    /// 尾区可视高度：上限 314（680 − 固定头部 314 − 底栏块 52），banner 出现再扣一条
-    var scrollTailHeight: CGFloat {
-        let available = Metrics.scrollTailMaxHeight - (showsErrorBanner ? Metrics.bannerBlockHeight : 0)
-        return min(scrollTailContentHeight, max(available, 0))
-    }
-
-    /// 面板应有的总高（§3.2）：由路由与尾区内容**瞬时**决定，窗口直接跟这个值走。
-    ///
-    /// 不让 SwiftUI 去动画内容高度：背景的 16pt 圆角是内容自己画的，一旦窗口和内容
-    /// 各走一条动画，中间帧就会出现直角（`PanelWindowController` 也不再动画 frame）。
-    var panelHeight: CGFloat {
-        guard route == .root else { return Metrics.panelHeightMax }
-        return Metrics.panelChromeHeight + min(scrollTailContentHeight, Metrics.scrollTailMaxHeight)
-    }
-
-    /// 内核启动失败：分组区变暗并禁用（§7）
-    var isGroupDisabled: Bool { showsErrorBanner || status == .failed }
 }
