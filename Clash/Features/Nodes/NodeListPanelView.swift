@@ -67,14 +67,14 @@ struct NodeListPanelView: View {
                 .controlSize(.small)
                 .scaleEffect(0.7)
                 .frame(width: 28, height: 28)
-                .padding(.trailing, Space.xs)
                 .allowsHitTesting(false)
                 .accessibilityLabel("测速中")
         } else {
+            // 右缘与底栏图标列共线：IconButtonView 自带 28pt 热区，热区右缘即内容右缘，
+            // 不再额外缩进（缩 4pt 会让图标列比底栏内收 4pt）
             IconButtonView(systemName: "speedometer", label: "测速全部节点", iconSize: 16) {
                 model.testAllNodes(in: group.id)
             }
-            .padding(.trailing, Space.xs)
         }
     }
 
