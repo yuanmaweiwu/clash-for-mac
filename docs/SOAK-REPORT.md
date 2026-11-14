@@ -54,6 +54,27 @@
 4. **x86_64**：只验证了构建产物架构，未在 Intel 机器运行
 5. **多屏 / 深色切换 / 睡眠唤醒**：未覆盖
 
-## 7. 结论
+## 7. 内存优化（2026-11-14）
+
+根因：`TrafficChartView` 用 `Canvas`（Metal），面板用 `orderOut` 收起后 `NSHostingView` 仍按 1Hz 离屏重绘 → `IOAccelerator (graphics)` 累积 55.9MB dirty，且不回收。
+
+修复（`3285082`）：
+
+1. 面板隐藏时采样只进不可观察缓冲，不发布给 UI；上屏前用最近 60 点补齐
+2. `Canvas` → `Path`/`Shape`，去掉 Metal 表面
+3. SwiftUI 树首次上屏才创建（`ensureContentView`）
+
+| 状态 | 改前 footprint | 改后 footprint |
+|---|---|---|
+| 空闲 | 39 MB | **30–32 MB** |
+| 面板关 + 1.2MB/s 流量 | 95 MB（持续爬升） | **31 MB（不爬）** |
+| 停止后 | 95 MB（不回落） | **31 MB** |
+| 面板开 + 流量 | 95 MB+ | **31 MB** |
+| 开合 20 次 | 40 MB | **32 MB**（峰值 33） |
+| `IOAccelerator (graphics)` | 55.9 MB resident / 55.4 MB dirty | **16 KB / 0 dirty** |
+
+注：打开过设置页后收起，空闲约 37MB（路由保留设置页树）；仍在 40MB 内。
+
+## 8. 结论
 
 空闲场景下：资源占用稳定（约 App 107MB + 内核 57MB + helper 11MB）、CPU 近 0、10.5 小时无重启无泄漏迹象。可以进入交互压力与 TUN 长稳。
