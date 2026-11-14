@@ -81,7 +81,7 @@
 需要 Xcode 16+（Swift 6）与 macOS 15 SDK。
 
 ```bash
-git clone https://github.com/yuanmaweiwu/Clash.git
+git clone https://github.com/yuanmaweiwu/clash-for-mac.git
 cd Clash
 
 Scripts/install-app.sh    # 构建 Release 并安装到 /Applications
@@ -135,9 +135,9 @@ Shared/       App 与 helper 之间的 XPC 协议
 
 ## Star History
 
-<!-- 仓库名不是 yuanmaweiwu/Clash 时，替换下面两处 slug -->
+<!-- 仓库名不是 yuanmaweiwu/clash-for-mac 时，替换下面两处 slug -->
 
-[![Star History Chart](https://api.star-history.com/svg?repos=yuanmaweiwu/Clash&type=Date&legend=top-left)](https://www.star-history.com/#yuanmaweiwu/Clash&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=yuanmaweiwu/clash-for-mac&type=Date&legend=top-left)](https://www.star-history.com/#yuanmaweiwu/clash-for-mac&Date)
 
 ## 致谢
 

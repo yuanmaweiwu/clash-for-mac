@@ -53,7 +53,7 @@ macOS 原生 Clash 客户端：状态栏「控制中心」风格，自带 mihomo
 
 ## 关键上下文（续作必读）
 
-- 主线分支 `main`；remote 为 GitHub `yuanmaweiwu/Clash`（Gitea 已停用）
+- 主线分支 `main`；remote 为 GitHub `yuanmaweiwu/clash-for-mac`（Gitea 已停用）
 - 无代码签名身份、不上架：ad-hoc 签名，Gatekeeper 由用户手动允许；helper 用一次性管理员授权装 LaunchDaemon（`adr/0008`）
 - 系统代理**不需要 root**（管理员账号直调 `networksetup`，实测）；helper 只为 TUN
 - 内核 `-d` 目录：本地 `/Library/Application Support/Clash/kernel`，TUN 用 `/Library/Application Support/ClashHelper`（root，需 `geoip.metadb`）
