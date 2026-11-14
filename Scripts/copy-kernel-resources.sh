@@ -17,13 +17,13 @@ mkdir -p "$DEST_DIR"
 
 for name in VERSION SHA256-arm64 SHA256-amd64; do
   if [ ! -f "$SRC_DIR/$name" ]; then
-    echo "error: 缺少 $SRC_DIR/$name（先跑 Scripts/fetch-kernel.sh）"
+    echo "error: 缺少 $SRC_DIR/${name}（先跑 Scripts/fetch-kernel.sh）"
     exit 1
   fi
   ditto "$SRC_DIR/$name" "$DEST_DIR/$name"
 done
 
-# 打进包的架构：单架构构建取 $ARCHS；通用构建按 arm64 优先
+# 打进包的架构：单架构构建取 ${ARCHS}；通用构建按 arm64 优先
 # （四种发布包都是单架构构建，通用构建只用于本地调试）
 BUNDLE_ARCH=""
 for candidate in ${ARCHS:-}; do
@@ -39,7 +39,7 @@ esac
 
 if [ "${CLASH_BUNDLE_KERNEL:-0}" = "1" ]; then
   if [ ! -f "$SRC_DIR/.stage/mihomo-$KERNEL_ARCH" ]; then
-    echo "error: CLASH_BUNDLE_KERNEL=1 但缺少 $SRC_DIR/.stage/mihomo-$KERNEL_ARCH（先跑 Scripts/fetch-kernel.sh）"
+    echo "error: CLASH_BUNDLE_KERNEL=1 但缺少 $SRC_DIR/.stage/mihomo-${KERNEL_ARCH}（先跑 Scripts/fetch-kernel.sh）"
     exit 1
   fi
   ditto "$SRC_DIR/.stage/mihomo-$KERNEL_ARCH" "$DEST_DIR/mihomo"
@@ -49,10 +49,10 @@ if [ "${CLASH_BUNDLE_KERNEL:-0}" = "1" ]; then
     if [ -f "$SRC_DIR/.stage/$name" ]; then
       ditto "$SRC_DIR/.stage/$name" "$DEST_DIR/$name"
     else
-      echo "warning: 缺少 $SRC_DIR/.stage/$name（内置变体首次运行会联网补）"
+      echo "warning: 缺少 $SRC_DIR/.stage/${name}（内置变体首次运行会联网补）"
     fi
   done
-  echo "Bundled kernel: $DEST_DIR/mihomo（arch=$KERNEL_ARCH）"
+  echo "Bundled kernel: $DEST_DIR/mihomo（arch=${KERNEL_ARCH}）"
 else
-  echo "Copied kernel metadata only: $DEST_DIR（内核运行时下载）"
+  echo "Copied kernel metadata only: ${DEST_DIR}（内核运行时下载）"
 fi

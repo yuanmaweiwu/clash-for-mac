@@ -16,7 +16,7 @@ done
 
 cd "$ROOT"
 
-echo "==> 构建（$CONFIG）"
+echo "==> 构建（${CONFIG}）"
 xcodebuild -project Clash.xcodeproj -scheme Clash -configuration "$CONFIG" build | tail -3
 
 APP="$(/usr/bin/find "$HOME/Library/Developer/Xcode/DerivedData" -maxdepth 5 -type d -name Clash.app -path "*/Build/Products/$CONFIG/*" | head -1)"

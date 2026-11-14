@@ -2,7 +2,7 @@
 # 订阅库自检（五条链路）：构建 → 本地订阅服务器 → DEBUG harness → 断言 → 入库文件再跑 `mihomo -t`。
 #
 # 用法：Scripts/check-profile-store.sh [--no-build]
-# 产物与输出留在 $WORK（打印在末尾）；服务器退出即关。
+# 产物与输出留在 ${WORK}（打印在末尾）；服务器退出即关。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -181,7 +181,7 @@ fi
 
 echo "==> 结果"
 if [[ "$STATUS" -ne 0 ]] || ! grep -q "HARNESS DONE failures=0" "$OUTPUT"; then
-  echo "FAIL 自检未全部通过（exit=$STATUS）"
+  echo "FAIL 自检未全部通过（exit=${STATUS}）"
   [[ "$MIHOMO_FAILED" -eq 0 ]] || echo "FAIL mihomo -t 复检失败"
   echo "工作目录：$WORK"
   exit 1

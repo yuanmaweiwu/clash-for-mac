@@ -35,7 +35,7 @@ sleep 0.5
 OPEN_ARGS=()
 if [[ -n "${CLASH_PROFILE:-}" ]]; then
   OPEN_ARGS+=(--env "CLASH_PROFILE=$CLASH_PROFILE")
-  echo "==> 配置：$CLASH_PROFILE（CLASH_PROFILE）"
+  echo "==> 配置：${CLASH_PROFILE}（CLASH_PROFILE）"
 fi
 
 open ${OPEN_ARGS[@]+"${OPEN_ARGS[@]}"} "$APP"

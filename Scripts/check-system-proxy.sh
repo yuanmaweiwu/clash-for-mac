@@ -68,7 +68,7 @@ run_mode() {
   if grep -q "HARNESS DONE failures=0" "$log"; then
     pass "harness $mode"
   else
-    fail "harness $mode（exit=$status）"
+    fail "harness ${mode}（exit=${status}）"
     sed -n '1,80p' "$log"
   fi
 }
@@ -124,7 +124,7 @@ wait "$HOLD_PID" || HOLD_STATUS=$?
 if grep -q "HARNESS DONE failures=0" "$WORK/hold.log"; then
   pass "harness hold"
 else
-  fail "harness hold（exit=$HOLD_STATUS）"
+  fail "harness hold（exit=${HOLD_STATUS}）"
   sed -n '1,80p' "$WORK/hold.log"
 fi
 
@@ -169,7 +169,7 @@ chmod 700 "$RO_DIR"
 if grep -q "HARNESS DONE failures=0" "$WORK/readonly.log"; then
   pass "harness readonly"
 else
-  fail "harness readonly（exit=$RO_STATUS）"
+  fail "harness readonly（exit=${RO_STATUS}）"
   sed -n '1,80p' "$WORK/readonly.log"
 fi
 verify_clean readonly

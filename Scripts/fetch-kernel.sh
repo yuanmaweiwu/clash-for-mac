@@ -70,7 +70,7 @@ for i in "${!ARCHES[@]}"; do
   echo "资产:     ${asset_urls[$i]##*/}"
 done
 echo "目标目录: $DEST"
-echo "暂存目录: $STAGE（双架构，供 CLASH_BUNDLE_KERNEL=1 打包）"
+echo "暂存目录: ${STAGE}（双架构，供 CLASH_BUNDLE_KERNEL=1 打包）"
 
 if [[ $DRY_RUN -eq 1 ]]; then
   echo "(dry-run，不下载)"
@@ -96,13 +96,13 @@ for i in "${!ARCHES[@]}"; do
   expect="$arch"
   [[ "$arch" == "amd64" ]] && expect="x86_64"
   if [[ "$archs" != "$expect" ]]; then
-    echo "架构不符，期望 $expect，实际 $archs（$asset_name）" >&2
+    echo "架构不符，期望 ${expect}，实际 ${archs}（${asset_name}）" >&2
     exit 1
   fi
 
   install -m 0755 "$bin" "$STAGE/mihomo-$arch"
   ( cd "$STAGE" && shasum -a 256 "mihomo-$arch" > "$META/SHA256-$arch" )
-  echo "已暂存: $STAGE/mihomo-$arch（架构 $archs）"
+  echo "已暂存: $STAGE/mihomo-${arch}（架构 ${archs}）"
 
   if [[ "$arch" == "$HOST_ARCH" ]]; then
     install -m 0755 "$bin" "$DEST/mihomo"
@@ -121,7 +121,7 @@ if [[ $SKIP_GEODATA -eq 0 ]]; then
     if curl -fsSL --max-time 180 "$GEO_BASE/$name" -o "$tmp/$name"; then
       install -m 0644 "$tmp/$name" "$DEST/$name"
       install -m 0644 "$tmp/$name" "$STAGE/$name"
-      echo "已写入: $DEST/$name（并暂存一份供打包）"
+      echo "已写入: $DEST/${name}（并暂存一份供打包）"
     else
       echo "warning: 下载 $name 失败；首次连接时 App 会自动重试" >&2
     fi
