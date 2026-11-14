@@ -118,6 +118,12 @@ final class PanelPreviewModel {
     /// WS 断连：曲线保留但降透明度、数值回到 `—`（§4.5 断连态）
     var isTrafficStale: Bool { !traffic.isStreaming }
 
+    /// 面板显隐（唯一入口 `PanelWindowController`）：收起时流量不再发布给 UI，
+    /// 避免隐藏窗口跟着每秒采样离屏重绘（GPU 表面会被一直占着）
+    func setPanelVisible(_ visible: Bool) {
+        traffic.setPanelVisible(visible)
+    }
+
     // MARK: 连接列表（`/connections`）
 
     /// 连接列表数据由 `ConnectionService` 持有；只有二级页打开期间才轮询

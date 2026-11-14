@@ -24,7 +24,10 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
     private static let resignCoalesceInterval: TimeInterval = 0.3
 
     private let panel: PanelWindow
-    private var hostingView: PanelHostingView<AnyView>!
+    /// SwiftUI 树第一次上屏时才建（见 `ensureContentView`）：挂上 `NSHostingView`
+    /// 会立刻拉起 SwiftUI 的 Metal 表面池，不为从没打开过的面板付这份钱
+    private var hostingView: PanelHostingView<AnyView>?
+    private let model: PanelPreviewModel
 
     /// 面板显隐变化（状态栏按钮高亮恢复普通态）
     var onVisibilityChange: ((Bool) -> Void)?
@@ -39,6 +42,7 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
     }
 
     init(model: PanelPreviewModel) {
+        self.model = model
         panel = PanelWindow(
             contentRect: NSRect(
                 x: 0,
@@ -54,6 +58,19 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
         super.init()
 
         configureWindow()
+
+        // 面板建好就是隐藏状态：先把「不可见」交给模型，避免每秒采样推着隐藏窗口离屏重绘
+        model.setPanelVisible(false)
+    }
+
+    /// 首次显示时才把 SwiftUI 树挂到窗口上。
+    ///
+    /// `NSHostingView` 一挂上就会初始化 SwiftUI 的 Metal 渲染表面池：实测启动后 1s
+    /// footprint 96MB（其中 56MB 是 `IOAccelerator (graphics)`），几秒后虽然回收，
+    /// 峰值已经留在 `phys_footprint_peak` 上了。菜单栏应用绝大多数时间是「挂着不打开」，
+    /// 这份钱应该等到真正上屏再付。
+    private func ensureContentView() {
+        guard hostingView == nil else { return }
 
         let hosting = PanelHostingView(rootView: AnyView(
             PanelView(model: model, onClose: { [weak self] in self?.hide() })
@@ -89,6 +106,7 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
     func show(relativeTo button: NSStatusBarButton?) {
         // 锚点取不到时不要静默 return：⌘, / 菜单唤起时若按钮还没进窗口，
         // 面板会"消失"或落到别处。这里退回屏幕右上角，保证位置可预期。
+        ensureContentView()
         let size = contentSize()
         let screen = button?.window?.screen ?? NSScreen.main
         var origin: NSPoint
@@ -115,17 +133,19 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
         }
 
         Self.logger.notice("面板定位 x=\(origin.x, privacy: .public) y=\(origin.y, privacy: .public) 尺寸=\(size.width, privacy: .public)×\(size.height, privacy: .public) 屏幕=\(screen?.localizedName ?? "nil", privacy: .public)")
+        // 先把流量缓冲补进模型，再上屏：首帧就是完整波形，不会闪一下「暂无流量」
+        onVisibilityChange?(true)
         panel.setFrame(NSRect(origin: origin, size: size), display: true)
         panel.makeKeyAndOrderFront(nil)
         // 面板刚显示时也补一次：路由可能是在隐藏状态下改的（⌘, / 菜单），
         // 隐着的时候没有绘制周期，内容还停在旧尺寸上
         syncHostingLayout()
-        onVisibilityChange?(true)
     }
 
     func hide() {
         guard panel.isVisible else { return }
         panel.orderOut(nil)
+        // 下屏之后再清空：清空状态一帧都不用画
         onVisibilityChange?(false)
     }
 
@@ -183,6 +203,7 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
     /// 于是窗口变高了却整块空白（订阅页 496 → 642 就是这样）。补一轮 layout + display
     /// 就能让内容跟上；代价只是一次小面板重绘。
     private func syncHostingLayout() {
+        guard let hostingView else { return }
         hostingView.needsLayout = true
         hostingView.layoutSubtreeIfNeeded()
         hostingView.needsDisplay = true
@@ -203,6 +224,10 @@ final class PanelWindowController: NSObject, NSWindowDelegate {
     }
 
     private func contentSize() -> NSSize {
+        // `show` 里先 `ensureContentView()` 再调这里；真有路径漏了就直接用默认高度
+        guard let hostingView else {
+            return NSSize(width: Metrics.panelWidth, height: Metrics.panelHeight)
+        }
         hostingView.layoutSubtreeIfNeeded()
         let fittingHeight = hostingView.fittingSize.height
         // 测不到极值（过渡帧 / 空树）时沿用当前高度：回落到 642 会让面板瞬间跳高

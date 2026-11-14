@@ -34,6 +34,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         // 面板的锚点与显隐入口都在 App 组合根上：⌘, / 菜单项 / 左键共用同一条路径
         AppEnvironment.shared.statusItemAnchor = { [weak self] in self?.statusItem.button }
         panel.onVisibilityChange = { [weak self] isVisible in
+            // 收起时停止把流量采样发布给 UI（隐藏窗口不重绘），打开时一次补齐
+            self?.model.setPanelVisible(isVisible)
             self?.setButtonHighlighted(isVisible)
         }
 
