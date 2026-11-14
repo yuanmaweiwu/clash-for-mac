@@ -271,6 +271,8 @@ enum Metrics {
     static let listRowHeight: CGFloat = 48
     /// 设置页表单行高
     static let formRowHeight: CGFloat = 36
+    /// 设置页滚动区底部渐隐高度：内容区已有 16pt 底部留白，渐隐落在留白内，不永久吃掉正文
+    static let settingsScrollFade: CGFloat = Space.l
     static let breadcrumbHeight: CGFloat = 40
     static let cardPadding: CGFloat = Space.l
     /// 卡片上下内边距：卡头 hover 胶囊距卡顶 = 4 + 2 = 6pt

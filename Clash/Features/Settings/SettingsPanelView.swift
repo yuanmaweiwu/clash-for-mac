@@ -74,6 +74,9 @@ struct SettingsPanelView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .scrollIndicators(.never)
+            // 底部 12pt 线性渐隐：超屏时告诉用户「下面还有内容」，不再硬切断。
+            // 渐隐落在内容区 16pt 底部留白之内，滚到最底时正文不吃损。
+            .mask(alignment: .bottom) { scrollFadeMask }
         }
         .frame(width: contentWidth, height: contentHeight)
         .onAppear {
@@ -89,6 +92,24 @@ struct SettingsPanelView: View {
             Button("清理", role: .destructive) { runCleanup() }
         } message: {
             Text("将删除订阅、内核、缓存与偏好；会先还原系统代理并停止内核 / TUN。已安装的特权组件需到「组件」里单独卸载。App 本身保留，完成后需重启。此操作不可撤销。")
+        }
+    }
+
+    // MARK: - 滚动渐隐
+
+    /// 只给设置页用的底部遮罩：上方实体、最下 12pt 渐隐到透明。
+    ///
+    /// 遮罩不改命中测试，也不改内容高度；滚动到底时它覆盖的是内容区自身的 16pt 留白。
+    private var scrollFadeMask: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(.black)
+            LinearGradient(
+                colors: [.black, .black.opacity(0)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: Metrics.settingsScrollFade)
         }
     }
 
