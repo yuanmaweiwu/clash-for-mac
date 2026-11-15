@@ -128,6 +128,8 @@ final class TunService {
     @ObservationIgnored private var heartbeatTask: Task<Void, Never>?
     /// 心跳间隔：足够便宜（一次 XPC），又能把「面板显示已启用但内核已死」压到 30s 内
     private static let livenessInterval: Duration = .seconds(30)
+    /// 正在热重载配置（切订阅 / 更新订阅）：期间磁贴禁用，也不允许 stop
+    @ObservationIgnored private var isReloadingConfig = false
 
     init(
         settings: SettingsStore,
@@ -159,9 +161,10 @@ final class TunService {
     /// `needsInstall / awaitingAuthorization / failed / off` 一律可点：用户点下去必须
     /// 有反馈（弹说明卡 / 提示「密码框已弹出」/ 直接重试），不能变成死的。
     var isBusy: Bool {
+        if isReloadingConfig { return true }
         switch phase {
-        case .starting, .stopping: true
-        case .off, .needsInstall, .awaitingAuthorization, .on, .failed: false
+        case .starting, .stopping: return true
+        case .off, .needsInstall, .awaitingAuthorization, .on, .failed: return false
         }
     }
 
@@ -187,6 +190,7 @@ final class TunService {
 
     /// 磁贴点击：任何「不是过渡态」的状态都要有明确反馈。
     func toggle() {
+        guard !isReloadingConfig else { return }
         switch phase {
         case .on:
             Task { [weak self] in await self?.disable() }
@@ -584,6 +588,7 @@ final class TunService {
             secret: secret,
             version: version,
             mixedPort: mixedPort,
+            dnsPort: ports[1],
             logLevel: settings.logLevel.cliValue,
             allowLAN: settings.allowLAN,
             hasProfile: profileURL != nil
@@ -594,6 +599,106 @@ final class TunService {
         livenessEndpoint = (ports[0], secret)
         startLivenessHeartbeat()
         Self.logger.notice("TUN 已开启 controller=127.0.0.1:\(ports[0]) version=\(version, privacy: .public)")
+    }
+
+    // MARK: - 热重载（切订阅 / 更新订阅）
+
+    /// TUN 内核热重载：新正文经 helper 落盘 → 对**当前已接管的 controller** 发
+    /// `PUT /configs?force=true`。root 内核 pid、controller 端口、secret、DNS 端口、utun 都不变。
+    ///
+    /// 失败抛错，由调用方回退原来的 disable + enable；这里不改相位，成功后面板需要主动刷新
+    /// `/proxies`（相位一直是 `.on`，不会触发 `onPhaseChange`）。
+    func reloadProfile() async throws {
+        guard isOn, !isReloadingConfig,
+              let controllerPort = kernel.port, let secret = kernel.secret,
+              let mixedPort = kernel.activeMixedPort, let dnsPort = kernel.activeDNSPort else {
+            throw HotReloadError.notRunning
+        }
+        guard let profileURL = ProfileLocator.locate() else { throw HotReloadError.missingEndpoint }
+        guard let beforePID = (try? await client.kernelState()) ?? nil else {
+            throw HotReloadError.notRunning
+        }
+
+        isReloadingConfig = true
+        defer { isReloadingConfig = false }
+        let began = ContinuousClock.now
+        let beforeTunnels = await Self.tunnelInterfaces()
+
+        let injected = RuntimeConfigBuilder.Injected(
+            mixedPort: mixedPort,
+            allowLAN: settings.allowLAN,
+            controllerPort: controllerPort,
+            dnsPort: dnsPort,
+            secret: secret,
+            logLevel: settings.logLevel.cliValue,
+            mode: settings.mode,
+            tunEnabled: true,
+            tunStack: .gvisor
+        )
+        let generated = try await RuntimeConfigBuilder.generate(from: profileURL, injected: injected)
+        try Task.checkCancellation()
+
+        // 先落盘再重载：即使 PUT 失败，回退的 disable→enable 也会用这份新正文
+        try await client.applyRuntimeConfig(Data(generated.yaml.utf8))
+        try Task.checkCancellation()
+
+        let api = ClashAPIClient(port: controllerPort, secret: secret, timeout: 5)
+        let expectation = ReloadExpectation(
+            groupNames: generated.groupNames,
+            proxyNames: generated.proxyNames
+        )
+        do {
+            try await api.reloadConfig(path: HelperLayout.runtimeConfigPath)
+        } catch {
+            try Task.checkCancellation()
+            Self.logger.notice(
+                "TUN path 方式热重载失败，改用 payload：\(String(describing: error), privacy: .public)"
+            )
+            try await api.reloadConfig(payload: generated.yaml)
+        }
+
+        try await ReloadVerifier.wait(client: api, expectation: expectation)
+
+        // 进程 / 隧道断言：热重载必须是「就地换配置」，不许换内核、不许重建 utun
+        let afterPID = (try? await client.kernelState()) ?? nil
+        guard let afterPID, afterPID == beforePID else {
+            throw HotReloadError.kernelRestarted(before: beforePID, after: afterPID)
+        }
+        let afterTunnels = await Self.tunnelInterfaces()
+        guard afterTunnels == beforeTunnels else {
+            throw HotReloadError.tunnelChanged
+        }
+
+        let elapsed = Self.milliseconds(from: began)
+        let pid = afterPID
+        let tunnelCount = afterTunnels.count
+        let groupCount = generated.groupNames.count
+        let proxyCount = generated.proxyNames.count
+        Self.logger.notice(
+            "TUN 配置热重载完成 用时=\(elapsed)ms pid=\(pid, privacy: .public) utun=\(tunnelCount) groups=\(groupCount) proxies=\(proxyCount)"
+        )
+    }
+
+    /// `ifconfig -a` 里的 utun 接口名集合（热重载前后必须一致）
+    private static func tunnelInterfaces() async -> Set<String> {
+        guard let output = await SystemNetworkProbe.runCommand("/sbin/ifconfig", ["-a"]) else {
+            return []
+        }
+        var names: Set<String> = []
+        for line in output.split(separator: "\n") {
+            let text = String(line)
+            // 只有一个接口的头部行不带缩进；正文（地址 / 标志）都是缩进的
+            guard !text.hasPrefix("\t"), !text.hasPrefix(" ") else { continue }
+            let name = text.split(separator: ":").first.map(String.init) ?? ""
+            if name.hasPrefix("utun") { names.insert(name) }
+        }
+        return names
+    }
+
+    private static func milliseconds(from start: ContinuousClock.Instant) -> Int {
+        let elapsed = ContinuousClock.now - start
+        return Int(elapsed.components.seconds * 1000
+            + elapsed.components.attoseconds / 1_000_000_000_000_000)
     }
 
     /// 等 mixed-port 真正释放：刚停掉本地内核时，进程退出 / TIME_WAIT 会让第一次探测失败。
@@ -705,6 +810,8 @@ final class TunService {
     ///   默认 `true`（用户点 TUN 关掉后仍要有节点可选）；「接着要开系统代理」的路径传
     ///   `false`——那边需要自己按 `running` 等待，不能被这里的自动重启抢跑。
     func disable(restartLocalKernel: Bool = true) async {
+        // 热重载正在进行：stop 会把 PUT /configs 的会话截断，先让重载收尾
+        guard !isReloadingConfig else { return }
         guard isOn || isHelperKernelRunning else { return }
 
         let total = LatencyTrace.shared.begin()

@@ -26,6 +26,8 @@ final class KernelService {
     private(set) var activeMixedPort: Int?
     private(set) var activeLogLevel: String?
     private(set) var activeAllowLAN: Bool?
+    /// 本次运行注入的 DNS 监听端口；热重载要复用它，绝不能换端口
+    private(set) var activeDNSPort: Int?
     /// 本轮启动是否用了用户配置（false = 内置空配置），空态文案据此区分
     private(set) var hasProfile = false
     /// 启动 / 停止过程中：UI 应禁用系统代理磁贴
@@ -130,6 +132,7 @@ final class KernelService {
             activeMixedPort = nil
             activeLogLevel = nil
             activeAllowLAN = nil
+            activeDNSPort = nil
             setPhase(.stopped)
         }
         Self.logger.notice("内核启动被取消（有更新的请求），已让位")
@@ -233,23 +236,24 @@ final class KernelService {
             logLevel: settings.logLevel.cliValue,
             mode: settings.mode
         )
-        let runtimeURL = try await RuntimeConfigBuilder.build(from: profileURL, injected: injected)
+        let runtime = try await RuntimeConfigBuilder.build(from: profileURL, injected: injected)
         Self.logger.notice("使用配置 profile=\(ProfileLocator.displayName(for: profileURL), privacy: .public)")
         try Task.checkCancellation()
 
         // 校验通过才进 starting（core-process §4）
         Self.logger.notice("流水线步骤 -t begin")
-        try await validateConfiguration(binaryURL: binaryURL, configPath: runtimeURL)
+        try await validateConfiguration(binaryURL: binaryURL, configPath: runtime.url)
         Self.logger.notice("流水线步骤 -t end")
         try Task.checkCancellation()
 
         let runner = runner ?? makeRunner(binaryURL: binaryURL)
         Self.logger.notice("流水线步骤 spawn begin")
-        let pid = try await runner.start(configPath: runtimeURL)
+        let pid = try await runner.start(configPath: runtime.url)
         Self.logger.notice("流水线步骤 spawn end pid=\(pid)")
 
         port = injected.controllerPort
         secret = injected.secret
+        activeDNSPort = injected.dnsPort
         let client = ClashAPIClient(
             port: injected.controllerPort,
             secret: injected.secret,
@@ -301,6 +305,92 @@ final class KernelService {
         return PortAllocator.isAvailable(port: port)
     }
 
+    // MARK: - 热重载（切订阅 / 更新订阅）
+
+    /// 用当前端点重建 `runtime/runtime.yaml`，再 `PUT /configs?force=true` 让 mihomo 就地重载。
+    ///
+    /// - 端口 / secret / DNS 端口 / mixed-port 全部复用当前运行值，**不换端点**
+    /// - 进程与 pid 不变；成功后回到 `.running`（`onPhaseChange` 会触发面板刷新 `/proxies`）
+    /// - 失败抛错（`HotReloadError` / API 错误），由调用方回退 stop→start；这里不做兜底，
+    ///   避免「服务层偷偷重启」与调用方的串行链抢同一个内核
+    ///
+    /// 过渡相位用 `.starting`：面板显示「启动中」、代理磁贴禁用；成功回 `.running` 时
+    /// 顺带触发策略组刷新，失败时调用方接着 `stop()` 也允许（`starting` 是可停的）。
+    func reloadProfile() async throws {
+        guard !isExternal else { throw HotReloadError.notRunning }
+        guard phase == .running, !isTransitioning else { throw HotReloadError.notRunning }
+        guard let port, let secret, let mixedPort = activeMixedPort,
+              let dnsPort = activeDNSPort, let client else {
+            throw HotReloadError.missingEndpoint
+        }
+        guard let profileURL = ProfileLocator.locate() else { throw HotReloadError.missingEndpoint }
+
+        isTransitioning = true
+        setPhase(.starting)
+        let began = ContinuousClock.now
+        defer { isTransitioning = false }
+
+        do {
+            let injected = RuntimeConfigBuilder.Injected(
+                mixedPort: mixedPort,
+                allowLAN: activeAllowLAN ?? settings.allowLAN,
+                controllerPort: port,
+                dnsPort: dnsPort,
+                secret: secret,
+                logLevel: activeLogLevel ?? settings.logLevel.cliValue,
+                mode: settings.mode
+            )
+            let built = try await RuntimeConfigBuilder.build(from: profileURL, injected: injected)
+            try Task.checkCancellation()
+
+            let expectation = ReloadExpectation(
+                groupNames: built.groupNames,
+                proxyNames: built.proxyNames
+            )
+            do {
+                try await client.reloadConfig(path: built.url.path)
+            } catch {
+                try Task.checkCancellation()
+                // 部分内核版本不接受 `path`（读不到文件 / 字段被忽略）：用正文兜底一次
+                Self.logger.notice(
+                    "path 方式热重载失败，改用 payload：\(String(describing: error), privacy: .public)"
+                )
+                try await client.reloadConfig(payload: built.yaml)
+            }
+
+            try await ReloadVerifier.wait(client: client, expectation: expectation)
+            setPhase(.running)
+            let elapsed = Self.milliseconds(from: began)
+            Self.logger.notice(
+                "配置热重载完成 用时=\(elapsed)ms groups=\(built.groupNames.count) proxies=\(built.proxyNames.count)"
+            )
+        } catch {
+            if Task.isCancelled || error is CancellationError {
+                // 让位给更新的意图：内核还活着就回 running，别把相位卡在 starting
+                if (try? await client.version(timeout: 1)) != nil {
+                    setPhase(.running)
+                }
+                throw CancellationError()
+            }
+            let reason = Self.describeReloadError(error)
+            let elapsed = Self.milliseconds(from: began)
+            Self.logger.error("配置热重载失败：\(reason, privacy: .public) 用时=\(elapsed)ms")
+            throw error
+        }
+    }
+
+    private static func describeReloadError(_ error: Error) -> String {
+        if let hot = error as? HotReloadError { return hot.logDescription }
+        if let api = error as? ClashAPIClient.APIError { return api.userMessage }
+        return String(describing: error)
+    }
+
+    private static func milliseconds(from start: ContinuousClock.Instant) -> Int {
+        let elapsed = ContinuousClock.now - start
+        return Int(elapsed.components.seconds * 1000
+            + elapsed.components.attoseconds / 1_000_000_000_000_000)
+    }
+
     // MARK: - 停止
 
     func stop() async {
@@ -322,6 +412,7 @@ final class KernelService {
         activeMixedPort = nil
         activeLogLevel = nil
         activeAllowLAN = nil
+        activeDNSPort = nil
         setPhase(.stopped)
         Self.logger.notice("内核已停止")
     }
@@ -363,6 +454,7 @@ final class KernelService {
         secret: String,
         version: String,
         mixedPort: Int,
+        dnsPort: Int,
         logLevel: String,
         allowLAN: Bool,
         hasProfile: Bool
@@ -372,6 +464,7 @@ final class KernelService {
         self.secret = secret
         kernelVersion = version
         activeMixedPort = mixedPort
+        activeDNSPort = dnsPort
         activeLogLevel = logLevel
         activeAllowLAN = allowLAN
         self.hasProfile = hasProfile
@@ -392,6 +485,7 @@ final class KernelService {
         activeMixedPort = nil
         activeLogLevel = nil
         activeAllowLAN = nil
+        activeDNSPort = nil
         setPhase(.stopped)
         Self.logger.notice("TUN 内核端点已释放")
     }
@@ -415,6 +509,7 @@ final class KernelService {
         activeMixedPort = nil
         activeLogLevel = nil
         activeAllowLAN = nil
+        activeDNSPort = nil
         setPhase(.failed)
         lastError = kernelError
 
@@ -432,6 +527,7 @@ final class KernelService {
         activeMixedPort = nil
         activeLogLevel = nil
         activeAllowLAN = nil
+        activeDNSPort = nil
         setPhase(.failed)
         lastError = .crashed(code: code)
 
