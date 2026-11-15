@@ -36,21 +36,44 @@ enum RuntimeConfigBuilder {
         var tunStack: TunStack = .gvisor
     }
 
+    /// 一次落盘构建的结果：路径 + 正文 + 预期内容指纹。
+    ///
+    /// 指纹（组名 / 节点名）用于热重载后校验 `/proxies` 是否真的换成了这份配置：
+    /// 组名集合必须精确匹配，节点名必须全部出现。
+    struct Built: Sendable {
+        let url: URL
+        let yaml: String
+        let groupNames: Set<String>
+        let proxyNames: Set<String>
+    }
+
+    /// 只生成正文（TUN 经 XPC 交给 helper 落盘），附带同一份内容指纹。
+    struct Generated: Sendable {
+        let yaml: String
+        let groupNames: Set<String>
+        let proxyNames: Set<String>
+    }
+
     // MARK: - 入口
 
-    /// 生成运行配置并返回其路径。
+    /// 生成运行配置并返回其路径与内容指纹。
     ///
     /// - `profileURL == nil`：没有用户配置，生成最小可用配置（v0.1 行为）
     /// - 否则：读取、解析、覆盖注入键、写出；解析失败 / 顶层不是映射 → `configInvalid`
     ///
     /// 真实订阅 1–5 MB：Yams 的 load + dump 与落盘一律在 `Task.detached` 里跑，
     /// 主线程只等结果（调用方是 `@MainActor` 的启动流水线）。
-    @discardableResult
-    static func build(from profileURL: URL?, injected: Injected) async throws -> URL {
+    static func build(from profileURL: URL?, injected: Injected) async throws -> Built {
         try await Task.detached(priority: .userInitiated) {
-            let yaml = try dump(makeRoot(profileURL: profileURL, injected: injected))
+            let root = try makeRoot(profileURL: profileURL, injected: injected)
+            let yaml = try dump(root)
             try writeAtomically(yaml, to: AppPaths.runtimeConfigURL)
-            return AppPaths.runtimeConfigURL
+            return Built(
+                url: AppPaths.runtimeConfigURL,
+                yaml: yaml,
+                groupNames: groupNames(in: root),
+                proxyNames: proxyNames(in: root)
+            )
         }.value
     }
 
@@ -59,8 +82,18 @@ enum RuntimeConfigBuilder {
     /// 与 `build(from:injected:)` 共用同一套解析 / 注入逻辑，避免「App 校验的配置」
     /// 和「helper 实际运行的配置」出现两份实现。
     static func yaml(from profileURL: URL?, injected: Injected) async throws -> String {
+        try await generate(from: profileURL, injected: injected).yaml
+    }
+
+    /// 只生成正文 + 内容指纹（TUN 热重载：正文经 XPC 落盘，指纹用于校验 `/proxies`）。
+    static func generate(from profileURL: URL?, injected: Injected) async throws -> Generated {
         try await Task.detached(priority: .userInitiated) {
-            try dump(makeRoot(profileURL: profileURL, injected: injected))
+            let root = try makeRoot(profileURL: profileURL, injected: injected)
+            return Generated(
+                yaml: try dump(root),
+                groupNames: groupNames(in: root),
+                proxyNames: proxyNames(in: root)
+            )
         }.value
     }
 
@@ -236,6 +269,18 @@ enum RuntimeConfigBuilder {
     }
 
     // MARK: - 序列化与落盘
+
+    /// 配置里声明的策略组名（`proxy-groups[].name`）。内核合成的 `GLOBAL` 不算。
+    private static func groupNames(in root: [String: Any]) -> Set<String> {
+        guard let groups = root["proxy-groups"] as? [[String: Any]] else { return [] }
+        return Set(groups.compactMap { $0["name"] as? String })
+    }
+
+    /// 配置里声明的节点名（`proxies[].name`）；`proxy-providers` 动态拉取的节点不在其中。
+    private static func proxyNames(in root: [String: Any]) -> Set<String> {
+        guard let proxies = root["proxies"] as? [[String: Any]] else { return [] }
+        return Set(proxies.compactMap { $0["name"] as? String })
+    }
 
     private static func dump(_ root: [String: Any]) throws -> String {
         do {

@@ -49,6 +49,14 @@ actor ClashAPIClient {
         let mode: String
     }
 
+    private struct ConfigPathBody: Encodable, Sendable {
+        let path: String
+    }
+
+    private struct ConfigPayloadBody: Encodable, Sendable {
+        let payload: String
+    }
+
     /// WS 流的用途：决定 `stopTraffic()` / `stopLogs()` 各关哪些 socket
     private enum StreamKind {
         case traffic
@@ -148,6 +156,53 @@ actor ClashAPIClient {
         let body = try JSONEncoder().encode(ModeBody(mode: mode))
         _ = try await send(["configs"], method: "PATCH", body: body)
     }
+
+    // MARK: - 热重载（切订阅 / 更新订阅）
+
+    /// `PUT /configs?force=true` `{"path": "..."}`：让 mihomo 就地重读运行配置。
+    ///
+    /// 进程 / controller 端口 / secret / pid 都不变，只是代理内容（组 / 节点 / 规则）换新。
+    /// 路径由内核进程自己读，因此 TUN 场景可以直接指向 root 目录里的那份 `runtime.yaml`。
+    func reloadConfig(path: String, timeout: TimeInterval = 5) async throws {
+        #if DEBUG
+        try Self.injectReloadFailureIfNeeded()
+        #endif
+        let body = try JSONEncoder().encode(ConfigPathBody(path: path))
+        _ = try await send(
+            ["configs"],
+            method: "PUT",
+            query: [URLQueryItem(name: "force", value: "true")],
+            body: body,
+            timeout: timeout
+        )
+    }
+
+    /// `PUT /configs?force=true` 的正文变体：`path` 不被接受（内核读不到文件 / 字段被忽略）时兜底。
+    func reloadConfig(payload: String, timeout: TimeInterval = 5) async throws {
+        #if DEBUG
+        try Self.injectReloadFailureIfNeeded()
+        #endif
+        let body = try JSONEncoder().encode(ConfigPayloadBody(payload: payload))
+        _ = try await send(
+            ["configs"],
+            method: "PUT",
+            query: [URLQueryItem(name: "force", value: "true")],
+            body: body,
+            timeout: timeout
+        )
+    }
+
+    #if DEBUG
+    /// 自检夹具（`CLASH_RELOAD_FAIL=1`）：强制热重载请求失败，验证 stop→start 回退。
+    /// 只在 Debug 编译，生产路径无法置位。
+    private static let injectsReloadFailure =
+        ProcessInfo.processInfo.environment["CLASH_RELOAD_FAIL"] == "1"
+
+    private static func injectReloadFailureIfNeeded() throws {
+        guard injectsReloadFailure else { return }
+        throw APIError.httpStatus(500)
+    }
+    #endif
 
     // MARK: - 连接（`core-process` §5）
 
