@@ -3,7 +3,7 @@ import Observation
 
 /// 节点测速的编排：批量测速 Task、结果提示（2.5s）、完成闪烁（1.5s）。
 ///
-/// 只依赖 `ProxyService`（真正的逐节点测速与互斥都在它里面），
+/// 只依赖 `ProxyService`（真正的 `/group/{name}/delay` 与互斥都在它里面），
 /// 不反向依赖 `PanelPreviewModel`；面板只做同名转发，View 不需要改。
 @MainActor
 @Observable

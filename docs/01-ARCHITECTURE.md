@@ -156,7 +156,7 @@ idle ──start──► starting ──ok──► running ──stop──►
 | 配置热改 | `PATCH /configs`（`mode` / `allow-lan` / `log-level`） |
 | 整体重载 | `PUT /configs?force=true` `{path}` |
 | 策略组/节点 | `GET /proxies`、`GET /providers/proxies`、`PUT /proxies/{name}` `{name}` |
-| 延迟测速 | `GET /proxies/{name}/delay?timeout=&url=`（批量按节点逐个测，滑动窗口并发） |
+| 延迟测速 | `GET /proxies/{name}/delay?timeout=&url=`、`GET /group/{name}/delay` |
 | 实时速率 | `GET /traffic`（WebSocket，逐秒 `up`/`down`） |
 | 日志 | `GET /logs?level=`（WebSocket） |
 | 连接 | `GET /connections`、`DELETE /connections`、`DELETE /connections/{id}` |
