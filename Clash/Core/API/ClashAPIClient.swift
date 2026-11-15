@@ -89,6 +89,8 @@ actor ClashAPIClient {
         configuration.timeoutIntervalForRequest = timeout
         configuration.timeoutIntervalForResource = timeout
         configuration.waitsForConnectivity = false
+        // 批量测速是 8 条并发请求；默认每主机 6 条会把窗口压成 6，白等
+        configuration.httpMaximumConnectionsPerHost = 16
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         self.session = URLSession(configuration: configuration)
 
@@ -131,15 +133,6 @@ actor ClashAPIClient {
             throw APIError.malformedResponse
         }
         return response.delay
-    }
-
-    /// `GET /group/{name}/delay`：结果为「节点名 → 毫秒」
-    func testGroupDelay(group: String, timeout: Int, url: String) async throws -> [String: Int] {
-        let data = try await delayRequest(components: ["group", group, "delay"], timeout: timeout, url: url)
-        guard let response = try? JSONDecoder().decode([String: Int].self, from: data) else {
-            throw APIError.malformedResponse
-        }
-        return response
     }
 
     /// `GET /configs`：只取模式与端口，其余字段忽略
@@ -436,6 +429,8 @@ actor ClashAPIClient {
         do {
             (data, response) = try await session.data(for: request)
         } catch {
+            // 取消不是「内核未响应」：测速要把取消与超时分开（取消不写缓存）
+            if error is CancellationError || Task.isCancelled { throw CancellationError() }
             throw APIError.unreachable
         }
 

@@ -93,7 +93,7 @@ Base：`http://127.0.0.1:<port>`，头 `Authorization: Bearer <secret>`。
 | 全部代理 | `GET /proxies` | `proxies{name:{type,now,all,history,udp,alive}}` |
 | 选择 | `PUT /proxies/{name}` `{"name":"<节点>"}` | 组名 URL 编码 |
 | 单测速 | `GET /proxies/{name}/delay?timeout=5000&url=http://www.gstatic.com/generate_204` | 返回 `delay` 或错误 |
-| 组测速 | `GET /group/{name}/delay?url=...&timeout=` | 结果以名字为键 |
+| 组测速 | `GET /group/{name}/delay?url=...&timeout=` | 结果以名字为键；**App 不用**：批量走逐节点单测速 + 滑动窗口并发（压内核 TCP 峰值） |
 | 规则 | `GET /rules` | 只读展示 |
 | 连接 | `GET /connections` | 也支持 WS 推送 |
 | 关连接 | `DELETE /connections` / `DELETE /connections/{id}` | |

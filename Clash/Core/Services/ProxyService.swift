@@ -19,6 +19,14 @@ final class ProxyService {
     static let testURL = "http://www.gstatic.com/generate_204"
     static let testTimeoutMilliseconds = 2000
 
+    /// 批量测速同时在飞的探测数。
+    ///
+    /// 以前整组交给 `/group/{name}/delay` 一次放完：真实订阅 60+ 节点时内核侧
+    /// TCP 峰值破百、App CPU 也有尖峰。改成自己按节点发 `/proxies/{name}/delay`，
+    /// 用滑动窗口把在飞数量压在这个上限内（8 条：峰值约 2×8 条 TCP，总时长与
+    /// 组测速接近）。
+    static let testConcurrency = 8
+
     /// 全部策略组（含 `GLOBAL`），内核配置顺序
     private(set) var allGroups: [ProxyGroupModel] = []
     private(set) var isRefreshing = false
@@ -152,10 +160,18 @@ final class ProxyService {
     // MARK: - 测速
 
     /// 批量测速：互斥（测速中直接忽略），结果写回节点延迟
+    ///
+    /// 逐节点请求、滑动窗口并发（`testConcurrency`），不再把整组交给内核一次测完：
+    /// 单点失败按「超时」记（0 ms，与组测速口径一致），取消时整批丢弃、不写缓存。
     func testAll(group: String) async {
         guard !isTesting, testingGroup == nil else { return }
-        guard allGroups.contains(where: { $0.name == group }) else { return }
+        guard let index = allGroups.firstIndex(where: { $0.name == group }) else { return }
         guard let client = apiClient() else { return }
+
+        // 先取节点名快照：测速期间 `/proxies` 刷新会重写 allGroups，
+        // 在飞请求只认名字，写回时再按名字定位（与原来按名字合并的口径一致）
+        let nodeNames = allGroups[index].nodes.map(\.name)
+        guard !nodeNames.isEmpty else { return }
 
         isTesting = true
         testingGroup = group
@@ -164,17 +180,81 @@ final class ProxyService {
             testingGroup = nil
         }
 
-        do {
-            let delays = try await client.testGroupDelay(
-                group: group,
-                timeout: Self.testTimeoutMilliseconds,
-                url: Self.testURL
-            )
+        switch await probeDelays(nodes: nodeNames, client: client) {
+        case .measured(let delays):
             apply(delays: delays, group: group)
             lastError = nil
-        } catch {
-            lastError = Self.message(for: error)
+        case .failed(let message):
+            lastError = message
+        case .cancelled:
+            break
         }
+    }
+
+    /// 一次批量探测的结果
+    private enum ProbeBatch {
+        /// 「节点名 → 毫秒」；超时 / 单点失败记 0（`apply` 显示「超时」）
+        case measured([String: Int])
+        /// 整批都撞上传输层失败（内核已退出 / 鉴权失效）：不改任何节点、报给上层
+        case failed(String)
+        /// 被取消：半截结果不写回、不落缓存
+        case cancelled
+    }
+
+    /// 滑动窗口测速：同时在飞的探测数固定为 `testConcurrency`。
+    private func probeDelays(nodes: [String], client: ClashAPIClient) async -> ProbeBatch {
+        let timeout = Self.testTimeoutMilliseconds
+        let url = Self.testURL
+        var delays: [String: Int] = [:]
+        delays.reserveCapacity(nodes.count)
+        var transportError: String?
+
+        await withTaskGroup(of: (name: String, delay: Int?, error: String?).self) { group in
+            var pending = nodes.makeIterator()
+            var inFlight = 0
+
+            func startProbe(_ name: String) {
+                inFlight += 1
+                group.addTask {
+                    do {
+                        let delay = try await client.testDelay(proxy: name, timeout: timeout, url: url)
+                        return (name, delay, nil)
+                    } catch {
+                        // 取消不算「超时」：交给整批丢弃
+                        if error is CancellationError || Task.isCancelled { return (name, nil, nil) }
+                        // 内核拒绝了这次探测（节点超时）：与组测速的 0 ms 口径一致
+                        if let apiError = error as? ClashAPIClient.APIError,
+                           apiError == .delayFailed || apiError == .malformedResponse {
+                            return (name, 0, nil)
+                        }
+                        let message = (error as? ClashAPIClient.APIError)?.userMessage
+                            ?? "操作失败，请稍后重试"
+                        return (name, nil, message)
+                    }
+                }
+            }
+
+            for _ in 0..<min(Self.testConcurrency, nodes.count) {
+                guard let name = pending.next() else { break }
+                startProbe(name)
+            }
+
+            while let result = await group.next() {
+                inFlight -= 1
+                if let delay = result.delay { delays[result.name] = delay }
+                if let error = result.error { transportError = error }
+                // 取消后不再补位：等在飞请求尽快结束（URLSession 立刻抛）
+                guard !Task.isCancelled, inFlight < Self.testConcurrency,
+                      let name = pending.next()
+                else { continue }
+                startProbe(name)
+            }
+        }
+
+        if Task.isCancelled { return .cancelled }
+        // 一个都没测到、而且全是传输层失败：内核大概率已经没了（旧行为是报错而非全「超时」）
+        if delays.isEmpty, let transportError { return .failed(transportError) }
+        return .measured(delays)
     }
 
     private func apply(delays: [String: Int], group: String) {

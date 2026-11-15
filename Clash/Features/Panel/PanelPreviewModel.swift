@@ -931,7 +931,7 @@ final class PanelPreviewModel {
     // 写操作（切换 / 更新 / 重命名 / 删除 / 导入）与内核重启编排都在 `SubscriptionActions`；
     // 这里只保留 View 在用的同名入口，行为不变。
 
-    // MARK: - 节点测速（真实 `/group/{name}/delay`）
+    // MARK: - 节点测速（真实 `/proxies/{name}/delay`，滑动窗口并发）
 
     func isSpeedTesting(_ groupID: String) -> Bool { speed.isTesting(groupID) }
 
