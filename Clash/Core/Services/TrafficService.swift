@@ -10,8 +10,10 @@ import Observation
 ///   UI 走 §4.5 断连态：曲线 30% 透明、数值 `—`）
 /// - 端口 / secret 变了（内核重启）→ 用新的 `ClashAPIClient` 重建连接，不复用旧 socket
 /// - 连接常驻：面板是自建 `NSPanel` 浮层，内核 running 期间始终保留一条 WS；
-///   面板收起时**照常采样、但不发布**——隐藏的 `NSHostingView` 仍会跟着状态变化
-///   离屏重绘，曲线每秒一次足以把 GPU 表面一直留在脏状态（实测 39MB → 95MB）
+///   面板收起时**不发布可观察状态**——隐藏的 `NSHostingView` 仍会跟着状态变化
+///   离屏重绘，曲线每秒一次足以把 GPU 表面一直留在脏状态（实测 39MB → 95MB）。
+///   收起期间采样降到 **2s 一次**（两帧取最新一帧）：数值仍然新鲜（重新上屏 /
+///   状态栏速率 2s 内补到最新），但不做无谓的缓冲写入与布局工作。
 @MainActor
 @Observable
 final class TrafficService {
@@ -49,6 +51,8 @@ final class TrafficService {
     @ObservationIgnored private var bufferedUp: Double = 0
     /// WS 健康度：隐藏期间也要记，重新上屏时一次补齐 `isStreaming`
     @ObservationIgnored private var streamHealthy = false
+    /// 隐藏期间隔帧取样的开关：两帧（2s）里丢前一帧、处理最新一帧
+    @ObservationIgnored private var skipNextHiddenFrame = false
 
     init(kernel: KernelService) {
         self.kernel = kernel
@@ -63,6 +67,8 @@ final class TrafficService {
     func setPanelVisible(_ visible: Bool) {
         guard isPanelVisible != visible else { return }
         isPanelVisible = visible
+        // 下一次收起重新从「先丢一帧」开始，保证取到的是成对样本里的最新一帧
+        skipNextHiddenFrame = false
         if visible {
             publish()
         } else {
@@ -150,6 +156,17 @@ final class TrafficService {
     }
 
     private func apply(_ sample: TrafficSample) {
+        // 面板收起：1Hz 的帧只取每两帧的最新一帧（2s 一次），并且不碰任何可观察状态——
+        // 每碰一次，隐藏的 `NSHostingView` 就会离屏重画一遍曲线。
+        // 数值仍按 2s 写进缓冲（重新上屏 / 状态栏速率读的是这两个非观察值）。
+        if !isPanelVisible {
+            skipNextHiddenFrame.toggle()
+            guard !skipNextHiddenFrame else {
+                streamHealthy = true
+                return
+            }
+        }
+
         bufferedDown = max(sample.down, 0)
         bufferedUp = max(sample.up, 0)
 
@@ -158,8 +175,7 @@ final class TrafficService {
         bufferedHasSamples = true
         streamHealthy = true
 
-        // 面板收起：只进缓冲。这里绝不能碰可观察状态——每碰一次，
-        // 隐藏的 `NSHostingView` 就会离屏重画一遍曲线
+        // 面板收起：只进缓冲
         guard isPanelVisible else { return }
         publish()
     }
