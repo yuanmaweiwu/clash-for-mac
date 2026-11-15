@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import OSLog
 
 /// 订阅写操作的宿主：只提供「面板 UI 状态怎么改」的几个入口，
 /// `SubscriptionActions` 不反向依赖 `PanelPreviewModel`。
@@ -17,6 +18,8 @@ protocol SubscriptionActionsHost: AnyObject {
     func subscriptionActionsProxyFailed(_ error: Error)
     /// 配置库被清空：策略组快照作废、路由指向不存在的目标要退回
     func subscriptionActionsProfilesCleared()
+    /// 热重载成功：内核相位没变（TUN 场景），面板需要主动刷新一次 `/proxies`
+    func subscriptionActionsDidReloadProxies()
     /// 导入成功：若还停在「添加订阅」页就回到列表
     func subscriptionActionsDidImport()
     /// 导入失败：页内红字由本类自己写，这里只处理「不在添加页时」的提示条
@@ -41,6 +44,8 @@ final class SubscriptionActions {
     private(set) var recentlyImportedProfileID: String?
     /// 列表顶部 3s 提示条
     private(set) var notice: String?
+
+    private static let logger = Logger(subsystem: "com.clash.app", category: "subscriptions")
 
     @ObservationIgnored private let profiles: ProfileStore
     @ObservationIgnored private let kernel: KernelService
@@ -234,33 +239,74 @@ final class SubscriptionActions {
         }
     }
 
-    /// active 变了：先 stop 再 start，让 `KernelService` 按新 active 重建 runtime。
+    /// active 变了：优先热重载（重建 runtime → `PUT /configs`），失败才回退 stop → start。
+    ///
+    /// - 本地内核：复用当前端口 / secret / DNS 端口，进程与 pid 不变
+    /// - TUN：新正文先经 helper 落盘，再对当前 controller 发同一个请求；pid / utun 必须不变
     /// 走同一条串行链，running 时也不会并发 start；内核没在跑（如自动启动失败）时也能救回来。
     private func restartKernelForProfileChange() {
         guard host?.hasConfiguredProfile == true else {
             stopKernelForProfileChange()
             return
         }
-        // TUN 内核里跑的是旧正文：关掉后按新 active 重开。
+        // TUN 内核里跑的是旧正文：热重载失败再回退 disable + enable。
         // 只有「订阅确实切换成功」才会走到这里——拉取 / 校验失败时调用方不重启，
         // TUN 保持原状（旧配置仍然有效），不会出现「用旧配置接管新流量」的半套状态。
         if tun.isHelperKernelRunning {
-            reopenTunAfterConfigChange()
+            reloadTunForProfileChange()
             return
         }
         host?.enqueueKernelOperation { [weak self] in
             guard let self else { return }
-            await self.kernel.stop()
-            // 切订阅比 stop 还快：已经有人排了更新的意图，就别再拉起旧配置。
-            // 250ms 合并窗口：0.2s 连切时把中间选择全部折叠掉，只按最后一次启动
-            // （窗口内被取消 → 直接让位，一次真实 `kernel.start()` 都不跑）。
             do {
-                try await Task.sleep(for: .milliseconds(250))
+                try await self.kernel.reloadProfile()
             } catch {
-                return
+                // 已被更新的意图取代：让新操作接手，旧任务不做回退（避免连切时多跑一轮 stop→start）
+                guard !Task.isCancelled else { return }
+                Self.logger.error(
+                    "本地内核热重载失败，回退 stop→start：\(String(describing: error), privacy: .public)"
+                )
+                await self.kernel.stop()
+                // 切订阅比 stop 还快：已经有人排了更新的意图，就别再拉起旧配置。
+                // 250ms 合并窗口：0.2s 连切时把中间选择全部折叠掉，只按最后一次启动
+                // （窗口内被取消 → 直接让位，一次真实 `kernel.start()` 都不跑）。
+                do {
+                    try await Task.sleep(for: .milliseconds(250))
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else { return }
+                await self.kernel.start()
             }
+        }
+    }
+
+    /// TUN：先热重载，失败（或本来就没到 `.on`）再走原来的 disable + enable。
+    private func reloadTunForProfileChange() {
+        tunReopenTask?.cancel()
+        tunReopenTask = Task { [weak self] in
+            guard let self else { return }
+            guard self.tun.isHelperKernelRunning else { return }
+
+            if self.tun.isOn {
+                do {
+                    try await self.tun.reloadProfile()
+                    self.host?.subscriptionActionsDidReloadProxies()
+                    return
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    Self.logger.error(
+                        "TUN 热重载失败，回退 disable+enable：\(String(describing: error), privacy: .public)"
+                    )
+                }
+            }
+
+            await self.tun.disable(restartLocalKernel: false)
             guard !Task.isCancelled else { return }
-            await self.kernel.start()
+            // 没关干净（stopKernel 失败）就不重开：那说明 root 内核还在接管流量
+            guard !self.tun.isOn, !self.tun.isHelperKernelRunning else { return }
+
+            await self.tun.enable()
         }
     }
 

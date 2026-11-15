@@ -35,6 +35,16 @@ extension PanelPreviewModel: SubscriptionActionsHost {
         pruneRouteIfTargetMissing()
     }
 
+    func subscriptionActionsDidReloadProxies() {
+        // TUN 热重载不重启内核，相位一直是 `.on`，`onPhaseChange` 不会触发；
+        // 这里主动刷新一次，和内核重启路径的「running → refresh」保持同一语义。
+        Task { [weak self] in
+            guard let self else { return }
+            guard await self.proxies.refresh() else { return }
+            self.pruneRouteIfTargetMissing()
+        }
+    }
+
     func subscriptionActionsDidImport() {
         if route == .subscriptionNew { route = .subscriptions }
     }
