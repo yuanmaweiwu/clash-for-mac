@@ -228,3 +228,18 @@ jobs:
           body_path: release-body.md
           files: dist/*
           fail_on_unmatched_files: true
+
+      # 模板 compose 在部分情况下没生效（文件是否存在受 checkout 影响），
+      # 这里用 runner 自带的 gh 兜底：有手写说明就以它为准。
+      - name: Apply release notes from docs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          NOTES="docs/RELEASE-${VERSION}.md"
+          if [ -f "$NOTES" ]; then
+            gh release edit "$GITHUB_REF_NAME" --notes-file "$NOTES"
+          else
+            echo "no $NOTES, keep generated body"
+          fi
