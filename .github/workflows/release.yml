@@ -187,6 +187,14 @@ jobs:
         run: |
           set -euo pipefail
           ls -lah dist
+
+          # 有手写的版本说明就用它（docs/RELEASE-<version>.md），否则用通用模板
+          if [ -f "docs/RELEASE-${VERSION}.md" ]; then
+            echo "使用 docs/RELEASE-${VERSION}.md 作为 Release 说明"
+            cp "docs/RELEASE-${VERSION}.md" release-body.md
+            exit 0
+          fi
+
           {
             echo "macOS 状态栏 Clash 客户端（macOS 15+，Apple Silicon 与 Intel 各一份）。"
             echo
