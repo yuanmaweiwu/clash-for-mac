@@ -68,6 +68,9 @@ jobs:
 
       - name: Fetch kernel and geodata
         if: steps.kernel-cache.outputs.cache-hit != 'true'
+        env:
+          # 未认证调用 GitHub API 会被 runner 共享 IP 的限流打成 403；带上 token
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           PINNED="$(cat Resources/Kernel/VERSION 2>/dev/null | tr -d '[:space:]' || true)"

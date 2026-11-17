@@ -43,7 +43,17 @@ if [[ -n "$PINNED_VERSION" ]]; then
 else
   api="https://api.github.com/repos/$REPO/releases/latest"
 fi
-json="$(curl -fsSL -H 'Accept: application/vnd.github+json' "$api")"
+# CI 里 runner 共享出口 IP，未认证 API 很容易吃到 60 次/小时的限流（403）。
+# 有 GITHUB_TOKEN 就带上，并统一给网络请求加重试。
+AUTH=()
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  AUTH=(-H "Authorization: Bearer $GITHUB_TOKEN")
+fi
+if [ "${#AUTH[@]}" -eq 0 ]; then
+  json="$(curl -fsSL --retry 3 --retry-delay 2 -H 'Accept: application/vnd.github+json' "$api")"
+else
+  json="$(curl -fsSL --retry 3 --retry-delay 2 "${AUTH[@]}" -H 'Accept: application/vnd.github+json' "$api")"
+fi
 
 tag="$(printf '%s' "$json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"])')"
 
@@ -88,7 +98,7 @@ for i in "${!ARCHES[@]}"; do
   url="${asset_urls[$i]}"
   asset_name="${url##*/}"
 
-  curl -fsSL "$url" -o "$tmp/$asset_name"
+  curl -fsSL --retry 3 --retry-delay 2 "$url" -o "$tmp/$asset_name"
   gunzip -f "$tmp/$asset_name"
   bin="$tmp/${asset_name%.gz}"
 
