@@ -193,7 +193,8 @@ final class TunService {
         guard !isReloadingConfig else { return }
         switch phase {
         case .on:
-            Task { [weak self] in await self?.disable() }
+            // 只有用户主动关 TUN 才写意图；退出清理 / 互斥关代理 / 热重载都不走这里
+            Task { [weak self] in await self?.disable(userInitiated: true) }
         case .starting, .stopping:
             return
         case .awaitingAuthorization:
@@ -598,6 +599,7 @@ final class TunService {
         failureMessage = nil
         livenessEndpoint = (ports[0], secret)
         startLivenessHeartbeat()
+        recordIntent(.tun)
         Self.logger.notice("TUN 已开启 controller=127.0.0.1:\(ports[0]) version=\(version, privacy: .public)")
     }
 
@@ -809,7 +811,10 @@ final class TunService {
     /// - Parameter restartLocalKernel: 关闭后是否把本地（用户态）内核拉回来。
     ///   默认 `true`（用户点 TUN 关掉后仍要有节点可选）；「接着要开系统代理」的路径传
     ///   `false`——那边需要自己按 `running` 等待，不能被这里的自动重启抢跑。
-    func disable(restartLocalKernel: Bool = true) async {
+    /// - Parameter userInitiated: 是否用户主动关 TUN。只有为 `true` 才把
+    ///   `settings.lastTransport` 写成 `off`；退出清理、互斥关代理、热重载、组件维护
+    ///   都是服务内部启停，不能改写用户意图。
+    func disable(restartLocalKernel: Bool = true, userInitiated: Bool = false) async {
         // 热重载正在进行：stop 会把 PUT /configs 的会话截断，先让重载收尾
         guard !isReloadingConfig else { return }
         guard isOn || isHelperKernelRunning else { return }
@@ -837,6 +842,7 @@ final class TunService {
 
         phase = .off
         failureMessage = nil
+        if userInitiated { recordIntent(.off) }
         Self.logger.notice("TUN 已关闭")
 
         if restartLocalKernel {
@@ -914,6 +920,13 @@ final class TunService {
         // 直接抢会得到 portInUse。先等端口真正可绑，再拉本地内核。
         _ = await waitForPortRelease(settings.mixedPort)
         await kernel.start()
+    }
+
+    /// 记录「用户主动」选择的接管方式（`settings.json` 的 `lastTransport`）。
+    /// 自检 / 截图夹具不写，避免把测试里的开关写进真实设置。
+    private func recordIntent(_ intent: TransportIntent) {
+        guard !Self.isAutomationFixture else { return }
+        settings.lastTransport = intent.rawValue
     }
 
     /// 截图 / 自检夹具（`CLASH_PREVIEW_PAGE`、`CLASH_TUN_SMOKE`、`*_HARNESS` 等）：没有用户会话

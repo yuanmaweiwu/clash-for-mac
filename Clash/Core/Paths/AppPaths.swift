@@ -127,6 +127,12 @@ enum AppPaths {
         supportDirectory.appending(path: "latency-cache.json")
     }
 
+    /// 用户手动选中的节点（组名 → 节点名）。本地内核与 TUN 内核的 `-d` 目录不同，
+    /// `store-selected` 的两份 cache.db 不共享，启动时靠这里显式恢复。
+    static var selectionURL: URL {
+        supportDirectory.appending(path: "selection.json")
+    }
+
     /// 当前启动使用的 runtime 配置（无 profile 时的最小可用配置）
     static var runtimeConfigURL: URL {
         runtimeDirectory.appending(path: "runtime.yaml")

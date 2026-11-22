@@ -76,6 +76,19 @@ idle ──start──► starting ──ok──► running ──stop──►
 - App 启动时若 helper 报告内核已在运行 → 直接进 `running`（不重复启动）
 - 崩溃自恢复：helper 记录最近一次 exit code；非用户停止时最多重启 3 次（指数退避 1s/3s/9s），仍失败则停在 `failed` 并通知
 
+### 3.1 启动恢复：意图 vs 实际状态
+
+`settings.json` 里的 `lastTransport`（`tun` / `proxy` / `off`）记录的是**用户意图**，不是实际状态：
+
+- **只在用户主动开 / 关时写**：TUN 开启成功 → `tun`；系统代理开启成功 → `proxy`；用户主动关掉 → `off`。
+- **退出清理、崩溃、服务内部启停一律不写**：`AppTerminationGuard` 走 `disableSynchronouslyForTermination()`，TUN 的互斥关代理 / 热重载 / 组件卸载走 `disable(userInitiated: false)`；这些路径都不会改 `lastTransport`。
+- 启动顺序（`autoStartsKernel == true`、非夹具）：
+  1. 先按上次遗留的 `systemproxy-snapshot.json` 还原系统代理（异常退出兜底）；
+  2. 启动本地内核，等 `running` 后刷新 `/proxies`，按 `selection.json` 恢复节点选择（只恢复 `Selector` 组；`URLTest` / `Fallback` 由内核自管，节点已不存在则提示并保留内核默认）；
+  3. 再按 `lastTransport` 恢复接管方式：`tun` → `TunService.enable()`（组件未装 / 版本不齐只提示、不弹密码框），`proxy` → 与磁贴一致的开代理流程。
+- 开机恢复由 `TransportRestoreService` 统一编排：第一次尝试延迟 1.5s，失败最多 3 次（间隔 2s / 5s），仍失败在面板顶部给一条 notice，不静默；用户中途手动接管则立即让位。
+- 本地内核与 TUN 内核使用两个不同的 `-d` 目录（`kernel/` vs `/Library/Application Support/ClashHelper`），`store-selected` 的 `cache.db` 不共享；因此 TUN 接管成功后会把 `selection.json` 的选择再应用一次。
+
 ## 4. 配置流水线
 
 ```

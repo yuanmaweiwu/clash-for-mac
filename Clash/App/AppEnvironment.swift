@@ -84,6 +84,7 @@ final class AppEnvironment {
         CleanupHarness.runIfRequested(model: model)
         NetworkProbeHarness.runIfRequested(model: model)
         _ = MemoryFootprintHarness.runIfRequested()
+        RestoreProbeHarness.runIfRequested(kernel: kernel)
         AuditBatch1Harness.runIfRequested(
             kernel: kernel,
             tun: tun,

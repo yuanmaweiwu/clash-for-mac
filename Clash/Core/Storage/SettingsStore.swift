@@ -27,6 +27,24 @@ enum LogLevelSetting: String, CaseIterable, Codable, Sendable, Identifiable {
     var cliValue: String { rawValue }
 }
 
+/// 上次「用户主动」选择的接管方式（`settings.json` 的 `lastTransport`）。
+///
+/// 这是**意图**，不是实际状态：只在用户点 TUN / 系统代理开关时写，
+/// 退出清理、崩溃、服务内部启停（互斥关 TUN、热重载、组件卸载）都不改它。
+enum TransportIntent: String, Codable, Sendable, CaseIterable {
+    case tun
+    case proxy
+    case off
+
+    var displayName: String {
+        switch self {
+        case .tun: "TUN"
+        case .proxy: "系统代理"
+        case .off: "关闭"
+        }
+    }
+}
+
 /// 应用设置：`settings.json` 的唯一读写者（`docs/01-ARCHITECTURE.md` §3）。
 ///
 /// 边界：
@@ -63,6 +81,10 @@ final class SettingsStore {
         var mode: ProxyMode = .rule
         /// 首屏展示的策略组（单选）；nil = 用第一个生效组。组被删后按回退规则处理
         var displayedGroup: String?
+        /// 开机自启后是否恢复上次的接管方式（TUN / 系统代理），默认开启
+        var restoreTransport: Bool = true
+        /// 上次用户主动选择的接管方式：`tun` / `proxy` / `off`
+        var lastTransport: String = TransportIntent.off.rawValue
 
         init() {}
 
@@ -70,6 +92,7 @@ final class SettingsStore {
             case mixedPort, allowLAN, keepKernelOnProxyOff, subscriptionUserAgent
             case autoUpdateHours, logLevel, launchAtLogin
             case kernelDownloadMode, customMirrorPrefix, mode, displayedGroup
+            case restoreTransport, lastTransport
         }
 
         init(from decoder: Decoder) throws {
@@ -93,6 +116,10 @@ final class SettingsStore {
                 ?? defaults.customMirrorPrefix
             mode = try container.decodeIfPresent(ProxyMode.self, forKey: .mode) ?? defaults.mode
             displayedGroup = try container.decodeIfPresent(String.self, forKey: .displayedGroup)
+            restoreTransport = try container.decodeIfPresent(Bool.self, forKey: .restoreTransport)
+                ?? defaults.restoreTransport
+            lastTransport = try container.decodeIfPresent(String.self, forKey: .lastTransport)
+                ?? defaults.lastTransport
         }
     }
 
@@ -110,6 +137,15 @@ final class SettingsStore {
     var mode: ProxyMode { didSet { persistIfReady() } }
     /// 首屏展示的策略组（单选）；nil = 未选过 / 组已被删，按「第一个生效组」回退
     var displayedGroup: String? { didSet { persistIfReady() } }
+    /// 开机自启后恢复上次的接管方式（TUN / 系统代理）
+    var restoreTransport: Bool { didSet { persistIfReady() } }
+    /// 上次用户主动选择的接管方式（`TransportIntent` 的 rawValue）
+    var lastTransport: String { didSet { persistIfReady() } }
+
+    /// 解析后的接管意图；未知值一律按 `off` 处理（手改坏文件不阻塞启动）
+    var lastTransportIntent: TransportIntent {
+        TransportIntent(rawValue: lastTransport) ?? .off
+    }
 
     /// 最近一次写盘失败的原因（UI 提示用；写成功后清空）
     private(set) var lastError: String?
@@ -143,6 +179,8 @@ final class SettingsStore {
         self.customMirrorPrefix = defaults.customMirrorPrefix
         self.mode = defaults.mode
         self.displayedGroup = defaults.displayedGroup
+        self.restoreTransport = defaults.restoreTransport
+        self.lastTransport = defaults.lastTransport
 
         load()
         isReady = true
@@ -170,6 +208,8 @@ final class SettingsStore {
         snapshot.customMirrorPrefix = customMirrorPrefix
         snapshot.mode = mode
         snapshot.displayedGroup = displayedGroup
+        snapshot.restoreTransport = restoreTransport
+        snapshot.lastTransport = lastTransport
         return snapshot
     }
 
@@ -212,6 +252,8 @@ final class SettingsStore {
         mode = decoded.mode
         let displayed = decoded.displayedGroup?.trimmingCharacters(in: .whitespacesAndNewlines)
         displayedGroup = (displayed?.isEmpty == false) ? displayed : nil
+        restoreTransport = decoded.restoreTransport
+        lastTransport = (TransportIntent(rawValue: decoded.lastTransport) ?? .off).rawValue
     }
 
     /// 损坏兜底：留证据（`settings.corrupt-*.json`）→ 回默认值 → 重写干净文件

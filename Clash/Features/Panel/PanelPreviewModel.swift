@@ -44,6 +44,10 @@ final class PanelPreviewModel {
     @ObservationIgnored let logStore: LogStore
     /// 应用设置（端口 / UA / 日志级别 / 关代理是否保留内核）
     @ObservationIgnored let settings: SettingsStore
+    /// 用户手动选中的节点（`selection.json`，跨内核 / 跨启动恢复）
+    @ObservationIgnored let selections: SelectionStore
+    /// 开机恢复上次接管方式（TUN / 系统代理）
+    @ObservationIgnored private let transportRestore: TransportRestoreService
     /// 规则列表（`GET /rules`，进页面拉一次 + 缓存）
     @ObservationIgnored let ruleService: RuleService
     /// 节点测速编排（Task / 提示 / 闪烁）
@@ -57,6 +61,9 @@ final class PanelPreviewModel {
     var connectionState: ConnectionState = .off
     /// 系统代理操作的失败文案（优先于内核错误进 banner）
     private(set) var connectionError: String?
+
+    /// 开机恢复（接管方式 / 节点选择）的提示。启动路径没有用户交互，失败必须落在 banner。
+    private(set) var startupRestoreNotice: String?
 
     /// 我们是否正在接管系统代理（快照存在且未还原）
     var isSystemProxyOn: Bool { systemProxy.isEnabled }
@@ -79,8 +86,10 @@ final class PanelPreviewModel {
     /// 避免重启瞬间面板从「全局」闪回「规则」。
     var mode: ProxyMode { proxies.hasLoaded ? proxies.mode : settings.mode }
 
-    /// 失败文案：TUN / 代理操作失败优先，其次内核启动失败
-    var errorMessage: String? { tun.bannerMessage ?? connectionError ?? kernel.lastError?.userMessage }
+    /// 失败文案：启动恢复 / TUN / 代理操作失败优先，其次内核启动失败
+    var errorMessage: String? {
+        startupRestoreNotice ?? tun.bannerMessage ?? connectionError ?? kernel.lastError?.userMessage
+    }
 
     /// 是否展示 banner（派生，不再手动置位）
     var showsErrorBanner: Bool { errorMessage != nil }
@@ -168,6 +177,13 @@ final class PanelPreviewModel {
     @ObservationIgnored private var modeTask: Task<Void, Never>?
     @ObservationIgnored private var proxyRefreshTask: Task<Void, Never>?
     @ObservationIgnored private var connectionTask: Task<Void, Never>?
+    /// 开机恢复：等内核 running 后再应用保存的节点选择
+    @ObservationIgnored private var pendingSelectionRestore = false
+    /// 开机恢复：上次用户主动选择的接管方式（消费一次）
+    @ObservationIgnored private var pendingTransportRestore: TransportIntent?
+    /// TUN 接管后内核换了 `-d` 目录：需要把节点选择再应用一次
+    @ObservationIgnored private var reapplySelectionsAfterTun = false
+    @ObservationIgnored private var transportRestoreTask: Task<Void, Never>?
 
     init(
         kernel: KernelService? = nil,
@@ -175,6 +191,7 @@ final class PanelPreviewModel {
         systemProxy: SystemProxyService = SystemProxyService(),
         settings: SettingsStore? = nil,
         tun: TunService? = nil,
+        selectionStore: SelectionStore = SelectionStore(),
         autoStartsKernel: Bool = true
     ) {
         // 设置只允许一份实例：内核注入端口 / 模型读端口 / 设置窗口写端口必须是同一个对象
@@ -189,12 +206,14 @@ final class PanelPreviewModel {
         self.kernel = resolvedKernel
         self.profiles = resolvedProfileStore
         self.systemProxy = systemProxy
+        self.selections = selectionStore
         let resolvedTun = tun ?? TunService(
             settings: resolvedSettings,
             systemProxy: systemProxy,
             kernel: resolvedKernel
         )
         self.tun = resolvedTun
+        self.transportRestore = TransportRestoreService(tun: resolvedTun, systemProxy: systemProxy)
         let resolvedProxies = ProxyService(
             kernel: resolvedKernel,
             profileStore: resolvedProfileStore,
@@ -331,26 +350,7 @@ final class PanelPreviewModel {
     private func handleKernelPhase(_ phase: KernelPhase) {
         switch phase {
         case .running:
-            proxyRefreshTask?.cancel()
-            proxyRefreshTask = Task { [weak self] in
-                guard let self else { return }
-                // 回退判断只在**成功刷新之后**做：刷新前先动路由，只会把用户从
-                // 还在的页面打回首层（内核重启 = 订阅更新 / 开关 TUN 的必经路径）
-                guard await self.proxies.refresh() else { return }
-                guard !Task.isCancelled else { return }
-                self.pruneRouteIfTargetMissing()
-            }
-            // 内核 running（含重启后新端口 / 新 secret）：重建 `/traffic` 连接
-            traffic.start()
-            // 内核 restart（更新订阅 / 开关 TUN 必经 stop→start）在 `.stopped` 里停了轮询；
-            // 用户还停在连接页时要把轮询接回来，否则列表清空后再不刷新（只能退出页面重进）。
-            if route == .connections {
-                connections.startPolling()
-            }
-            // 同理：停在规则页时内核重启过（缓存已作废），这里补拉一次
-            if route == .rules {
-                Task { [weak self] in await self?.ruleService.loadIfNeeded() }
-            }
+            kernelDidBecomeRunning()
         case .stopped, .failed:
             // 相位变化不再清空策略组、不再重置路由：开关代理 / TUN / 更新订阅都会
             // 让内核 stop → start，清空只会让面板在开关瞬间塌成空态再长回来。
@@ -367,6 +367,55 @@ final class PanelPreviewModel {
             }
         case .starting:
             break
+        }
+    }
+
+    /// 内核 `running`（含本地启动、TUN 接管、重启后的新会话）：刷新数据并接上启动恢复。
+    ///
+    /// 顺序是硬约束：先刷新 `/proxies` → 恢复节点选择 → 再恢复接管方式。
+    /// TUN 会把内核从一个 `-d` 目录换到另一个，所以 TUN 起来后会再次进入这里，
+    /// 由 `reapplySelectionsAfterTun` 把选择补到新内核上。
+    private func kernelDidBecomeRunning() {
+        proxyRefreshTask?.cancel()
+        proxyRefreshTask = Task { [weak self] in
+            guard let self else { return }
+            // 回退判断只在**成功刷新之后**做：刷新前先动路由，只会把用户从
+            // 还在的页面打回首层（内核重启 = 订阅更新 / 开关 TUN 的必经路径）
+            let refreshed = await self.proxies.refresh()
+            guard !Task.isCancelled else { return }
+            if refreshed {
+                await self.restoreSelectionsIfNeeded()
+                guard !Task.isCancelled else { return }
+                self.pruneRouteIfTargetMissing()
+            }
+            // 即使 `/proxies` 刷新失败也要继续恢复接管方式：代理不依赖组数据，
+            // 网络抖动不能把开机恢复卡死。
+            self.startTransportRestoreIfNeeded()
+        }
+        // 内核 running（含重启后新端口 / 新 secret）：重建 `/traffic` 连接
+        traffic.start()
+        // 内核 restart（更新订阅 / 开关 TUN 必经 stop→start）在 `.stopped` 里停了轮询；
+        // 用户还停在连接页时要把轮询接回来，否则列表清空后再不刷新（只能退出页面重进）。
+        if route == .connections {
+            connections.startPolling()
+        }
+        // 同理：停在规则页时内核重启过（缓存已作废），这里补拉一次
+        if route == .rules {
+            Task { [weak self] in await self?.ruleService.loadIfNeeded() }
+        }
+    }
+
+    /// 启动恢复节点选择：只在 bootstrap 标记过 / TUN 刚换了内核目录时执行
+    private func restoreSelectionsIfNeeded() async {
+        let isStartup = pendingSelectionRestore
+        let isAfterTun = reapplySelectionsAfterTun
+        guard isStartup || isAfterTun else { return }
+        pendingSelectionRestore = false
+        reapplySelectionsAfterTun = false
+        guard !selections.isEmpty else { return }
+
+        if let notice = await proxies.restoreSelections(selections.groups) {
+            startupRestoreNotice = notice
         }
     }
 
@@ -400,8 +449,55 @@ final class PanelPreviewModel {
             }
 
             guard autoStartsKernel else { return }
+            // 启动恢复只在这里登记意图，真正执行要等内核 running（见 kernelDidBecomeRunning）
+            self.prepareStartupRestore()
             // 没有订阅就不启动内核，保留空态引导导入
             self.startKernelIfNeeded()
+            // 内核可能已经是 running（例如本地内核先一步就绪）：补一次，避免错过相位回调
+            if self.kernel.phase == .running {
+                self.kernelDidBecomeRunning()
+            }
+        }
+    }
+
+    /// 登记启动恢复意图：节点选择 + 接管方式。夹具（`autoStartsKernel == false`）不会走到这里。
+    private func prepareStartupRestore() {
+        pendingSelectionRestore = !selections.isEmpty
+
+        let intent = settings.lastTransportIntent
+        guard settings.restoreTransport, intent != .off else {
+            pendingTransportRestore = nil
+            return
+        }
+        // 上次异常退出的快照已在 bootstrap 开头还原；此时还开着说明用户就是想要它
+        guard !systemProxy.isEnabled, !tun.isOn else {
+            pendingTransportRestore = nil
+            return
+        }
+        pendingTransportRestore = intent
+    }
+
+    /// 内核就绪且节点选择已恢复后再开始接管，避免「先抢路由、后改节点」导致 TUN 内核
+    /// 用默认节点跑一段时间。失败原因由 `TransportRestoreService` 统一给。
+    private func startTransportRestoreIfNeeded() {
+        guard let intent = pendingTransportRestore else { return }
+        pendingTransportRestore = nil
+        guard settings.restoreTransport, intent != .off else { return }
+        guard !systemProxy.isEnabled, !tun.isOn else { return }
+
+        reapplySelectionsAfterTun = intent == .tun
+        transportRestoreTask?.cancel()
+        transportRestoreTask = Task { [weak self] in
+            guard let self else { return }
+            let notice = await self.transportRestore.restore(intent: intent) { [weak self] in
+                guard let self else { throw CancellationError() }
+                try await self.enableProxyTransport(recordIntent: false)
+            }
+            guard !Task.isCancelled else { return }
+            guard let notice else { return }
+            // TUN 没起来：不要在下一次 running 时白跑一遍节点恢复
+            self.reapplySelectionsAfterTun = false
+            self.startupRestoreNotice = notice
         }
     }
 
@@ -449,6 +545,7 @@ final class PanelPreviewModel {
             return
         }
         guard !isConnectionBusy else { return }
+        startupRestoreNotice = nil
         if isSystemProxyOn {
             turnOffProxy()
         } else {
@@ -462,45 +559,56 @@ final class PanelPreviewModel {
         connectionTask?.cancel()
         connectionState = .turningOn
         connectionError = nil
+        startupRestoreNotice = nil
 
         connectionTask = Task { [weak self] in
             guard let self else { return }
-
-            // 与 TUN 互斥：先关 TUN（TUN 的 root 内核与本地内核抢同一个 mixed-port），
-            // 且不在这里让 TUN 顺带重启本地内核——下面按代理解锁的顺序自己起
-            if self.tun.isHelperKernelRunning {
-                await self.tun.disable(restartLocalKernel: false)
-                guard !Task.isCancelled else { return }
-                self.connectionState = .off
-                guard !self.tun.isOn else {
-                    self.failConnection(
-                        .enable,
-                        message: self.tun.failureMessage ?? "TUN 未能关闭，代理没有开启"
-                    )
-                    return
-                }
-            }
-
-            if self.kernel.phase != .running {
-                await self.kernel.start()
-                guard !Task.isCancelled else { return }
-                guard self.kernel.phase == .running else {
-                    self.failConnection(
-                        .enable,
-                        message: self.kernel.lastError?.userMessage ?? "内核未能就绪，代理没有开启"
-                    )
-                    return
-                }
-            }
-
             do {
-                try await self.systemProxy.enable(port: self.settings.mixedPort)
-                guard !Task.isCancelled else { return }
-                self.connectionState = .on
-                self.connectionError = nil
+                try await self.enableProxyTransport(recordIntent: true)
+            } catch is CancellationError {
+                return
             } catch {
+                guard !Task.isCancelled else { return }
                 self.failConnection(.enable, error: error)
+                return
             }
+            guard !Task.isCancelled else { return }
+            self.connectionState = .on
+            self.connectionError = nil
+        }
+    }
+
+    /// 开系统代理的共用实现（磁贴 / 开机恢复）。
+    ///
+    /// - Parameter recordIntent: 只有用户点磁贴才写 `settings.lastTransport = proxy`；
+    ///   开机恢复调进来时不能写（它本来就是在执行已保存的意图）。
+    private func enableProxyTransport(recordIntent: Bool) async throws {
+        // 与 TUN 互斥：先关 TUN（TUN 的 root 内核与本地内核抢同一个 mixed-port），
+        // 且不在这里让 TUN 顺带重启本地内核——下面按代理解锁的顺序自己起。
+        // 这是内部启停，不改用户意图。
+        if tun.isHelperKernelRunning {
+            await tun.disable(restartLocalKernel: false)
+            guard !Task.isCancelled else { throw CancellationError() }
+            guard !tun.isOn else {
+                throw TransportEnableError.tunStillOn(
+                    tun.failureMessage ?? "TUN 未能关闭，代理没有开启"
+                )
+            }
+        }
+
+        if kernel.phase != .running {
+            await kernel.start()
+            guard !Task.isCancelled else { throw CancellationError() }
+            guard kernel.phase == .running else {
+                throw TransportEnableError.kernelNotReady(
+                    kernel.lastError?.userMessage ?? "内核未能就绪，代理没有开启"
+                )
+            }
+        }
+
+        try await systemProxy.enable(port: settings.mixedPort)
+        if recordIntent {
+            settings.lastTransport = TransportIntent.proxy.rawValue
         }
     }
 
@@ -510,6 +618,7 @@ final class PanelPreviewModel {
         connectionTask?.cancel()
         connectionState = .turningOff
         connectionError = nil
+        startupRestoreNotice = nil
 
         connectionTask = Task { [weak self] in
             guard let self else { return }
@@ -520,6 +629,9 @@ final class PanelPreviewModel {
                 return
             }
             guard !Task.isCancelled else { return }
+            // 用户主动关代理：记录意图。退出清理走 `disableSynchronouslyForTermination`，
+            // 内核异常退出 / 清理流程也都不经过这里，所以不会误改。
+            self.settings.lastTransport = TransportIntent.off.rawValue
             self.connectionState = .off
 
             guard !self.settings.keepKernelOnProxyOff else { return }
@@ -549,7 +661,9 @@ final class PanelPreviewModel {
     }
 
     func failConnection(_ stage: ConnectionState.Stage, error: Error) {
-        let message = (error as? SystemProxyError)?.userMessage ?? "代理操作失败"
+        let message = (error as? SystemProxyError)?.userMessage
+            ?? (error as? LocalizedError)?.errorDescription
+            ?? "代理操作失败"
         failConnection(stage, message: message)
     }
 
@@ -804,6 +918,8 @@ final class PanelPreviewModel {
 
         // 内存态跟上：配置正文已删，策略组快照必须作废，否则面板还挂着上一份配置的卡片
         profiles.forgetAllAfterCleanup()
+        selections.clearInMemory()
+        startupRestoreNotice = nil
         proxies.clear()
         pruneRouteIfTargetMissing()
         connectionState = .off
@@ -839,6 +955,7 @@ final class PanelPreviewModel {
 
     /// 点击 TUN：安装引导 / 启动 / 关闭都由 `TunService` 的状态机决定
     func toggleTun() {
+        startupRestoreNotice = nil
         tun.toggle()
     }
 
@@ -916,7 +1033,15 @@ final class PanelPreviewModel {
 
         selectionTask?.cancel()
         selectionTask = Task { [weak self] in
-            await self?.proxies.selectNode(group: groupID, node: nodeID)
+            guard let self else { return }
+            guard await self.proxies.selectNode(group: groupID, node: nodeID) else { return }
+            guard !Task.isCancelled else { return }
+            // 只有用户主动选中的成功路径才落盘（启动恢复 / 内核默认值不写）
+            self.selections.record(group: groupID, node: nodeID)
+            if let error = self.selections.lastError {
+                self.connectionError = error
+            }
+            self.startupRestoreNotice = nil
         }
     }
 
@@ -974,5 +1099,18 @@ final class PanelPreviewModel {
     func refreshProfile() {
         guard let id = activeSubscriptionID else { return }
         updateSubscription(id)
+    }
+}
+
+/// 开系统代理流程里的两种「前置条件不满足」：都带可读原因，直接进 banner。
+private enum TransportEnableError: LocalizedError {
+    case tunStillOn(String)
+    case kernelNotReady(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .tunStillOn(let message), .kernelNotReady(let message):
+            message
+        }
     }
 }

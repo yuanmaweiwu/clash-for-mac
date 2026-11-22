@@ -130,23 +130,63 @@ final class ProxyService {
 
     // MARK: - 选节点
 
-    /// 切换组内节点：乐观更新 `now`，请求失败回滚
-    func selectNode(group: String, node: String) async {
-        guard let index = allGroups.firstIndex(where: { $0.name == group }) else { return }
+    /// 切换组内节点：乐观更新 `now`，请求失败回滚。
+    ///
+    /// - Returns: 是否已生效（`true` 也包含「本来就是它」）。调用方据此决定是否落盘用户意图。
+    @discardableResult
+    func selectNode(group: String, node: String) async -> Bool {
+        guard let index = allGroups.firstIndex(where: { $0.name == group }) else { return false }
         let previous = allGroups[index].now
-        guard previous != node else { return }
-        guard let client = apiClient() else { return }
+        guard previous != node else { return true }
+        guard let client = apiClient() else { return false }
 
         allGroups[index].now = node
         do {
             try await client.selectProxy(group: group, name: node)
             lastError = nil
+            return true
         } catch {
             if let rollback = allGroups.firstIndex(where: { $0.name == group }) {
                 allGroups[rollback].now = previous
             }
             lastError = Self.message(for: error)
+            return false
         }
+    }
+
+    /// 启动 / TUN 切换后恢复保存的节点选择（`selection.json`）。
+    ///
+    /// 只处理 `Selector` 组：`URLTest` / `Fallback` / `LoadBalance` 的 `now` 由内核按延迟
+    /// 自动改写，强行 PATCH 会在下一次健康检查时被覆盖，还会让用户误以为选择生效了。
+    /// 节点已不存在（订阅更新换了节点名）时保留内核默认并返回一条提示。
+    ///
+    /// - Parameter saved: 组名 → 节点名（来自 `SelectionStore`）
+    /// - Returns: 需要提示给用户的一句话；`nil` = 全部恢复成功或无需处理
+    func restoreSelections(_ saved: [String: String]) async -> String? {
+        guard !saved.isEmpty else { return nil }
+
+        var missing: [String] = []
+        var failed: [String] = []
+        for (group, node) in saved.sorted(by: { $0.key < $1.key }) {
+            guard let current = allGroups.first(where: { $0.name == group }), !current.isGlobal else { continue }
+            guard current.type.lowercased() == "selector" else { continue }
+            guard current.nodes.contains(where: { $0.name == node }) else {
+                missing.append("「\(group)」中的「\(node)」")
+                continue
+            }
+            guard current.now != node else { continue }
+            if await selectNode(group: group, node: node) == false {
+                failed.append(group)
+            }
+        }
+
+        if !missing.isEmpty {
+            return "上次选中的节点（\(missing.joined(separator: "、"))）已不存在，已保留内核默认"
+        }
+        if !failed.isEmpty {
+            return "恢复节点选择失败（\(failed.joined(separator: "、"))），已保留内核默认"
+        }
+        return nil
     }
 
     // MARK: - 测速

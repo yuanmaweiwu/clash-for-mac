@@ -212,6 +212,35 @@ struct SettingsPanelView: View {
                 .accessibilityLabel(Text("关闭代理时保留内核"))
                 .accessibilityHint(Text("关闭后关代理会一并停止内核；保留时仍可挑选节点与测速"))
             }
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: Space.l) {
+                    Text("开机恢复上次接管")
+                        .font(Typography.body)
+                        .foregroundStyle(Theme.textPrimary)
+                        .lineLimit(1)
+
+                    Spacer(minLength: Space.l)
+
+                    Toggle("", isOn: Binding(
+                        get: { settings.restoreTransport },
+                        set: { settings.restoreTransport = $0 }
+                    ))
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .labelsHidden()
+                    .accessibilityLabel(Text("开机恢复上次接管"))
+                    .accessibilityHint(Text("关机前开着 TUN 或系统代理，下次启动自动恢复；关闭后启动保持两者关闭"))
+                }
+
+                Text("关机前开着 TUN 或系统代理，下次启动自动恢复")
+                    .font(Typography.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(minHeight: Metrics.formRowHeight)
+            .padding(.vertical, 2)
+            .accessibilityElement(children: .contain)
         }
     }
 
